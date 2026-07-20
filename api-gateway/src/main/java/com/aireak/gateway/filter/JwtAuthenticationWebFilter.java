@@ -61,7 +61,17 @@ public class JwtAuthenticationWebFilter implements WebFilter, Ordered {
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         String path = exchange.getRequest().getURI().getPath();
         if (isPublic(path)) {
-            return chain.filter(exchange);
+            // Public paths (login/register/refresh/logout/health) skip validation, but a client
+            // could still attach X-User-Id/X-User-Email itself; strip them unconditionally so
+            // nothing downstream (including gateway-side rate limiting keyed on X-User-Id) can
+            // ever observe a client-forged identity header on a route we didn't authenticate.
+            ServerHttpRequest strippedRequest = exchange.getRequest().mutate()
+                    .headers(headers -> {
+                        headers.remove("X-User-Id");
+                        headers.remove("X-User-Email");
+                    })
+                    .build();
+            return chain.filter(exchange.mutate().request(strippedRequest).build());
         }
 
         String authorization = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);

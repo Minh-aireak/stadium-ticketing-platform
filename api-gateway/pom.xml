@@ -21,10 +21,30 @@
             <artifactId>spring-cloud-starter-gateway-server-webflux</artifactId>
         </dependency>
 
+        <!-- The gateway starter pulls in the raw spring-boot-webflux module transitively, but
+             NOT the Boot 4.1 webflux-autoconfigure module that registers ServerProperties /
+             the reactive embedded-server beans Spring Cloud Gateway's own NettyConfiguration
+             requires — without this, the app fails to start at all
+             (UnsatisfiedDependencyException on ServerProperties). -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
+
         <!-- Actuator -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- Redisson — distributed RedisRateLimiter backing store (reactive), same client
+             every other service in this project uses. Pulls in spring-boot-starter-data-redis
+             + spring-data-redis transitively, which is what Spring Cloud Gateway's
+             GatewayRedisAutoConfiguration needs (ReactiveRedisTemplate bean) to expose the
+             RedisRateLimiter/redisRequestRateLimiterScript beans. -->
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson-spring-boot-starter</artifactId>
         </dependency>
 
         <!-- JWT — local (in-process) validation of access tokens issued by identity-service.
@@ -55,6 +75,20 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Real Redis for rate-limiter tests — same "test against real infra" pattern the
+             other services already use (Testcontainers Postgres). Version from the root
+             testcontainers-bom import. -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
