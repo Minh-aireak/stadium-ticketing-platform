@@ -17,6 +17,8 @@
 
         <!-- Spring Boot (verified on repo1.maven.org: 4.1.0 published 2026-06-09) -->
         <spring-boot.version>4.1.0</spring-boot.version>
+        <!-- Spring Cloud 2025.1.2 release train (Boot 4.1.x compatible); ships spring-cloud-gateway-server-webflux 5.0.2 -->
+        <spring-cloud.version>2025.1.2</spring-cloud.version>
 
         <!-- Dependencies (all verified on repo1.maven.org) -->
         <lombok.version>1.18.38</lombok.version>
@@ -64,6 +66,15 @@
                 <groupId>org.testcontainers</groupId>
                 <artifactId>testcontainers-bom</artifactId>
                 <version>${testcontainers-bom.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- Spring Cloud BOM (Gateway, etc.) -->
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
