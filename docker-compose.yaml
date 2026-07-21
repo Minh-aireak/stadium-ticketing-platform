@@ -25,9 +25,12 @@ volumes:
 services:
 
   # ---- PostgreSQL — identity-service -----------------------------------
+  # wal_level=logical is required for Debezium's CDC connector to read the
+  # outbox_events table via logical replication (see infra/debezium/).
   postgres-identity:
     image: postgres:16-alpine
     container_name: postgres-identity
+    command: ["postgres", "-c", "wal_level=logical"]
     networks: [stadium-net]
     environment:
       POSTGRES_DB: identity_db
@@ -176,6 +179,37 @@ services:
       interval: 15s
       timeout: 10s
       retries: 5
+      start_period: 30s
+
+  # ---- Kafka Connect + Debezium (CDC from outbox tables to Kafka) ------
+  # Register connectors after startup, e.g.:
+  #   curl -X POST -H "Content-Type: application/json" \
+  #     --data @identity-service/infra/debezium/identity-outbox-connector.json \
+  #     http://localhost:8083/connectors
+  kafka-connect:
+    image: debezium/connect:2.7
+    container_name: kafka-connect
+    networks: [stadium-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:29092
+      GROUP_ID: identity-outbox-connect
+      CONFIG_STORAGE_TOPIC: _identity_connect_configs
+      OFFSET_STORAGE_TOPIC: _identity_connect_offsets
+      STATUS_STORAGE_TOPIC: _identity_connect_status
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8083/connectors"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
       start_period: 30s
 
   # ---- Elasticsearch (match catalog read model) ------------------------
