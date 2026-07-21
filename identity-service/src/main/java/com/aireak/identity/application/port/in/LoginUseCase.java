@@ -1,12 +1,11 @@
 package com.aireak.identity.application.port.in;
 
 import com.aireak.identity.application.port.in.command.LoginCommand;
+import com.aireak.identity.application.port.in.dto.AuthResult;
 
 /**
- * Inbound port: authenticate an account and return a JWT token.
- *
- * @return signed JWT token string
+ * Inbound port: authenticate an account and issue an access token + refresh session.
  */
 public interface LoginUseCase {
-    String execute(LoginCommand command);
+    AuthResult execute(LoginCommand command);
 }

@@ -1,8 +1,10 @@
 package com.aireak.identity.adapter.out.persistence;
 
+import com.aireak.identity.domain.exception.EmailAlreadyRegisteredException;
 import com.aireak.identity.application.port.out.AccountRepository;
 import com.aireak.identity.domain.model.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 
 import java.util.Optional;
@@ -17,9 +19,22 @@ public class AccountPersistenceAdapter implements AccountRepository {
 
     private final AccountJpaRepository jpaRepository;
 
+    /**
+     * Updates load the existing managed entity first so {@code @Version} and
+     * {@code createdAt} are preserved — building a fresh detached entity on every
+     * save would null out the version and break optimistic locking on concurrent updates.
+     */
     @Override
     public void save(Account account) {
-        jpaRepository.save(toJpaEntity(account));
+        try {
+            AccountJpaEntity entity = jpaRepository.findById(account.getId().value())
+                    .map(existing -> applyDomainState(existing, account))
+                    .orElseGet(() -> toNewJpaEntity(account));
+            jpaRepository.save(entity);
+        } catch (DataIntegrityViolationException ex) {
+            // Unique constraint race: two concurrent registrations for the same email.
+            throw new EmailAlreadyRegisteredException(account.getEmail().value());
+        }
     }
 
     @Override
@@ -39,7 +54,7 @@ public class AccountPersistenceAdapter implements AccountRepository {
 
     // ---- Mapping ----
 
-    private AccountJpaEntity toJpaEntity(Account account) {
+    private AccountJpaEntity toNewJpaEntity(Account account) {
         return AccountJpaEntity.builder()
                 .id(account.getId().value())
                 .email(account.getEmail().value())
@@ -47,6 +62,13 @@ public class AccountPersistenceAdapter implements AccountRepository {
                 .status(account.getStatus())
                 .registeredAt(account.getRegisteredAt())
                 .build();
+    }
+
+    private AccountJpaEntity applyDomainState(AccountJpaEntity entity, Account account) {
+        entity.setEmail(account.getEmail().value());
+        entity.setPasswordHash(account.getPassword().value());
+        entity.setStatus(account.getStatus());
+        return entity;
     }
 
     private Account toDomain(AccountJpaEntity entity) {

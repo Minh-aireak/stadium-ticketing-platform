@@ -16,12 +16,6 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
 
-  kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -31,8 +25,25 @@ server:
   port: 8081
 
 jwt:
-  secret: ${JWT_SECRET:change-me-in-production-must-be-at-least-32-chars}
-  expiration-seconds: ${JWT_EXPIRATION_SECONDS:3600}
+  secret: ${JWT_SECRET:fe006751700ab1284e297ef026e49e8715ed22f7d773730fc63ed8d87a7e8bd2}
+  # Access token is short-lived by design — 15 min balances UX (silent refresh) vs blast radius if leaked.
+  expiration-seconds: ${JWT_EXPIRATION_SECONDS:900}
+  issuer: ${JWT_ISSUER:https://auth.aireak.com}
+  audience: ${JWT_AUDIENCE:aireak-platform}
+
+refresh-token:
+  # Absolute cap on a refresh session's lifetime — rotation does NOT extend this. Forces re-login every 30 days.
+  absolute-ttl-seconds: ${REFRESH_TOKEN_ABSOLUTE_TTL_SECONDS:2592000}
+
+auth-cookie:
+  name: ${AUTH_COOKIE_NAME:refresh_token}
+  path: ${AUTH_COOKIE_PATH:/api/v1/auth}
+  domain: ${AUTH_COOKIE_DOMAIN:}
+  secure: ${AUTH_COOKIE_SECURE:true}
+  same-site: ${AUTH_COOKIE_SAME_SITE:Strict}
+
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
 
 management:
   endpoints:

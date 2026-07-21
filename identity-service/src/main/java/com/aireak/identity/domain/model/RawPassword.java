@@ -22,6 +22,21 @@ public final class RawPassword {
         this.value = value;
     }
 
+    private RawPassword(String value, boolean skipPolicyCheck) {
+        this.value = value;
+    }
+
+    /**
+     * Wraps a password supplied for an authentication attempt, without enforcing the
+     * current registration policy. Login must reject on a wrong password, not on a
+     * policy mismatch — a password valid under an older policy must still be checkable,
+     * and the caller should see a uniform "invalid credentials" error either way.
+     */
+    public static RawPassword forAuthentication(String value) {
+        Objects.requireNonNull(value, "Password must not be null");
+        return new RawPassword(value, true);
+    }
+
     private void validate(String password) {
         if (password.length() < 8) {
             throw new IllegalArgumentException("Password must be at least 8 characters");

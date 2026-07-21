@@ -12,7 +12,7 @@
 
     <artifactId>identity-service</artifactId>
     <name>Identity Service</name>
-    <description>Bounded Context: Identity and Access — Account aggregate, JWT tokens, Kafka event publishing</description>
+    <description>Bounded Context: Identity and Access — Account aggregate, JWT tokens, transactional outbox event publishing</description>
 
     <dependencies>
         <dependency>
@@ -34,12 +34,6 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
-        </dependency>
-
-        <!-- Kafka (version managed by Spring Boot 4.1.0 BOM) -->
-        <dependency>
-            <groupId>org.springframework.kafka</groupId>
-            <artifactId>spring-kafka</artifactId>
         </dependency>
 
         <!-- PostgreSQL -->
@@ -108,13 +102,25 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.springframework.kafka</groupId>
-            <artifactId>spring-kafka-test</artifactId>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>postgresql</artifactId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Spring Boot 4 split the JPA/JDBC test slices (@DataJpaTest, @AutoConfigureTestDatabase)
+             out of spring-boot-test-autoconfigure into their own modules. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-data-jpa-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-jdbc-test</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
