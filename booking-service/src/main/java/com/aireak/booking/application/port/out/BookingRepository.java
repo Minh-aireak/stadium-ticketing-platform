@@ -4,8 +4,9 @@ import com.aireak.booking.domain.model.Booking;
 
 import java.util.Optional;
 
-/** Outbound port: Booking persistence. */
+// Outbound port: Booking persistence.
 public interface BookingRepository {
     void save(Booking booking);
     Optional<Booking> findById(String bookingId);
+    Optional<Booking> findByIdempotencyKey(String idempotencyKey);
 }

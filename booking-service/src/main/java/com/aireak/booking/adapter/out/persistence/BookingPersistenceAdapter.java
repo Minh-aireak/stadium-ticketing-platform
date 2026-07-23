@@ -11,10 +11,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
-/**
- * Persistence adapter: maps Booking domain aggregate ↔ JPA entity.
- * Seat codes stored as comma-separated string in a single column.
- */
 @Component
 @RequiredArgsConstructor
 public class BookingPersistenceAdapter implements BookingRepository {
@@ -31,6 +27,11 @@ public class BookingPersistenceAdapter implements BookingRepository {
         return jpaRepository.findById(bookingId).map(this::toDomain);
     }
 
+    @Override
+    public Optional<Booking> findByIdempotencyKey(String idempotencyKey) {
+        return jpaRepository.findByIdempotencyKey(idempotencyKey).map(this::toDomain);
+    }
+
     private BookingJpaEntity toJpaEntity(Booking booking) {
         return BookingJpaEntity.builder()
                 .bookingId(booking.getBookingId())
@@ -40,7 +41,8 @@ public class BookingPersistenceAdapter implements BookingRepository {
                 .amount(booking.getAmount().amount())
                 .currency(booking.getAmount().currency())
                 .status(booking.getStatus())
-                .createdAt(booking.getCreatedAt())
+                .idempotencyKey(booking.getIdempotencyKey())
+                .version(booking.getVersion())
                 .build();
     }
 
@@ -53,7 +55,9 @@ public class BookingPersistenceAdapter implements BookingRepository {
                 new SeatSelection(seatCodes),
                 BookingAmount.of(entity.getAmount(), entity.getCurrency()),
                 entity.getStatus(),
-                entity.getCreatedAt()
+                entity.getCreatedAt(),
+                entity.getIdempotencyKey(),
+                entity.getVersion()
         );
     }
 }

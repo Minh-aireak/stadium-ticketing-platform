@@ -18,16 +18,6 @@ spring:
 
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-    consumer:
-      group-id: booking-service
-      auto-offset-reset: earliest
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
-      properties:
-        spring.json.trusted.packages: "com.aireak.*"
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
 
   data:
     redis:
@@ -50,11 +40,13 @@ resilience4j:
     instances:
       ticket-inventory:
         slidingWindowSize: 10
+        minimumNumberOfCalls: 5
         failureRateThreshold: 50
         waitDurationInOpenState: 10s
         permittedNumberOfCallsInHalfOpenState: 3
       payment:
         slidingWindowSize: 10
+        minimumNumberOfCalls: 5
         failureRateThreshold: 50
         waitDurationInOpenState: 10s
         permittedNumberOfCallsInHalfOpenState: 3
@@ -63,9 +55,13 @@ resilience4j:
       ticket-inventory:
         maxAttempts: 3
         waitDuration: 500ms
+        ignoreExceptions:
+          - org.springframework.web.client.HttpClientErrorException
       payment:
         maxAttempts: 3
         waitDuration: 500ms
+        ignoreExceptions:
+          - org.springframework.web.client.HttpClientErrorException
 
 management:
   endpoints:

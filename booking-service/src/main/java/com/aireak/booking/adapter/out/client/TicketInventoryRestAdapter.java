@@ -5,26 +5,23 @@ import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import java.util.List;
 
-/**
- * Outbound REST adapter: calls ticket-inventory-service.
- *
- * <p>Resilience4j (hexagonal rule — only this adapter layer uses these annotations):
- * <ul>
- *   <li>{@code @CircuitBreaker} — opens after N failures, fast-fail for duration</li>
- *   <li>{@code @Retry} — retries transient errors (connection timeout, 503)</li>
- * </ul>
- */
+// Outbound REST adapter: calls ticket-inventory-service. Resilience4j @CircuitBreaker/@Retry
+// live only at this adapter layer (hexagonal rule).
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class TicketInventoryRestAdapter implements TicketInventoryPort {
 
+    // Explicit qualifier: InfraConfig defines a second RestClient bean (paymentStatusRestClient),
+    // so type alone no longer resolves unambiguously.
+    @Qualifier("restClient")
     private final RestClient restClient;
 
     @Value("${services.ticket-inventory.base-url:http://localhost:8083}")
@@ -35,8 +32,11 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
     @Retry(name = "ticket-inventory")
     public void reserveSeats(String showtimeId, String bookingId, List<String> seatCodes) {
         log.debug("Reserving seats: showtime={}, booking={}", showtimeId, bookingId);
+        // bookingId doubles as the Idempotency-Key so @Retry re-sends dedupe instead of
+        // reserving the seats twice.
         restClient.post()
                 .uri(baseUrl + "/api/v1/inventory/{showtimeId}/reserve", showtimeId)
+                .header("Idempotency-Key", bookingId)
                 .body(new ReservationRequest(bookingId, seatCodes))
                 .retrieve()
                 .toBodilessEntity();
@@ -50,6 +50,18 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
         restClient.delete()
                 .uri(baseUrl + "/api/v1/inventory/{showtimeId}/reserve/{bookingId}?seatCodes={codes}",
                         showtimeId, bookingId, String.join(",", seatCodes))
+                .retrieve()
+                .toBodilessEntity();
+    }
+
+    @Override
+    @CircuitBreaker(name = "ticket-inventory", fallbackMethod = "confirmReservationFallback")
+    @Retry(name = "ticket-inventory")
+    public void confirmReservation(String showtimeId, String bookingId, List<String> seatCodes) {
+        log.debug("Confirming reservation: showtime={}, booking={}", showtimeId, bookingId);
+        restClient.post()
+                .uri(baseUrl + "/api/v1/inventory/{showtimeId}/confirm", showtimeId)
+                .body(new ReservationRequest(bookingId, seatCodes))
                 .retrieve()
                 .toBodilessEntity();
     }
@@ -68,6 +80,14 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
                 showtimeId, bookingId, t.getMessage());
     }
 
-    /** Internal DTO for the REST call body. */
+    // Known gap: the Redis hold still self-expires (TTL) even though payment succeeded —
+    // logged loudly (not swallowed) so it's visible in logs/alerts for manual reconciliation.
+    private void confirmReservationFallback(String showtimeId, String bookingId,
+                                             List<String> seatCodes, Throwable t) {
+        log.error("Failed to confirm reservation after payment success — seat hold will expire " +
+                        "via TTL regardless of successful payment: showtime={}, booking={}, seats={}: {}",
+                showtimeId, bookingId, seatCodes, t.getMessage());
+    }
+
     record ReservationRequest(String bookingId, List<String> seatCodes) {}
 }

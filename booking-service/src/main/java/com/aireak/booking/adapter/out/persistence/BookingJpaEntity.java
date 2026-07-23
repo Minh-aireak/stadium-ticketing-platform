@@ -4,15 +4,11 @@ import com.aireak.booking.domain.model.BookingStatus;
 import com.aireak.common.persistence.BaseAuditEntity;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 
-/**
- * JPA entity for Booking persistence.
- * Seat codes stored as comma-separated string for simplicity.
- * Use @ElementCollection for normalized storage if seat history matters.
- */
 @Getter
 @Setter
 @Entity
@@ -32,13 +28,13 @@ public class BookingJpaEntity extends BaseAuditEntity {
     @Column(name = "showtime_id", nullable = false, length = 36)
     private String showtimeId;
 
-    /** Comma-separated seat codes: "A1,A2,B3" */
     @Column(name = "seat_codes", nullable = false, length = 1000)
     private String seatCodes;
 
     @Column(name = "amount", nullable = false, precision = 15, scale = 2)
     private BigDecimal amount;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "currency", nullable = false, length = 3)
     private String currency;
 
@@ -46,8 +42,8 @@ public class BookingJpaEntity extends BaseAuditEntity {
     @Column(name = "status", nullable = false, length = 30)
     private BookingStatus status;
 
-    @Column(name = "created_at", nullable = false, updatable = false)
-    private Instant createdAt;
+    @Column(name = "idempotency_key", length = 255, updatable = false)
+    private String idempotencyKey;
 
     @Version
     @Column(name = "version")

@@ -3,10 +3,6 @@ package com.aireak.booking.domain.model;
 import java.math.BigDecimal;
 import java.util.Objects;
 
-/**
- * Value Object: monetary amount with currency.
- * Domain rule: amount must be positive.
- */
 public record BookingAmount(BigDecimal amount, String currency) {
 
     public BookingAmount {
@@ -22,9 +18,5 @@ public record BookingAmount(BigDecimal amount, String currency) {
 
     public static BookingAmount of(BigDecimal amount, String currency) {
         return new BookingAmount(amount, currency);
-    }
-
-    public static BookingAmount vnd(BigDecimal amount) {
-        return new BookingAmount(amount, "VND");
     }
 }

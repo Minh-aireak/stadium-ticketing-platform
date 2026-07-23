@@ -10,12 +10,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
-/**
- * Inbound Kafka adapter: listens for payment result events and drives saga forward.
- *
- * <p>Idempotency is handled at the orchestration service level via booking status check
- * (PENDING_PAYMENT → CONFIRMED/CANCELLED — if already terminal, no-op).
- */
+// Inbound Kafka adapter: listens for payment result events to drive saga.
 @Slf4j
 @Component
 @RequiredArgsConstructor
