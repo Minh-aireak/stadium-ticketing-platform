@@ -11,6 +11,13 @@ package com.aireak.gateway.ratelimit;
  */
 public enum RateLimitPolicy {
 
+    // Coarse per-IP flood guard applied to EVERY inbound request, before JWT validation even
+    // runs (see PreAuthRateLimitingWebFilter) — the only line of defense against an attacker
+    // hammering a protected route with garbage/expired bearer tokens, since such requests are
+    // rejected with 401 before they ever reach the per-route/per-user policies below. Sized well
+    // above any single route's allowance (a legitimate session fans out across several routes
+    // from one IP) so it only trips under actual flooding.
+    PRE_AUTH_IP(KeyStrategy.IP, 20, 600, 3),
     LOGIN(KeyStrategy.IP, 1, 120, 12),
     REGISTER(KeyStrategy.IP, 1, 3600, 1200),
     REFRESH_TOKEN(KeyStrategy.USER_OR_IP, 1, 60, 3),

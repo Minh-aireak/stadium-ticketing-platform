@@ -69,6 +69,10 @@ public class RateLimitingWebFilter implements WebFilter, Ordered {
         PATH_POLICIES.put("/api/v1/auth/login", RateLimitPolicy.LOGIN);
         PATH_POLICIES.put("/api/v1/auth/register", RateLimitPolicy.REGISTER);
         PATH_POLICIES.put("/api/v1/auth/refresh", RateLimitPolicy.REFRESH_TOKEN);
+        // Same trust model as refresh: cookie-authenticated, public path, best-effort Bearer
+        // verification via tryVerifySubjectFromBearer() — reuses REFRESH_TOKEN rather than
+        // falling back to DEFAULT_ANONYMOUS.
+        PATH_POLICIES.put("/api/v1/auth/logout", RateLimitPolicy.REFRESH_TOKEN);
         PATH_POLICIES.put("/api/v1/matches/**", RateLimitPolicy.READ_ANONYMOUS);
         PATH_POLICIES.put("/api/v1/inventory/**", RateLimitPolicy.READ_AUTHENTICATED);
         PATH_POLICIES.put("/api/v1/bookings/**", RateLimitPolicy.BOOKING);

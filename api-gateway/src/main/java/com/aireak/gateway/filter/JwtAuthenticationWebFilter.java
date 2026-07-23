@@ -97,12 +97,15 @@ public class JwtAuthenticationWebFilter implements WebFilter, Ordered {
             return unauthorized(exchange, "Invalid access token");
         }
 
+        Object email = claims.get("email");
         ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
                 .headers(headers -> {
                     headers.remove("X-User-Id");
                     headers.remove("X-User-Email");
                     headers.set("X-User-Id", claims.getSubject());
-                    headers.set("X-User-Email", String.valueOf(claims.get("email")));
+                    if (email != null) {
+                        headers.set("X-User-Email", String.valueOf(email));
+                    }
                 })
                 .build();
 
