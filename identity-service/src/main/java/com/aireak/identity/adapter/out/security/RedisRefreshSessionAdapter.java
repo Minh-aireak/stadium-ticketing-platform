@@ -22,7 +22,6 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -77,6 +76,21 @@ public class RedisRefreshSessionAdapter implements RefreshSessionStorePort {
             return 'OK'
             """;
 
+    // HSET + PEXPIRE in one atomic EVAL so a crash/disconnect between the two Redis calls can
+    // never leave a session hash with no TTL (HSET alone doesn't carry one).
+    private static final String CREATE_SCRIPT = """
+            redis.call('HSET', KEYS[1],
+              'userId', ARGV[1],
+              'tokenHash', ARGV[2],
+              'tokenFamilyId', ARGV[3],
+              'createdAt', ARGV[4],
+              'expiresAt', ARGV[5],
+              'revokedAt', '',
+              'lastUsedAt', ARGV[4])
+            redis.call('PEXPIRE', KEYS[1], ARGV[6])
+            return 'OK'
+            """;
+
     private final RedissonClient redissonClient;
     private final RefreshTokenProperties properties;
     private final SecureRandom secureRandom = new SecureRandom();
@@ -94,21 +108,17 @@ public class RedisRefreshSessionAdapter implements RefreshSessionStorePort {
 
         Instant now = Instant.now();
         Instant expiresAt = now.plusSeconds(properties.absoluteTtlSeconds());
-
-        Map<String, String> fields = Map.of(
-                "userId", accountId.toString(),
-                "tokenHash", tokenHash,
-                "tokenFamilyId", sessionId.toString(),
-                "createdAt", String.valueOf(now.toEpochMilli()),
-                "expiresAt", String.valueOf(expiresAt.toEpochMilli()),
-                "revokedAt", "",
-                "lastUsedAt", String.valueOf(now.toEpochMilli())
-        );
+        long ttlMillis = Duration.between(now, expiresAt).toMillis();
 
         try {
-            var map = redissonClient.<String, String>getMap(sessionKey(sessionId), StringCodec.INSTANCE);
-            map.putAll(fields);
-            map.expire(Duration.between(now, expiresAt));
+            redissonClient.getScript(StringCodec.INSTANCE).eval(
+                    RScript.Mode.READ_WRITE,
+                    CREATE_SCRIPT,
+                    RScript.ReturnType.VALUE,
+                    List.of(sessionKey(sessionId)),
+                    accountId.toString(), tokenHash, sessionId.toString(),
+                    String.valueOf(now.toEpochMilli()), String.valueOf(expiresAt.toEpochMilli()),
+                    String.valueOf(ttlMillis));
         } catch (RedisException ex) {
             throw new RefreshSessionStoreUnavailableException("Failed to create refresh session", ex);
         }

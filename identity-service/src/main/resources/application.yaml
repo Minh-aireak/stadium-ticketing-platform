@@ -25,7 +25,9 @@ server:
   port: 8081
 
 jwt:
-  secret: ${JWT_SECRET:fe006751700ab1284e297ef026e49e8715ed22f7d773730fc63ed8d87a7e8bd2}
+  # No default — must be injected via env var in every environment. A hardcoded fallback here
+  # would let anyone who reads the source mint valid tokens if the env var is ever left unset.
+  secret: ${JWT_SECRET}
   # Access token is short-lived by design — 15 min balances UX (silent refresh) vs blast radius if leaked.
   expiration-seconds: ${JWT_EXPIRATION_SECONDS:900}
   issuer: ${JWT_ISSUER:https://auth.aireak.com}

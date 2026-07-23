@@ -66,8 +66,8 @@ public class LoginService implements LoginUseCase {
                 "Invalid credentials")); // intentionally vague — no user enumeration
 
         if (account.getStatus() != AccountStatus.ACTIVE) {
-            throw new InvalidAccountStatusException(
-                    "Account is not active, current status: " + account.getStatus());
+            log.warn("Login rejected: accountId={}, status={}", account.getId(), account.getStatus());
+            throw new InvalidAccountStatusException("Invalid credentials");
         }
 
         if (!passwordMatches) {

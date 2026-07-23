@@ -15,10 +15,10 @@ public record Email(String value) {
 
     public Email {
         Objects.requireNonNull(value, "Email must not be null");
+        value = value.trim().toLowerCase();
         if (!EMAIL_PATTERN.matcher(value).matches()) {
             throw new IllegalArgumentException("Invalid email format: " + value);
         }
-        value = value.toLowerCase().trim();
     }
 
     @Override
