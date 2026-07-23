@@ -46,6 +46,144 @@ class JwtAuthenticationWebFilterTest {
         assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
+    // This filter (order -50) still returns without ever calling chain.filter() on rejection —
+    // RateLimitingWebFilter (order -40), the per-route/per-user policy filter, correctly never
+    // runs for a rejected request. That's fine now: CorrelationIdWebFilter (order -100) and
+    // PreAuthRateLimitingWebFilter (order -60) both run BEFORE this filter, not after, so every
+    // request — including one this filter rejects with 401 — already has its correlation id set
+    // and has already passed the coarse per-IP flood guard by the time it gets here. See
+    // PreAuthRateLimitingWebFilterTest for proof that repeated 401-bound traffic actually gets
+    // capped.
+    @Test
+    void rejectionNeverInvokesTheRestOfTheChain() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/bookings/123").build());
+
+        boolean[] chainInvoked = {false};
+        filter.filter(exchange, ex -> {
+            chainInvoked[0] = true;
+            return Mono.empty();
+        }).block(Duration.ofSeconds(5));
+
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(chainInvoked[0]).isFalse();
+    }
+
+    @Test
+    void rejectsMalformedToken() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/bookings/123")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer not-a-jwt-at-all")
+                        .build());
+
+        filter.filter(exchange, ex -> Mono.empty()).block(Duration.ofSeconds(5));
+
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void rejectsTokenSignedWithAWrongSecret() {
+        SecretKey wrongKey = Keys.hmacShaKeyFor(
+                "a-completely-different-secret-key-that-is-long-enough".getBytes(StandardCharsets.UTF_8));
+        String token = Jwts.builder()
+                .subject(UUID.randomUUID().toString())
+                .issuer(ISSUER)
+                .audience().add(AUDIENCE).and()
+                .issuedAt(Date.from(Instant.now()))
+                .expiration(Date.from(Instant.now().plusSeconds(300)))
+                .signWith(wrongKey)
+                .compact();
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/bookings/123")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .build());
+
+        filter.filter(exchange, ex -> Mono.empty()).block(Duration.ofSeconds(5));
+
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void rejectsTokenWithWrongIssuer() {
+        String token = Jwts.builder()
+                .subject(UUID.randomUUID().toString())
+                .issuer("some-other-issuer")
+                .audience().add(AUDIENCE).and()
+                .issuedAt(Date.from(Instant.now()))
+                .expiration(Date.from(Instant.now().plusSeconds(300)))
+                .signWith(secretKey)
+                .compact();
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/bookings/123")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .build());
+
+        filter.filter(exchange, ex -> Mono.empty()).block(Duration.ofSeconds(5));
+
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void rejectsTokenWithWrongAudience() {
+        String token = Jwts.builder()
+                .subject(UUID.randomUUID().toString())
+                .issuer(ISSUER)
+                .audience().add("some-other-audience").and()
+                .issuedAt(Date.from(Instant.now()))
+                .expiration(Date.from(Instant.now().plusSeconds(300)))
+                .signWith(secretKey)
+                .compact();
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/bookings/123")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .build());
+
+        filter.filter(exchange, ex -> Mono.empty()).block(Duration.ofSeconds(5));
+
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void rejectsNonBearerAuthorizationScheme() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/bookings/123")
+                        .header(HttpHeaders.AUTHORIZATION, "Basic dXNlcjpwYXNz")
+                        .build());
+
+        filter.filter(exchange, ex -> Mono.empty()).block(Duration.ofSeconds(5));
+
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    // identity-service's JwtTokenGeneratorAdapter always sets an "email" claim today, so this is
+    // dormant in practice — but if a future token type (e.g. a service-to-service token) is ever
+    // issued without that claim, X-User-Email must be absent rather than the literal string
+    // "null", which a downstream service (e.g. notification-service) could mistake for a real value.
+    @Test
+    void leavesXUserEmailAbsentWhenEmailClaimIsMissing() {
+        String accountId = UUID.randomUUID().toString();
+        String tokenWithoutEmail = Jwts.builder()
+                .subject(accountId)
+                .issuer(ISSUER)
+                .audience().add(AUDIENCE).and()
+                .issuedAt(Date.from(Instant.now()))
+                .expiration(Date.from(Instant.now().plusSeconds(300)))
+                .signWith(secretKey)
+                .compact();
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/bookings/123")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenWithoutEmail)
+                        .build());
+
+        AtomicReference<ServerWebExchange> forwarded = new AtomicReference<>();
+        filter.filter(exchange, ex -> {
+            forwarded.set(ex);
+            return Mono.empty();
+        }).block(Duration.ofSeconds(5));
+
+        assertThat(forwarded.get().getRequest().getHeaders().getFirst("X-User-Email")).isNull();
+    }
+
     @Test
     void rejectsExpiredToken() {
         String expired = Jwts.builder()
