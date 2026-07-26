@@ -3,6 +3,7 @@ package com.aireak.payment.adapter.out.persistence;
 import com.aireak.payment.application.port.out.PaymentRepository;
 import com.aireak.payment.domain.model.Payment;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 
 import java.util.Optional;
@@ -16,6 +17,16 @@ public class PaymentPersistenceAdapter implements PaymentRepository {
     @Override
     public void save(Payment payment) {
         jpaRepository.save(toJpaEntity(payment));
+    }
+
+    @Override
+    public boolean tryInsert(Payment payment) {
+        try {
+            jpaRepository.saveAndFlush(toJpaEntity(payment));
+            return true;
+        } catch (DataIntegrityViolationException e) {
+            return false;
+        }
     }
 
     @Override

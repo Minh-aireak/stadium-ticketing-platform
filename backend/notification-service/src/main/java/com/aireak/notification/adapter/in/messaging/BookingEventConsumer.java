@@ -23,7 +23,7 @@ public class BookingEventConsumer {
     private final SendNotificationUseCase sendNotificationUseCase;
 
     @KafkaListener(
-            topics = {KafkaTopics.BOOKING_CONFIRMED, KafkaTopics.BOOKING_CANCELLED},
+            topics = {KafkaTopics.BOOKING_CREATED, KafkaTopics.BOOKING_CONFIRMED, KafkaTopics.BOOKING_CANCELLED},
             groupId = "notification-service-booking",
             containerFactory = "kafkaListenerContainerFactory"
     )

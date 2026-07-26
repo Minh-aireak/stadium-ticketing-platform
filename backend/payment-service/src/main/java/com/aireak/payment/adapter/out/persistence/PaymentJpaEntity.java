@@ -12,7 +12,7 @@ import java.time.Instant;
 @Setter
 @Entity
 @Table(name = "payments",
-        indexes = @Index(name = "idx_payments_booking_id", columnList = "booking_id"))
+        uniqueConstraints = @UniqueConstraint(name = "uq_payments_booking_id", columnNames = "booking_id"))
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
