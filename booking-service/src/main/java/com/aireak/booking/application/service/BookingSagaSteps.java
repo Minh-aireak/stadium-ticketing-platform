@@ -61,6 +61,16 @@ class BookingSagaSteps {
         saveAndPublish(booking);
     }
 
+    // Own step (committed after the confirmReservation REST call, not alongside markConfirmed)
+    // because it records the REST call's *outcome*, which isn't known until after markConfirmed
+    // has already committed. See BookingOrchestrationService#confirmInventoryReservation.
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markInventoryConfirmed(String bookingId) {
+        Booking booking = findOrThrow(bookingId);
+        booking.markInventoryConfirmed();
+        bookingRepository.save(booking);
+    }
+
     private void saveAndPublish(Booking booking) {
         bookingRepository.save(booking);
         eventPublisher.publishAll(booking.pullDomainEvents());

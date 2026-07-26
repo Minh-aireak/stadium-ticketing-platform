@@ -28,11 +28,17 @@ public class Booking {
     // null only until first persist (create()) — Spring Data's isNew() check needs that,
     // so reconstitute() must carry the real value through unchanged after that point.
     private final Long version;
+    // True once ticketInventoryPort.confirmReservation() has actually succeeded for this
+    // (already-CONFIRMED) booking — see BookingOrchestrationService#confirmInventoryReservation.
+    // Stays false when that best-effort call failed, so InventoryConfirmationReconciler can
+    // find and retry exactly those bookings.
+    private boolean inventoryConfirmed;
     private final List<Object> domainEvents = new ArrayList<>();
 
     private Booking(String bookingId, String customerId, String showtimeId,
                     SeatSelection seatSelection, BookingAmount amount,
-                    BookingStatus status, Instant createdAt, String idempotencyKey, Long version) {
+                    BookingStatus status, Instant createdAt, String idempotencyKey, Long version,
+                    boolean inventoryConfirmed) {
         this.bookingId    = bookingId;
         this.customerId   = customerId;
         this.showtimeId   = showtimeId;
@@ -42,6 +48,7 @@ public class Booking {
         this.createdAt     = createdAt;
         this.idempotencyKey = idempotencyKey;
         this.version        = version;
+        this.inventoryConfirmed = inventoryConfirmed;
     }
 
     // Creates a new Booking in DRAFT state with invariant checks.
@@ -56,16 +63,16 @@ public class Booking {
         }
         String bookingId = UUID.randomUUID().toString();
         return new Booking(bookingId, customerId, showtimeId,
-                seatSelection, amount, BookingStatus.DRAFT, Instant.now(), idempotencyKey, null);
+                seatSelection, amount, BookingStatus.DRAFT, Instant.now(), idempotencyKey, null, false);
     }
 
     // Reconstitute from persistence — no events raised.
     public static Booking reconstitute(String bookingId, String customerId, String showtimeId,
                                         SeatSelection seatSelection, BookingAmount amount,
                                         BookingStatus status, Instant createdAt,
-                                        String idempotencyKey, Long version) {
+                                        String idempotencyKey, Long version, boolean inventoryConfirmed) {
         return new Booking(bookingId, customerId, showtimeId, seatSelection, amount, status, createdAt,
-                idempotencyKey, version);
+                idempotencyKey, version, inventoryConfirmed);
     }
 
     // mark PENDING_PAYMENT if DRAFT
@@ -101,6 +108,12 @@ public class Booking {
         domainEvents.add(new BookingCancelledEvent(bookingId, customerId, showtimeId, reason));
     }
 
+    // Records that ticketInventoryPort.confirmReservation() actually succeeded. Idempotent —
+    // safe to call again on a retry.
+    public void markInventoryConfirmed() {
+        this.inventoryConfirmed = true;
+    }
+
     // Accessors
     public String getBookingId()            { return bookingId; }
     public String getCustomerId()           { return customerId; }
@@ -111,6 +124,7 @@ public class Booking {
     public Instant getCreatedAt()           { return createdAt; }
     public String getIdempotencyKey()       { return idempotencyKey; }
     public Long getVersion()                { return version; }
+    public boolean isInventoryConfirmed()   { return inventoryConfirmed; }
 
     public List<Object> pullDomainEvents() {
         List<Object> events = Collections.unmodifiableList(new ArrayList<>(domainEvents));

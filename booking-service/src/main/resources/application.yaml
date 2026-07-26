@@ -34,6 +34,15 @@ services:
   payment:
     base-url: ${PAYMENT_SERVICE_URL:http://localhost:8084}
 
+booking:
+  inventory-confirmation-reconciler:
+    # Only retry CONFIRMED bookings whose inventory confirm is still unresolved after this
+    # long, so the job never races the synchronous attempt in confirmBooking().
+    grace-minutes: ${INVENTORY_RECONCILER_GRACE_MINUTES:5}
+    fixed-delay-ms: ${INVENTORY_RECONCILER_FIXED_DELAY_MS:300000}
+    # Caps how many bookings a single run retries — a real backlog drains over several cycles.
+    batch-size: ${INVENTORY_RECONCILER_BATCH_SIZE:200}
+
 # Resilience4j circuit breaker config
 resilience4j:
   circuitbreaker:

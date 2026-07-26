@@ -238,9 +238,31 @@ public class BookingOrchestrationService {
             return;
         }
         sagaSteps.markConfirmed(bookingId);
-        ticketInventoryPort.confirmReservation(
-                booking.getShowtimeId(), bookingId, booking.getSeatSelection().seatCodes());
+        confirmInventoryReservation(bookingId, booking.getShowtimeId(), booking.getSeatSelection().seatCodes());
         log.info("Booking confirmed: id={}", bookingId);
+    }
+
+    // Called only by InventoryConfirmationReconciler for a booking its own query already found
+    // CONFIRMED with inventoryConfirmed=false — unlike confirmBooking(), this has no
+    // PENDING_PAYMENT guard, since the booking is expected to already be CONFIRMED.
+    public void retryInventoryConfirmation(Booking booking) {
+        confirmInventoryReservation(booking.getBookingId(), booking.getShowtimeId(),
+                booking.getSeatSelection().seatCodes());
+    }
+
+    // Best-effort: confirmReservation is called after the booking is already durably CONFIRMED,
+    // so a failure here must never undo that. On success, records inventoryConfirmed=true; on
+    // failure, logs and leaves it false so InventoryConfirmationReconciler retries later —
+    // the Redis hold otherwise just expires via TTL despite payment having succeeded (see
+    // TicketInventoryRestAdapter#confirmReservationFallback).
+    private void confirmInventoryReservation(String bookingId, String showtimeId, List<String> seatCodes) {
+        try {
+            ticketInventoryPort.confirmReservation(showtimeId, bookingId, seatCodes);
+            sagaSteps.markInventoryConfirmed(bookingId);
+        } catch (Exception e) {
+            log.error("confirmReservation failed for booking {}; left for reconciliation: {}",
+                    bookingId, e.getMessage());
+        }
     }
 
     // Called by PaymentResultConsumer on PAYMENT_FAILED.

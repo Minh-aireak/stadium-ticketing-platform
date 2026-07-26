@@ -80,13 +80,16 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
                 showtimeId, bookingId, t.getMessage());
     }
 
-    // Known gap: the Redis hold still self-expires (TTL) even though payment succeeded —
-    // logged loudly (not swallowed) so it's visible in logs/alerts for manual reconciliation.
+    // Rethrows (unlike releaseSeatsFallback) so BookingOrchestrationService#confirmInventoryReservation
+    // can tell the call failed and leave inventoryConfirmed=false — InventoryConfirmationReconciler
+    // is the actual backstop; without a signal here it would never know to retry, and the Redis
+    // hold would just expire via TTL despite payment having succeeded.
     private void confirmReservationFallback(String showtimeId, String bookingId,
                                              List<String> seatCodes, Throwable t) {
-        log.error("Failed to confirm reservation after payment success — seat hold will expire " +
-                        "via TTL regardless of successful payment: showtime={}, booking={}, seats={}: {}",
+        log.error("Failed to confirm reservation after payment success — left for reconciliation: " +
+                        "showtime={}, booking={}, seats={}: {}",
                 showtimeId, bookingId, seatCodes, t.getMessage());
+        throw new RuntimeException("Ticket inventory service unavailable for confirmReservation", t);
     }
 
     record ReservationRequest(String bookingId, List<String> seatCodes) {}

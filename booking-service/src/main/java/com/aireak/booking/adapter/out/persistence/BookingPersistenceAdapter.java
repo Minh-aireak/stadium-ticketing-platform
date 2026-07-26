@@ -3,10 +3,13 @@ package com.aireak.booking.adapter.out.persistence;
 import com.aireak.booking.application.port.out.BookingRepository;
 import com.aireak.booking.domain.model.Booking;
 import com.aireak.booking.domain.model.BookingAmount;
+import com.aireak.booking.domain.model.BookingStatus;
 import com.aireak.booking.domain.model.SeatSelection;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -32,6 +35,16 @@ public class BookingPersistenceAdapter implements BookingRepository {
         return jpaRepository.findByIdempotencyKey(idempotencyKey).map(this::toDomain);
     }
 
+    @Override
+    public List<Booking> findConfirmedAwaitingInventoryConfirmation(Instant updatedBefore, int limit) {
+        return jpaRepository
+                .findByStatusAndInventoryConfirmedFalseAndUpdatedAtBefore(
+                        BookingStatus.CONFIRMED, updatedBefore, Limit.of(limit))
+                .stream()
+                .map(this::toDomain)
+                .toList();
+    }
+
     private BookingJpaEntity toJpaEntity(Booking booking) {
         return BookingJpaEntity.builder()
                 .bookingId(booking.getBookingId())
@@ -42,6 +55,7 @@ public class BookingPersistenceAdapter implements BookingRepository {
                 .currency(booking.getAmount().currency())
                 .status(booking.getStatus())
                 .idempotencyKey(booking.getIdempotencyKey())
+                .inventoryConfirmed(booking.isInventoryConfirmed())
                 .version(booking.getVersion())
                 .build();
     }
@@ -57,7 +71,8 @@ public class BookingPersistenceAdapter implements BookingRepository {
                 entity.getStatus(),
                 entity.getCreatedAt(),
                 entity.getIdempotencyKey(),
-                entity.getVersion()
+                entity.getVersion(),
+                entity.isInventoryConfirmed()
         );
     }
 }

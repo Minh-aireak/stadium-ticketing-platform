@@ -45,6 +45,9 @@ public class BookingJpaEntity extends BaseAuditEntity {
     @Column(name = "idempotency_key", length = 255, updatable = false)
     private String idempotencyKey;
 
+    @Column(name = "inventory_confirmed", nullable = false)
+    private boolean inventoryConfirmed;
+
     @Version
     @Column(name = "version")
     private Long version;
