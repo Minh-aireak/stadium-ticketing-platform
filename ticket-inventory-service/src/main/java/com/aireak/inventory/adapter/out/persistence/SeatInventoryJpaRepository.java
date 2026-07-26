@@ -6,4 +6,5 @@ import java.util.Optional;
 
 interface SeatInventoryJpaRepository extends JpaRepository<SeatInventoryJpaEntity, String> {
     Optional<SeatInventoryJpaEntity> findByShowtimeId(String showtimeId);
+    boolean existsByShowtimeId(String showtimeId);
 }

@@ -8,7 +8,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * Manages seat availability and reservation for showtimes.
  * Distributed lock via Redisson; optimistic lock via JPA @Version.
  */
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = {"com.aireak.inventory", "com.aireak.common"})
 public class TicketInventoryServiceApplication {
     public static void main(String[] args) {
         SpringApplication.run(TicketInventoryServiceApplication.class, args);

@@ -16,12 +16,6 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
 
-  kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -29,6 +23,12 @@ spring:
 
 server:
   port: 8083
+
+inventory:
+  hold:
+    # Seat hold TTL — Redis auto-expires an abandoned reservation this long
+    # after reserveSeats(), no explicit release or cleanup job needed.
+    ttl-minutes: ${INVENTORY_HOLD_TTL_MINUTES:10}
 
 management:
   endpoints:

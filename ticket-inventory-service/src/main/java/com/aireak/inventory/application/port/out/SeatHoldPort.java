@@ -1,0 +1,35 @@
+package com.aireak.inventory.application.port.out;
+
+import com.aireak.inventory.domain.model.SeatCode;
+
+import java.util.List;
+
+/**
+ * Outbound port: temporary (TTL-based) seat holds.
+ *
+ * <p>Replaces writing a {@code RESERVED} row to Postgres on every reservation
+ * attempt. A hold lives only in Redis with an expiry — no DB write on the hot
+ * path, and an abandoned hold (payment never completed) self-cleans via TTL
+ * instead of needing an explicit release or a cleanup job.
+ *
+ * <p>Implemented by {@code RedissonSeatHoldAdapter}. Callers are expected to
+ * already hold the per-showtime {@code DistributedLockPort} lock — this port
+ * does not itself provide cross-request atomicity beyond that.
+ */
+public interface SeatHoldPort {
+
+    /**
+     * Attempts to place a hold on every given seat, all-or-nothing.
+     *
+     * @throws com.aireak.inventory.domain.exception.SeatsNotAvailableException
+     *         if any seat already has an active hold (any previously-placed
+     *         holds from this call are rolled back before the exception propagates)
+     */
+    void holdSeats(String showtimeId, List<SeatCode> seatCodes, String bookingId);
+
+    /** Releases holds owned by {@code bookingId} for the given seats. No-op for seats not held by it. */
+    void releaseHolds(String showtimeId, List<SeatCode> seatCodes, String bookingId);
+
+    /** True if the seat currently has an active (non-expired) hold, regardless of owner. */
+    boolean isHeld(String showtimeId, SeatCode seatCode);
+}

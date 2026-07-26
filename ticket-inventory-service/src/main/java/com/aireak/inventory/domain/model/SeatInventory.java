@@ -1,18 +1,15 @@
 package com.aireak.inventory.domain.model;
 
-import com.aireak.inventory.domain.event.SeatsReleasedEvent;
-import com.aireak.inventory.domain.event.SeatsReservedEvent;
 import com.aireak.inventory.domain.event.SeatsSoldEvent;
-import com.aireak.inventory.domain.exception.SeatsNotAvailableException;
 
 import java.util.*;
 
 /**
  * Aggregate Root: SeatInventory — one per showtime.
  *
- * <p><strong>Core invariant</strong>: no double-booking.
- * {@code reserveSeats()} atomically checks availability for ALL requested seats
- * before mutating any — all-or-nothing semantics within the aggregate.
+ * <p><strong>Core invariant</strong>: no double-booking. {@code sellSeats()} is the only
+ * mutating operation left on this aggregate — reserve/release now live entirely in Redis
+ * (see {@code SeatHoldPort}) and never touch this aggregate at all.
  *
  * <p>Concurrency protection:
  * <ul>
@@ -50,48 +47,15 @@ public class SeatInventory {
     // ----------------------------------------------------------------
 
     /**
-     * Reserves a list of seats for a booking.
-     * All-or-nothing: if ANY seat is unavailable, throws without mutating state.
-     *
-     * @throws SeatsNotAvailableException if any seat is not AVAILABLE
+     * Marks reserved seats as SOLD for {@code bookingId} (on payment success).
+     * Idempotent per-booking; throws {@link com.aireak.inventory.domain.exception.SeatAlreadySoldException}
+     * if a seat is already SOLD to a different booking (see {@link Seat#sell}).
      */
-    public void reserveSeats(List<SeatCode> seatCodes, String bookingId) {
-        // Check ALL before mutating ANY
-        List<SeatCode> unavailable = seatCodes.stream()
-                .filter(code -> {
-                    Seat seat = seats.get(code);
-                    return seat == null || !seat.isAvailable();
-                })
-                .toList();
-
-        if (!unavailable.isEmpty()) {
-            throw new SeatsNotAvailableException(showtimeId, unavailable);
-        }
-
-        seatCodes.forEach(code -> seats.get(code).reserve(bookingId));
-        domainEvents.add(new SeatsReservedEvent(showtimeId, bookingId, seatCodes));
-    }
-
-    /**
-     * Releases previously reserved seats (on payment failure or timeout).
-     */
-    public void releaseSeats(List<SeatCode> seatCodes) {
+    public void sellSeats(List<SeatCode> seatCodes, String bookingId) {
         seatCodes.stream()
                 .map(seats::get)
                 .filter(Objects::nonNull)
-                .filter(s -> s.getStatus() == SeatStatus.RESERVED)
-                .forEach(Seat::release);
-        domainEvents.add(new SeatsReleasedEvent(showtimeId, seatCodes));
-    }
-
-    /**
-     * Marks reserved seats as SOLD (on payment success).
-     */
-    public void sellSeats(List<SeatCode> seatCodes) {
-        seatCodes.stream()
-                .map(seats::get)
-                .filter(Objects::nonNull)
-                .forEach(Seat::sell);
+                .forEach(seat -> seat.sell(bookingId));
         domainEvents.add(new SeatsSoldEvent(showtimeId, seatCodes));
     }
 

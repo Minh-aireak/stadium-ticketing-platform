@@ -1,5 +1,7 @@
 package com.aireak.inventory.domain.model;
 
+import com.aireak.inventory.domain.exception.SeatAlreadySoldException;
+
 import java.util.Objects;
 
 /**
@@ -10,7 +12,7 @@ public class Seat {
 
     private final SeatCode seatCode;
     private SeatStatus status;
-    private String reservedByBookingId; // null when AVAILABLE or SOLD
+    private String reservedByBookingId; // null when AVAILABLE; the owning booking once RESERVED or SOLD
 
     public Seat(SeatCode seatCode) {
         this.seatCode = Objects.requireNonNull(seatCode);
@@ -24,20 +26,22 @@ public class Seat {
         this.reservedByBookingId = reservedByBookingId;
     }
 
-    public boolean isAvailable() { return status == SeatStatus.AVAILABLE; }
-
-    void reserve(String bookingId) {
-        this.status = SeatStatus.RESERVED;
-        this.reservedByBookingId = bookingId;
-    }
-
-    void release() {
-        this.status = SeatStatus.AVAILABLE;
-        this.reservedByBookingId = null;
-    }
-
-    void sell() {
+    /**
+     * Marks this seat SOLD for {@code bookingId}. Idempotent if this exact booking already
+     * sold it (e.g. a redelivered Kafka event); throws if a DIFFERENT booking claims a seat
+     * already SOLD — the RESERVED hold that should have prevented this lives only in Redis
+     * (see SeatHoldPort), so a lost/expired hold can otherwise let two bookings both "win"
+     * the same seat without this check.
+     */
+    void sell(String bookingId) {
+        if (status == SeatStatus.SOLD) {
+            if (Objects.equals(reservedByBookingId, bookingId)) {
+                return;
+            }
+            throw new SeatAlreadySoldException(seatCode, reservedByBookingId, bookingId);
+        }
         this.status = SeatStatus.SOLD;
+        this.reservedByBookingId = bookingId;
     }
 
     public SeatCode getSeatCode()          { return seatCode; }
