@@ -190,13 +190,13 @@ services:
   # ---- Kafka Connect + Debezium (CDC from outbox tables to Kafka) ------
   # Register connectors after startup, e.g.:
   #   curl -X POST -H "Content-Type: application/json" \
-  #     --data @identity-service/infra/debezium/identity-outbox-connector.json \
+  #     --data @backend/identity-service/infra/debezium/identity-outbox-connector.json \
   #     http://localhost:8083/connectors
   #   curl -X POST -H "Content-Type: application/json" \
-  #     --data @booking-service/infra/debezium/booking-outbox-connector.json \
+  #     --data @backend/booking-service/infra/debezium/booking-outbox-connector.json \
   #     http://localhost:8083/connectors
   #   curl -X POST -H "Content-Type: application/json" \
-  #     --data @ticket-inventory-service/infra/debezium/inventory-outbox-connector.json \
+  #     --data @backend/ticket-inventory-service/infra/debezium/inventory-outbox-connector.json \
   #     http://localhost:8083/connectors
   kafka-connect:
     image: debezium/connect:2.7
