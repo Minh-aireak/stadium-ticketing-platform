@@ -47,9 +47,12 @@ services:
       retries: 5
 
   # ---- PostgreSQL — ticket-inventory-service ----------------------------
+  # wal_level=logical is required for Debezium's CDC connector to read the
+  # outbox_events table via logical replication (see infra/debezium/).
   postgres-inventory:
     image: postgres:16-alpine
     container_name: postgres-inventory
+    command: ["postgres", "-c", "wal_level=logical"]
     networks: [stadium-net]
     environment:
       POSTGRES_DB: inventory_db
@@ -66,9 +69,12 @@ services:
       retries: 5
 
   # ---- PostgreSQL — booking-service ------------------------------------
+  # wal_level=logical is required for Debezium's CDC connector to read the
+  # outbox_events table via logical replication (see infra/debezium/).
   postgres-booking:
     image: postgres:16-alpine
     container_name: postgres-booking
+    command: ["postgres", "-c", "wal_level=logical"]
     networks: [stadium-net]
     environment:
       POSTGRES_DB: booking_db
@@ -185,6 +191,12 @@ services:
   # Register connectors after startup, e.g.:
   #   curl -X POST -H "Content-Type: application/json" \
   #     --data @identity-service/infra/debezium/identity-outbox-connector.json \
+  #     http://localhost:8083/connectors
+  #   curl -X POST -H "Content-Type: application/json" \
+  #     --data @booking-service/infra/debezium/booking-outbox-connector.json \
+  #     http://localhost:8083/connectors
+  #   curl -X POST -H "Content-Type: application/json" \
+  #     --data @ticket-inventory-service/infra/debezium/inventory-outbox-connector.json \
   #     http://localhost:8083/connectors
   kafka-connect:
     image: debezium/connect:2.7
