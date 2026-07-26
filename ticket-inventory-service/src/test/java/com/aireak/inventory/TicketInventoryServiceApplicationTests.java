@@ -1,4 +1,4 @@
-package com.aireak.ticketinventory;
+package com.aireak.inventory;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
