@@ -8,7 +8,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * Notification Service — Kafka consumer, idempotent event processing,
  * email/SMS dispatch for booking and identity events.
  */
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = {"com.aireak.notification", "com.aireak.common"})
 @EnableScheduling
 public class NotificationServiceApplication {
 

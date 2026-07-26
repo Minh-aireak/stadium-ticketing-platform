@@ -7,7 +7,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * Payment Service — Bounded Context: Payment.
  * Integrates with external payment gateway, publishes payment result events to Kafka.
  */
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = {"com.aireak.payment", "com.aireak.common"})
 public class PaymentServiceApplication {
     public static void main(String[] args) {
         SpringApplication.run(PaymentServiceApplication.class, args);

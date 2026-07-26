@@ -7,7 +7,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * Match Catalog Service — Bounded Context: Catalog.
  * Manages Match/Showtime lifecycle. CQRS: PostgreSQL (write) + Elasticsearch (read).
  */
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = {"com.aireak.catalog", "com.aireak.common"})
 public class MatchCatalogServiceApplication {
     public static void main(String[] args) {
         SpringApplication.run(MatchCatalogServiceApplication.class, args);
