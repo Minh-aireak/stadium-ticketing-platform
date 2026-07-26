@@ -1,6 +1,7 @@
 package com.aireak.payment.adapter.out.gateway;
 
 import com.aireak.payment.application.port.out.PaymentGatewayPort;
+import io.github.resilience4j.bulkhead.annotation.Bulkhead;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
 import lombok.extern.slf4j.Slf4j;
@@ -13,7 +14,7 @@ import java.util.UUID;
  * Stub payment gateway adapter.
  * Replace with VNPay/Stripe SDK integration.
  *
- * <p>@CircuitBreaker + @Retry applied here — hexagonal rule: only adapter layer
+ * <p>@Bulkhead + @CircuitBreaker + @Retry applied here — hexagonal rule: only adapter layer
  * uses Resilience4j annotations.
  */
 @Slf4j
@@ -21,6 +22,7 @@ import java.util.UUID;
 public class StubPaymentGatewayAdapter implements PaymentGatewayPort {
 
     @Override
+    @Bulkhead(name = "payment-gateway", type = Bulkhead.Type.SEMAPHORE)
     @CircuitBreaker(name = "payment-gateway", fallbackMethod = "chargeFallback")
     @Retry(name = "payment-gateway")
     public String charge(String bookingId, BigDecimal amount, String currency) {

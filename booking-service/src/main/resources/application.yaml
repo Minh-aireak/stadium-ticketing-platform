@@ -7,6 +7,15 @@ spring:
     username: ${DB_USERNAME:aireak}
     password: ${DB_PASSWORD:aireak}
     driver-class-name: org.postgresql.Driver
+    # Explicit pool size: every step in BookingSagaSteps is a short REQUIRES_NEW transaction that
+    # never spans the outbound REST calls (see BookingOrchestrationService), so a connection is
+    # only ever held for a single insert/update — this pool no longer needs to cover network wait.
+    hikari:
+      pool-name: BookingHikariPool
+      maximum-pool-size: 20
+      minimum-idle: 10
+      connection-timeout: 3000
+      max-lifetime: 1800000
 
   jpa:
     hibernate:
@@ -26,6 +35,13 @@ spring:
 
 server:
   port: 8086
+  tomcat:
+    threads:
+      # Kept above the sum of the ticket-inventory/payment Bulkhead limits (50+50=100) so a
+      # rejected call fails fast at the Bulkhead instead of also queueing at the Tomcat level.
+      max: 200
+      min-spare: 20
+    accept-count: 100
 
 # Downstream service URLs
 services:
@@ -43,7 +59,8 @@ booking:
     # Caps how many bookings a single run retries — a real backlog drains over several cycles.
     batch-size: ${INVENTORY_RECONCILER_BATCH_SIZE:200}
 
-# Resilience4j circuit breaker config
+# Resilience4j: CircuitBreaker + Retry + Bulkhead on outbound REST calls to
+# ticket-inventory-service and payment-service.
 resilience4j:
   circuitbreaker:
     instances:
@@ -53,30 +70,54 @@ resilience4j:
         failureRateThreshold: 50
         waitDurationInOpenState: 10s
         permittedNumberOfCallsInHalfOpenState: 3
+        # A Bulkhead rejection reflects OUR OWN concurrency cap, not the downstream's health —
+        # must not count toward tripping this circuit open.
+        ignoreExceptions:
+          - io.github.resilience4j.bulkhead.BulkheadFullException
       payment:
         slidingWindowSize: 10
         minimumNumberOfCalls: 5
         failureRateThreshold: 50
         waitDurationInOpenState: 10s
         permittedNumberOfCallsInHalfOpenState: 3
+        ignoreExceptions:
+          - io.github.resilience4j.bulkhead.BulkheadFullException
+  bulkhead:
+    instances:
+      # Caps concurrent in-flight calls to each downstream so one slow dependency can never
+      # consume every Tomcat thread handling createBooking(); overflow fails fast instead of
+      # queueing (maxWaitDuration: 0).
+      ticket-inventory:
+        maxConcurrentCalls: 50
+        maxWaitDuration: 0
+      payment:
+        maxConcurrentCalls: 50
+        maxWaitDuration: 0
   retry:
     instances:
       ticket-inventory:
         maxAttempts: 3
         waitDuration: 500ms
         ignoreExceptions:
+          # 4xx: caller error, retrying won't help.
           - org.springframework.web.client.HttpClientErrorException
+          # 503: downstream is explicitly shedding load — retrying just adds to the pile-on.
+          - org.springframework.web.client.HttpServerErrorException$ServiceUnavailable
+          # Bulkhead already full locally — an immediate retry has zero chance of a free slot.
+          - io.github.resilience4j.bulkhead.BulkheadFullException
       payment:
         maxAttempts: 3
         waitDuration: 500ms
         ignoreExceptions:
           - org.springframework.web.client.HttpClientErrorException
+          - org.springframework.web.client.HttpServerErrorException$ServiceUnavailable
+          - io.github.resilience4j.bulkhead.BulkheadFullException
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,circuitbreakers
+        include: health,info,metrics,circuitbreakers,bulkheads,ratelimiters
   endpoint:
     health:
       show-details: always

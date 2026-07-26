@@ -1,6 +1,7 @@
 package com.aireak.booking.adapter.out.client;
 
 import com.aireak.booking.application.port.out.TicketInventoryPort;
+import io.github.resilience4j.bulkhead.annotation.Bulkhead;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +29,7 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
     private String baseUrl;
 
     @Override
+    @Bulkhead(name = "ticket-inventory", type = Bulkhead.Type.SEMAPHORE)
     @CircuitBreaker(name = "ticket-inventory", fallbackMethod = "reserveSeatsFallback")
     @Retry(name = "ticket-inventory")
     public void reserveSeats(String showtimeId, String bookingId, List<String> seatCodes) {
@@ -43,6 +45,7 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
     }
 
     @Override
+    @Bulkhead(name = "ticket-inventory", type = Bulkhead.Type.SEMAPHORE)
     @CircuitBreaker(name = "ticket-inventory", fallbackMethod = "releaseSeatsFallback")
     @Retry(name = "ticket-inventory")
     public void releaseSeats(String showtimeId, String bookingId, List<String> seatCodes) {
@@ -55,6 +58,7 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
     }
 
     @Override
+    @Bulkhead(name = "ticket-inventory", type = Bulkhead.Type.SEMAPHORE)
     @CircuitBreaker(name = "ticket-inventory", fallbackMethod = "confirmReservationFallback")
     @Retry(name = "ticket-inventory")
     public void confirmReservation(String showtimeId, String bookingId, List<String> seatCodes) {

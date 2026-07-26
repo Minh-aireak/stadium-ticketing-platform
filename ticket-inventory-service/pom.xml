@@ -45,6 +45,14 @@
             <artifactId>redisson-spring-boot-starter</artifactId>
         </dependency>
 
+        <!-- Resilience4j: Bulkhead + RateLimiter on the reserve/release use cases (hot path
+             for flash sales) so overload fails fast (503) instead of queueing Tomcat threads
+             behind the 5s Redisson lock wait. -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot4</artifactId>
+        </dependency>
+
         <!-- Common -->
         <dependency>
             <groupId>com.aireak</groupId>

@@ -2,6 +2,7 @@ package com.aireak.booking.adapter.out.client;
 
 import com.aireak.booking.application.port.out.OutboundServiceUnavailableException;
 import com.aireak.booking.application.port.out.PaymentPort;
+import io.github.resilience4j.bulkhead.annotation.Bulkhead;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +33,7 @@ public class PaymentRestAdapter implements PaymentPort {
     private String baseUrl;
 
     @Override
+    @Bulkhead(name = "payment", type = Bulkhead.Type.SEMAPHORE)
     @CircuitBreaker(name = "payment", fallbackMethod = "initiatePaymentFallback")
     @Retry(name = "payment")
     public void initiatePayment(String bookingId, BigDecimal amount, String currency) {

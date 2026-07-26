@@ -15,6 +15,8 @@ import com.aireak.inventory.domain.event.SeatsReservedEvent;
 import com.aireak.inventory.domain.exception.SeatInventoryNotFoundException;
 import com.aireak.inventory.domain.exception.SeatsNotAvailableException;
 import com.aireak.inventory.domain.model.SeatCode;
+import io.github.resilience4j.bulkhead.annotation.Bulkhead;
+import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -59,7 +61,13 @@ public class SeatInventoryService implements ReserveSeatsUseCase, ReleaseSeatsUs
     private final DomainEventPublisher eventPublisher;
     private final SeatSaleConfirmer seatSaleConfirmer;
 
+    // Bulkhead + RateLimiter guard the hot path *before* the 5s Redisson lock wait: once the
+    // semaphore/rate budget is exhausted, calls are rejected immediately (BulkheadFullException /
+    // RequestNotPermitted, mapped to 503 by InventoryOverloadExceptionHandler) instead of piling
+    // up Tomcat threads behind tryLock().
     @Override
+    @Bulkhead(name = "seat-inventory", type = Bulkhead.Type.SEMAPHORE)
+    @RateLimiter(name = "seat-inventory")
     public void execute(ReserveSeatsCommand command) {
         String lockKey = LOCK_PREFIX + command.showtimeId();
         List<SeatCode> seatCodes = command.seatCodes().stream().map(SeatCode::new).toList();
@@ -78,7 +86,10 @@ public class SeatInventoryService implements ReserveSeatsUseCase, ReleaseSeatsUs
                 });
     }
 
+    // Bulkhead only (no RateLimiter): release is a compensating action, not the contended
+    // buy-path, but it still must not queue unbounded threads behind the same per-showtime lock.
     @Override
+    @Bulkhead(name = "seat-inventory", type = Bulkhead.Type.SEMAPHORE)
     public void execute(ReleaseSeatsCommand command) {
         String lockKey = LOCK_PREFIX + command.showtimeId();
         List<SeatCode> seatCodes = command.seatCodes().stream().map(SeatCode::new).toList();

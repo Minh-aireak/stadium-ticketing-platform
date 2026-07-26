@@ -7,6 +7,15 @@ spring:
     username: ${DB_USERNAME:aireak}
     password: ${DB_PASSWORD:aireak}
     driver-class-name: org.postgresql.Driver
+    # Explicit pool size: PaymentSagaSteps commits INITIATED/SUCCEEDED/FAILED as short, independent
+    # REQUIRES_NEW transactions around the gateway call (see PaymentService), so a connection is
+    # never held while waiting on the gateway — this pool only covers the DB writes themselves.
+    hikari:
+      pool-name: PaymentHikariPool
+      maximum-pool-size: 20
+      minimum-idle: 10
+      connection-timeout: 3000
+      max-lifetime: 1800000
 
   jpa:
     hibernate:
@@ -22,8 +31,20 @@ spring:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
 
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
 server:
   port: 8084
+  tomcat:
+    threads:
+      # Kept above the payment-gateway Bulkhead limit (30) so a rejected call fails fast at the
+      # Bulkhead instead of also queueing at the Tomcat level.
+      max: 200
+      min-spare: 20
+    accept-count: 100
 
 resilience4j:
   circuitbreaker:
@@ -33,17 +54,35 @@ resilience4j:
         failureRateThreshold: 50
         waitDurationInOpenState: 30s
         permittedNumberOfCallsInHalfOpenState: 2
+        # A Bulkhead rejection reflects OUR OWN concurrency cap, not the gateway's health — must
+        # not count toward tripping this circuit open.
+        ignoreExceptions:
+          - io.github.resilience4j.bulkhead.BulkheadFullException
+  bulkhead:
+    instances:
+      # Caps concurrent in-flight gateway calls so a slow gateway can't consume every Tomcat
+      # thread handling PaymentService#execute; overflow fails fast (maxWaitDuration: 0).
+      payment-gateway:
+        maxConcurrentCalls: 30
+        maxWaitDuration: 0
   retry:
     instances:
       payment-gateway:
         maxAttempts: 2
         waitDuration: 1s
+        ignoreExceptions:
+          # 4xx: caller error, retrying won't help.
+          - org.springframework.web.client.HttpClientErrorException
+          # 503: gateway is explicitly shedding load — retrying just adds to the pile-on.
+          - org.springframework.web.client.HttpServerErrorException$ServiceUnavailable
+          # Bulkhead already full locally — an immediate retry has zero chance of a free slot.
+          - io.github.resilience4j.bulkhead.BulkheadFullException
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,circuitbreakers
+        include: health,info,metrics,circuitbreakers,bulkheads,ratelimiters
   endpoint:
     health:
       show-details: always

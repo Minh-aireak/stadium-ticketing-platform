@@ -7,6 +7,15 @@ spring:
     username: ${DB_USERNAME:aireak}
     password: ${DB_PASSWORD:aireak}
     driver-class-name: org.postgresql.Driver
+    # Explicit pool size: the reserve/release hot path no longer touches Postgres at all (Redis
+    # hold only — see SeatInventoryService), so this pool only serves the rarer confirm-sale write
+    # and read queries. Sized well below the Bulkhead limit below so the DB is never the bottleneck.
+    hikari:
+      pool-name: InventoryHikariPool
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 3000
+      max-lifetime: 1800000
 
   jpa:
     hibernate:
@@ -23,6 +32,13 @@ spring:
 
 server:
   port: 8083
+  tomcat:
+    threads:
+      # Kept above the Bulkhead's maxConcurrentCalls (100) so requests rejected by the Bulkhead
+      # fail fast instead of ever forming a Tomcat-level queue.
+      max: 200
+      min-spare: 20
+    accept-count: 100
 
 inventory:
   hold:
@@ -30,11 +46,27 @@ inventory:
     # after reserveSeats(), no explicit release or cleanup job needed.
     ttl-minutes: ${INVENTORY_HOLD_TTL_MINUTES:10}
 
+# Resilience4j: Bulkhead/RateLimiter on SeatInventoryService's reserve/release use cases (the
+# flash-sale hot path). maxWaitDuration/timeoutDuration are 0 on purpose — fail fast with a 503
+# instead of queueing caller threads on top of the 5s Redisson lock wait.
+resilience4j:
+  bulkhead:
+    instances:
+      seat-inventory:
+        maxConcurrentCalls: 100
+        maxWaitDuration: 0
+  ratelimiter:
+    instances:
+      seat-inventory:
+        limitForPeriod: 200
+        limitRefreshPeriod: 1s
+        timeoutDuration: 0
+
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,bulkheads,ratelimiters
   endpoint:
     health:
       show-details: always
