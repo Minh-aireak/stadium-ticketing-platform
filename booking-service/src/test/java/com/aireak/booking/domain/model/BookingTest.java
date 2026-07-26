@@ -209,11 +209,12 @@ class BookingTest {
         Instant createdAt = Instant.parse("2024-01-01T00:00:00Z");
 
         Booking booking = Booking.reconstitute("booking-1", "customer-1", "showtime-1",
-                SEATS, AMOUNT, BookingStatus.CONFIRMED, createdAt, "idem-1", 5L);
+                SEATS, AMOUNT, BookingStatus.CONFIRMED, createdAt, "idem-1", 5L, true);
 
         assertThat(booking.getVersion()).isEqualTo(5L);
         assertThat(booking.getStatus()).isEqualTo(BookingStatus.CONFIRMED);
         assertThat(booking.getCreatedAt()).isEqualTo(createdAt);
+        assertThat(booking.isInventoryConfirmed()).isTrue();
         assertThat(booking.pullDomainEvents()).isEmpty();
     }
 
@@ -223,8 +224,24 @@ class BookingTest {
         // just carries whatever persistence handed it through unchanged (see the field's
         // javadoc on why that distinction matters for JPA's isNew() check).
         Booking booking = Booking.reconstitute("booking-1", "customer-1", "showtime-1",
-                SEATS, AMOUNT, BookingStatus.DRAFT, Instant.now(), null, 0L);
+                SEATS, AMOUNT, BookingStatus.DRAFT, Instant.now(), null, 0L, false);
 
         assertThat(booking.getVersion()).isEqualTo(0L);
+    }
+
+    @Test
+    void createStartsWithInventoryNotConfirmed() {
+        Booking booking = Booking.create("customer-1", "showtime-1", SEATS, AMOUNT, null);
+
+        assertThat(booking.isInventoryConfirmed()).isFalse();
+    }
+
+    @Test
+    void markInventoryConfirmedSetsFlag() {
+        Booking booking = Booking.create("customer-1", "showtime-1", SEATS, AMOUNT, null);
+
+        booking.markInventoryConfirmed();
+
+        assertThat(booking.isInventoryConfirmed()).isTrue();
     }
 }

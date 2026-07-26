@@ -368,6 +368,7 @@ class BookingOrchestrationServiceTest {
 
             verify(sagaSteps).markConfirmed(BOOKING_ID);
             verify(ticketInventoryPort).confirmReservation(SHOWTIME_ID, BOOKING_ID, SEAT_CODES);
+            verify(sagaSteps).markInventoryConfirmed(BOOKING_ID);
         }
 
         @Test
@@ -387,6 +388,51 @@ class BookingOrchestrationServiceTest {
             service.confirmBooking(BOOKING_ID);
 
             verify(sagaSteps, never()).markConfirmed(anyString());
+        }
+
+        @Test
+        void confirmReservationFailureIsSwallowedAndLeftForReconciliation() {
+            Booking pending = pendingPaymentBooking(BOOKING_ID);
+            when(sagaSteps.findOrThrow(BOOKING_ID)).thenReturn(pending);
+            doThrow(new RuntimeException("ticket-inventory unavailable"))
+                    .when(ticketInventoryPort).confirmReservation(SHOWTIME_ID, BOOKING_ID, SEAT_CODES);
+
+            // Must not throw: the booking is already durably CONFIRMED (markConfirmed already
+            // committed) — a failure here must not surface as a caller-visible error.
+            service.confirmBooking(BOOKING_ID);
+
+            verify(sagaSteps).markConfirmed(BOOKING_ID);
+            // Left false on failure so InventoryConfirmationReconciler picks it up later.
+            verify(sagaSteps, never()).markInventoryConfirmed(anyString());
+        }
+    }
+
+    @Nested
+    class RetryInventoryConfirmation {
+
+        @Test
+        void retriesConfirmReservationAndMarksItConfirmedOnSuccessWithoutTheConfirmBookingGuard() {
+            Booking alreadyConfirmed = confirmedBooking(BOOKING_ID);
+
+            service.retryInventoryConfirmation(alreadyConfirmed);
+
+            verify(ticketInventoryPort).confirmReservation(SHOWTIME_ID, BOOKING_ID, SEAT_CODES);
+            verify(sagaSteps).markInventoryConfirmed(BOOKING_ID);
+            // No PENDING_PAYMENT guard: the caller-supplied Booking is used directly, so
+            // findOrThrow/markConfirmed (confirmBooking()'s own steps) are never touched.
+            verify(sagaSteps, never()).findOrThrow(anyString());
+            verify(sagaSteps, never()).markConfirmed(anyString());
+        }
+
+        @Test
+        void retryFailureIsSwallowed() {
+            Booking alreadyConfirmed = confirmedBooking(BOOKING_ID);
+            doThrow(new RuntimeException("still unavailable"))
+                    .when(ticketInventoryPort).confirmReservation(SHOWTIME_ID, BOOKING_ID, SEAT_CODES);
+
+            service.retryInventoryConfirmation(alreadyConfirmed);
+
+            verify(sagaSteps, never()).markInventoryConfirmed(anyString());
         }
     }
 
@@ -447,6 +493,6 @@ class BookingOrchestrationServiceTest {
     private static Booking reconstituted(String bookingId, BookingStatus status) {
         return Booking.reconstitute(bookingId, CUSTOMER_ID, SHOWTIME_ID,
                 new SeatSelection(SEAT_CODES), BookingAmount.of(AMOUNT, CURRENCY),
-                status, java.time.Instant.now(), null, 0L);
+                status, java.time.Instant.now(), null, 0L, false);
     }
 }

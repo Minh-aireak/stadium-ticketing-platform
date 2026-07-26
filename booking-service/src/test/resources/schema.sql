@@ -13,6 +13,7 @@ CREATE TABLE bookings (
     currency CHAR(3) NOT NULL,
     status VARCHAR(30) NOT NULL,
     idempotency_key VARCHAR(255),
+    inventory_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
     version BIGINT,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
