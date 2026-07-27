@@ -25,7 +25,7 @@
                 <p><strong>Booking ID:</strong> ${bookingId}</p>
                 <p><strong>Showtime ID:</strong> ${showtimeId}</p>
                 <p><strong>Seats:</strong> ${seatCodes?join(", ")}</p>
-                <p><strong>Total Amount:</strong> ${amount.amount} ${amount.currency}</p>
+                <p><strong>Total Amount:</strong> ${amount} ${currency}</p>
             </div>
             
             <p>Please present this confirmation email or Booking ID at the venue gate to enter.</p>

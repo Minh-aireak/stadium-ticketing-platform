@@ -122,7 +122,8 @@ public class NotificationDispatchService implements SendNotificationUseCase {
             model.put("customerId", event.customerId());
             model.put("showtimeId", event.showtimeId());
             model.put("seatCodes", event.seatCodes());
-            model.put("amount", event.amount());
+            model.put("amount", event.amount().amount());
+            model.put("currency", event.amount().currency());
             model.put("occurredAt", event.occurredAt());
         } else if (payload instanceof BookingCancelledEvent event) {
             model.put("bookingId", event.bookingId());
