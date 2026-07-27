@@ -443,7 +443,7 @@ class BookingOrchestrationServiceTest {
         void cancelsAndReleasesSeatsWhenPendingPayment() {
             when(sagaSteps.findOrThrow(BOOKING_ID)).thenReturn(pendingPaymentBooking(BOOKING_ID));
 
-            service.cancelBookingOnPaymentFailure(BOOKING_ID, SHOWTIME_ID, SEAT_CODES, "declined");
+            service.cancelBookingOnPaymentFailure(BOOKING_ID, "declined");
 
             verify(sagaSteps).cancelBooking(BOOKING_ID, "declined");
             verify(ticketInventoryPort).releaseSeats(SHOWTIME_ID, BOOKING_ID, SEAT_CODES);
@@ -453,7 +453,7 @@ class BookingOrchestrationServiceTest {
         void isNoOpWhenAlreadyConfirmedSoSoldSeatsAreNeverReleased() {
             when(sagaSteps.findOrThrow(BOOKING_ID)).thenReturn(confirmedBooking(BOOKING_ID));
 
-            service.cancelBookingOnPaymentFailure(BOOKING_ID, SHOWTIME_ID, SEAT_CODES, "late failure signal");
+            service.cancelBookingOnPaymentFailure(BOOKING_ID, "late failure signal");
 
             verify(sagaSteps, never()).cancelBooking(anyString(), anyString());
             verify(ticketInventoryPort, never()).releaseSeats(anyString(), anyString(), any());
@@ -463,7 +463,7 @@ class BookingOrchestrationServiceTest {
         void isNoOpWhenAlreadyCancelled() {
             when(sagaSteps.findOrThrow(BOOKING_ID)).thenReturn(cancelledBooking(BOOKING_ID));
 
-            service.cancelBookingOnPaymentFailure(BOOKING_ID, SHOWTIME_ID, SEAT_CODES, "redelivered event");
+            service.cancelBookingOnPaymentFailure(BOOKING_ID, "redelivered event");
 
             verify(sagaSteps, never()).cancelBooking(anyString(), anyString());
             verify(ticketInventoryPort, never()).releaseSeats(anyString(), anyString(), any());
