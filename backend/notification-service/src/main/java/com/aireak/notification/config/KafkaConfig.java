@@ -2,15 +2,23 @@ package com.aireak.notification.config;
 
 import com.aireak.common.event.EventEnvelope;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
+import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
+import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.serializer.JacksonJsonDeserializer;
+import org.springframework.kafka.support.serializer.JacksonJsonSerializer;
+import org.springframework.util.backoff.ExponentialBackOff;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -23,6 +31,12 @@ import java.util.Map;
  *   <li>RECORD ack mode — commits offset after each successful record processing.</li>
  *   <li>Deserializes messages as {@link EventEnvelope} via JacksonJsonDeserializer (Jackson 3).</li>
  *   <li>Trusted packages set to {@code com.aireak.*} for safe polymorphic deserialization.</li>
+ *   <li>{@code kafkaErrorHandler} (same shape as booking-service's): retries a failing record
+ *       with exponential backoff, then republishes it to a {@code <topic>.DLT} topic instead of
+ *       either looping forever or silently dropping it — see {@code EmailSenderPort}/
+ *       {@code SmsSenderPort} failures in {@code NotificationDispatchService#dispatch}, which
+ *       propagate out of the {@code @KafkaListener} method and previously hit Spring Kafka's
+ *       default handler (log-and-skip after a fixed retry count, no DLQ trail).</li>
  * </ul>
  */
 @Configuration
@@ -46,13 +60,33 @@ public class KafkaConfig {
     }
 
     @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, EventEnvelope<?>> kafkaListenerContainerFactory() {
+    public KafkaTemplate<String, Object> deadLetterKafkaTemplate() {
+        Map<String, Object> props = new HashMap<>();
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JacksonJsonSerializer.class);
+        return new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(props));
+    }
+
+    @Bean
+    public DefaultErrorHandler kafkaErrorHandler(KafkaTemplate<String, Object> deadLetterKafkaTemplate) {
+        var recoverer = new DeadLetterPublishingRecoverer(deadLetterKafkaTemplate);
+        var backOff = new ExponentialBackOff(500L, 2.0);
+        backOff.setMaxInterval(10_000L);
+        backOff.setMaxElapsedTime(30_000L);
+        return new DefaultErrorHandler(recoverer, backOff);
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, EventEnvelope<?>> kafkaListenerContainerFactory(
+            DefaultErrorHandler kafkaErrorHandler) {
         ConcurrentKafkaListenerContainerFactory<String, EventEnvelope<?>> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory());
         // RECORD: commit offset per-record after listener returns normally
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
         factory.setConcurrency(3);
+        factory.setCommonErrorHandler(kafkaErrorHandler);
         return factory;
     }
 }
