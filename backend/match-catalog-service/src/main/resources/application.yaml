@@ -25,6 +25,13 @@ elasticsearch:
   port: ${ELASTICSEARCH_PORT:9200}
   scheme: ${ELASTICSEARCH_SCHEME:http}
 
+outbox:
+  cleanup:
+    # Debezium reads outbox_events via WAL, not the table itself — rows older than this are
+    # safe to purge regardless of whether CDC has "processed" them.
+    retention-days: ${OUTBOX_CLEANUP_RETENTION_DAYS:14}
+    fixed-delay-ms: ${OUTBOX_CLEANUP_FIXED_DELAY_MS:86400000}
+
 management:
   endpoints:
     web:

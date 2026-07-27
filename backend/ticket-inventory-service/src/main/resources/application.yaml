@@ -46,6 +46,13 @@ inventory:
     # after reserveSeats(), no explicit release or cleanup job needed.
     ttl-minutes: ${INVENTORY_HOLD_TTL_MINUTES:10}
 
+outbox:
+  cleanup:
+    # Debezium reads outbox_events via WAL, not the table itself — rows older than this are
+    # safe to purge regardless of whether CDC has "processed" them.
+    retention-days: ${OUTBOX_CLEANUP_RETENTION_DAYS:14}
+    fixed-delay-ms: ${OUTBOX_CLEANUP_FIXED_DELAY_MS:86400000}
+
 # Resilience4j: Bulkhead/RateLimiter on SeatInventoryService's reserve/release use cases (the
 # flash-sale hot path). maxWaitDuration/timeoutDuration are 0 on purpose — fail fast with a 503
 # instead of queueing caller threads on top of the 5s Redisson lock wait.

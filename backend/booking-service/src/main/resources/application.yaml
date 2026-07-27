@@ -59,6 +59,13 @@ booking:
     # Caps how many bookings a single run retries — a real backlog drains over several cycles.
     batch-size: ${INVENTORY_RECONCILER_BATCH_SIZE:200}
 
+outbox:
+  cleanup:
+    # Debezium reads outbox_events via WAL, not the table itself — rows older than this are
+    # safe to purge regardless of whether CDC has "processed" them.
+    retention-days: ${OUTBOX_CLEANUP_RETENTION_DAYS:14}
+    fixed-delay-ms: ${OUTBOX_CLEANUP_FIXED_DELAY_MS:86400000}
+
 # Resilience4j: CircuitBreaker + Retry + Bulkhead on outbound REST calls to
 # ticket-inventory-service and payment-service.
 resilience4j:
