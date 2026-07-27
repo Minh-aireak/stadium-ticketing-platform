@@ -1,0 +1,160 @@
+package com.aireak.catalog.domain.model;
+
+import com.aireak.catalog.domain.event.MatchPublishedEvent;
+import com.aireak.catalog.domain.exception.InvalidMatchStatusException;
+import org.junit.jupiter.api.Test;
+
+import java.time.Instant;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+class MatchTest {
+
+    private Match matchWithShowtime() {
+        Match match = Match.create("Home FC", "Away FC", "Premier League");
+        match.addShowtime(new Showtime(Instant.now().plusSeconds(3600), "venue-1", 100));
+        return match;
+    }
+
+    @Test
+    void createStartsInDraftWithNoShowtimesAndNoEvents() {
+        Match match = Match.create("Home FC", "Away FC", "Premier League");
+
+        assertThat(match.getStatus()).isEqualTo(MatchStatus.DRAFT);
+        assertThat(match.getMatchId()).isNotBlank();
+        assertThat(match.getShowtimes()).isEmpty();
+        assertThat(match.pullDomainEvents()).isEmpty();
+    }
+
+    @Test
+    void addShowtimeAppendsToListWhenDraft() {
+        Match match = Match.create("Home FC", "Away FC", "Premier League");
+
+        match.addShowtime(new Showtime(Instant.now().plusSeconds(3600), "venue-1", 100));
+
+        assertThat(match.getShowtimes()).hasSize(1);
+    }
+
+    @Test
+    void addShowtimeRejectsWhenNotDraft() {
+        Match match = matchWithShowtime();
+        match.publish();
+
+        assertThatThrownBy(() -> match.addShowtime(new Showtime(Instant.now(), "venue-2", 50)))
+                .isInstanceOf(InvalidMatchStatusException.class);
+    }
+
+    @Test
+    void publishRejectsWhenNoShowtimes() {
+        Match match = Match.create("Home FC", "Away FC", "Premier League");
+
+        assertThatThrownBy(match::publish)
+                .isInstanceOf(InvalidMatchStatusException.class);
+    }
+
+    @Test
+    void publishTransitionsToPublishedAndRaisesEvent() {
+        Match match = matchWithShowtime();
+
+        match.publish();
+
+        assertThat(match.getStatus()).isEqualTo(MatchStatus.PUBLISHED);
+        List<Object> events = match.pullDomainEvents();
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0)).isInstanceOf(MatchPublishedEvent.class);
+        assertThat(((MatchPublishedEvent) events.get(0)).matchId()).isEqualTo(match.getMatchId());
+    }
+
+    @Test
+    void publishRejectsWhenAlreadyPublished() {
+        Match match = matchWithShowtime();
+        match.publish();
+
+        assertThatThrownBy(match::publish)
+                .isInstanceOf(InvalidMatchStatusException.class);
+    }
+
+    @Test
+    void completeTransitionsFromPublished() {
+        Match match = matchWithShowtime();
+        match.publish();
+
+        match.complete();
+
+        assertThat(match.getStatus()).isEqualTo(MatchStatus.COMPLETED);
+    }
+
+    @Test
+    void completeRejectsWhenStillDraft() {
+        Match match = matchWithShowtime();
+
+        assertThatThrownBy(match::complete)
+                .isInstanceOf(InvalidMatchStatusException.class);
+    }
+
+    @Test
+    void cancelAllowedFromDraft() {
+        Match match = Match.create("Home FC", "Away FC", "Premier League");
+
+        match.cancel();
+
+        assertThat(match.getStatus()).isEqualTo(MatchStatus.CANCELLED);
+    }
+
+    @Test
+    void cancelAllowedFromPublished() {
+        Match match = matchWithShowtime();
+        match.publish();
+
+        match.cancel();
+
+        assertThat(match.getStatus()).isEqualTo(MatchStatus.CANCELLED);
+    }
+
+    @Test
+    void cancelRejectsWhenAlreadyCompleted() {
+        Match match = matchWithShowtime();
+        match.publish();
+        match.complete();
+
+        assertThatThrownBy(match::cancel)
+                .isInstanceOf(InvalidMatchStatusException.class);
+    }
+
+    @Test
+    void cancelRejectsWhenAlreadyCancelled() {
+        Match match = Match.create("Home FC", "Away FC", "Premier League");
+        match.cancel();
+
+        assertThatThrownBy(match::cancel)
+                .isInstanceOf(InvalidMatchStatusException.class);
+    }
+
+    @Test
+    void reconstitutePreservesStateAndRaisesNoEvents() {
+        Instant createdAt = Instant.parse("2024-01-01T00:00:00Z");
+        Showtime showtime = new Showtime("showtime-1", Instant.now(), "venue-1", 100, 80);
+
+        Match match = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
+                MatchStatus.PUBLISHED, createdAt, List.of(showtime));
+
+        assertThat(match.getStatus()).isEqualTo(MatchStatus.PUBLISHED);
+        assertThat(match.getCreatedAt()).isEqualTo(createdAt);
+        assertThat(match.getShowtimes()).containsExactly(showtime);
+        assertThat(match.pullDomainEvents()).isEmpty();
+    }
+
+    @Test
+    void pullDomainEventsClearsTheList() {
+        Match match = matchWithShowtime();
+        match.publish();
+
+        List<Object> firstPull = match.pullDomainEvents();
+        List<Object> secondPull = match.pullDomainEvents();
+
+        assertThat(firstPull).hasSize(1);
+        assertThat(secondPull).isEmpty();
+    }
+}
