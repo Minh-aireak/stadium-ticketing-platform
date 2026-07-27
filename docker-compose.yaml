@@ -194,15 +194,11 @@ services:
       start_period: 30s
 
   # ---- Kafka Connect + Debezium (CDC from outbox tables to Kafka) ------
-  # Register connectors after startup, e.g.:
+  # Connectors are auto-registered by the kafka-connect-init service below
+  # once this container reports healthy. To re-register one manually after
+  # editing its JSON (e.g. after a config change), re-run e.g.:
   #   curl -X POST -H "Content-Type: application/json" \
   #     --data @backend/identity-service/infra/debezium/identity-outbox-connector.json \
-  #     http://localhost:8083/connectors
-  #   curl -X POST -H "Content-Type: application/json" \
-  #     --data @backend/booking-service/infra/debezium/booking-outbox-connector.json \
-  #     http://localhost:8083/connectors
-  #   curl -X POST -H "Content-Type: application/json" \
-  #     --data @backend/ticket-inventory-service/infra/debezium/inventory-outbox-connector.json \
   #     http://localhost:8083/connectors
   kafka-connect:
     image: debezium/connect:2.7
@@ -229,6 +225,36 @@ services:
       timeout: 10s
       retries: 10
       start_period: 30s
+
+  # ---- Kafka Connect init (auto-registers Debezium connectors) --------
+  # Runs once kafka-connect is healthy, POSTs all 5 outbox connector configs,
+  # then exits. Idempotent: a 409 (connector already exists) counts as
+  # success, so re-running `docker compose up -d` is always safe.
+  kafka-connect-init:
+    image: curlimages/curl:8.11.0
+    container_name: kafka-connect-init
+    networks: [stadium-net]
+    depends_on:
+      kafka-connect:
+        condition: service_healthy
+      postgres-identity:
+        condition: service_healthy
+      postgres-inventory:
+        condition: service_healthy
+      postgres-booking:
+        condition: service_healthy
+      postgres-payment:
+        condition: service_healthy
+      postgres-catalog:
+        condition: service_healthy
+    volumes:
+      - ./infra/kafka-connect/register-connectors.sh:/register-connectors.sh:ro
+      - ./backend/identity-service/infra/debezium/identity-outbox-connector.json:/connectors/identity-outbox-connector.json:ro
+      - ./backend/booking-service/infra/debezium/booking-outbox-connector.json:/connectors/booking-outbox-connector.json:ro
+      - ./backend/ticket-inventory-service/infra/debezium/inventory-outbox-connector.json:/connectors/inventory-outbox-connector.json:ro
+      - ./backend/payment-service/infra/debezium/payment-outbox-connector.json:/connectors/payment-outbox-connector.json:ro
+      - ./backend/match-catalog-service/infra/debezium/catalog-outbox-connector.json:/connectors/catalog-outbox-connector.json:ro
+    entrypoint: ["/bin/sh", "/register-connectors.sh"]
 
   # ---- Elasticsearch (match catalog read model) ------------------------
   elasticsearch:
