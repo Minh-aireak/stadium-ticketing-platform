@@ -265,17 +265,19 @@ public class BookingOrchestrationService {
         }
     }
 
-    // Called by PaymentResultConsumer on PAYMENT_FAILED.
+    // Called by PaymentResultConsumer on PAYMENT_FAILED. showtimeId/seatCodes come from the
+    // found Booking, not the event, since PaymentFailedEvent (payment-service's domain, not
+    // booking's) carries neither.
     // No-ops if CONFIRMED/CANCELED (stale event — never release sold seats).
     // Not @Transactional: cancelBooking() commits first; releaseSeats() is best-effort (Redis TTL fallback).
-    public void cancelBookingOnPaymentFailure(String bookingId, String showtimeId, List<String> seatCodes, String reason) {
+    public void cancelBookingOnPaymentFailure(String bookingId, String reason) {
         Booking booking = sagaSteps.findOrThrow(bookingId);
         if (booking.getStatus() == BookingStatus.CONFIRMED || booking.getStatus() == BookingStatus.CANCELLED) {
             log.warn("Ignoring PAYMENT_FAILED for booking {}: status is already {}", bookingId, booking.getStatus());
             return;
         }
         sagaSteps.cancelBooking(bookingId, reason);
-        ticketInventoryPort.releaseSeats(showtimeId, bookingId, seatCodes);
+        ticketInventoryPort.releaseSeats(booking.getShowtimeId(), bookingId, booking.getSeatSelection().seatCodes());
         log.info("Booking cancelled due to payment failure: id={}", bookingId);
     }
 }

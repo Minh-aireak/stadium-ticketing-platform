@@ -13,7 +13,12 @@ import java.util.UUID;
  * <p>Fields:
  * <ul>
  *   <li>{@code eventId}    — unique ID for idempotency (consumers dedupe by this)</li>
- *   <li>{@code eventType}  — fully-qualified event class name for deserialization</li>
+ *   <li>{@code eventType}  — the Kafka topic this event routes to (e.g. "booking.booking.confirmed"),
+ *                            matching the {@code KafkaTopics} constant. Consumers route on this value —
+ *                            see {@code SendNotificationUseCase} and {@code PaymentResultConsumer}.
+ *                            Polymorphic {@code payload} deserialization is handled separately below
+ *                            via {@code @JsonTypeInfo}, so this field is free to be a stable, dotted
+ *                            routing key rather than a Java class name.</li>
  *   <li>{@code occurredAt} — when the event happened (domain time, not broker time)</li>
  *   <li>{@code traceId}    — correlation ID propagated from the originating HTTP request</li>
  *   <li>{@code payload}    — the actual domain event data</li>
@@ -51,11 +56,13 @@ public class EventEnvelope<T> {
 
     /**
      * Factory method — generates a new random eventId.
+     *
+     * @param eventType the Kafka topic this event routes to, e.g. {@code KafkaTopics.BOOKING_CONFIRMED}
      */
-    public static <T> EventEnvelope<T> of(T payload, String traceId) {
+    public static <T> EventEnvelope<T> of(String eventType, T payload, String traceId) {
         return new EventEnvelope<>(
                 UUID.randomUUID().toString(),
-                payload.getClass().getName(),
+                eventType,
                 Instant.now(),
                 traceId,
                 payload
@@ -64,11 +71,13 @@ public class EventEnvelope<T> {
 
     /**
      * Factory method with explicit eventId (for testing or replay).
+     *
+     * @param eventType the Kafka topic this event routes to, e.g. {@code KafkaTopics.BOOKING_CONFIRMED}
      */
-    public static <T> EventEnvelope<T> of(String eventId, T payload, String traceId) {
+    public static <T> EventEnvelope<T> of(String eventId, String eventType, T payload, String traceId) {
         return new EventEnvelope<>(
                 eventId,
-                payload.getClass().getName(),
+                eventType,
                 Instant.now(),
                 traceId,
                 payload

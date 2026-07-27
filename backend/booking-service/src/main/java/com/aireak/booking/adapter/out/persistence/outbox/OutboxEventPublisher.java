@@ -37,7 +37,7 @@ public class OutboxEventPublisher implements DomainEventPublisher {
         }
         String aggregateId = resolveAggregateId(domainEvent);
         String traceId = MDC.get(CorrelationIdFilter.MDC_KEY);
-        EventEnvelope<?> envelope = EventEnvelope.of(domainEvent, traceId);
+        EventEnvelope<?> envelope = EventEnvelope.of(topic, domainEvent, traceId);
 
         String payload = serialize(envelope);
         outboxEventJpaRepository.save(OutboxEventEntity.of(

@@ -3,12 +3,12 @@ package com.aireak.booking.adapter.in.messaging;
 import com.aireak.booking.application.service.BookingOrchestrationService;
 import com.aireak.common.event.EventEnvelope;
 import com.aireak.common.kafka.KafkaTopics;
+import com.aireak.payment.domain.event.PaymentFailedEvent;
+import com.aireak.payment.domain.event.PaymentSucceededEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
-
-import java.util.Map;
 
 // Inbound Kafka adapter: listens for payment result events to drive saga.
 @Slf4j
@@ -18,7 +18,6 @@ public class PaymentResultConsumer {
 
     private final BookingOrchestrationService bookingOrchestrationService;
 
-    @SuppressWarnings("unchecked")
     @KafkaListener(
             topics = {KafkaTopics.PAYMENT_SUCCEEDED, KafkaTopics.PAYMENT_FAILED},
             groupId = "booking-service-payment",
@@ -27,19 +26,11 @@ public class PaymentResultConsumer {
     public void consume(EventEnvelope<?> envelope) {
         log.debug("Received payment event: type={}, eventId={}", envelope.getEventType(), envelope.getEventId());
 
-        Map<String, Object> payload = (Map<String, Object>) envelope.getPayload();
-        String bookingId = (String) payload.get("bookingId");
-
-        switch (envelope.getEventType()) {
-            case KafkaTopics.PAYMENT_SUCCEEDED -> bookingOrchestrationService.confirmBooking(bookingId);
-            case KafkaTopics.PAYMENT_FAILED    -> {
-                String showtimeId = (String) payload.get("showtimeId");
-                @SuppressWarnings("unchecked")
-                var seatCodes = (java.util.List<String>) payload.get("seatCodes");
-                String reason = (String) payload.getOrDefault("reason", "Payment failed");
-                bookingOrchestrationService.cancelBookingOnPaymentFailure(bookingId, showtimeId, seatCodes, reason);
-            }
-            default -> log.warn("Unknown payment event type: {}", envelope.getEventType());
+        switch (envelope.getPayload()) {
+            case PaymentSucceededEvent e -> bookingOrchestrationService.confirmBooking(e.bookingId());
+            case PaymentFailedEvent e -> bookingOrchestrationService.cancelBookingOnPaymentFailure(
+                    e.bookingId(), e.reason());
+            default -> log.warn("Unknown payment event payload for eventType={}", envelope.getEventType());
         }
     }
 }
