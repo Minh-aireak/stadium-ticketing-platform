@@ -91,9 +91,12 @@ services:
       retries: 5
 
   # ---- PostgreSQL — payment-service ------------------------------------
+  # wal_level=logical is required for Debezium's CDC connector to read the
+  # outbox_events table via logical replication (see infra/debezium/).
   postgres-payment:
     image: postgres:16-alpine
     container_name: postgres-payment
+    command: ["postgres", "-c", "wal_level=logical"]
     networks: [stadium-net]
     environment:
       POSTGRES_DB: payment_db
@@ -110,9 +113,12 @@ services:
       retries: 5
 
   # ---- PostgreSQL — match-catalog-service ------------------------------
+  # wal_level=logical is required for Debezium's CDC connector to read the
+  # outbox_events table via logical replication (see infra/debezium/).
   postgres-catalog:
     image: postgres:16-alpine
     container_name: postgres-catalog
+    command: ["postgres", "-c", "wal_level=logical"]
     networks: [stadium-net]
     environment:
       POSTGRES_DB: catalog_db

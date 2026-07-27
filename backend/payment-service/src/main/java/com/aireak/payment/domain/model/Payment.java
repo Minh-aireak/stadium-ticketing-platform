@@ -31,16 +31,23 @@ public class Payment {
     private String gatewayTransactionId; // set on success
     private String failureReason;        // set on failure
     private final Instant createdAt;
+    // null only until first persist (initiate()) — Spring Data's isNew() check needs that,
+    // so reconstitute() must carry the real value through unchanged after that point. Without
+    // this, PaymentPersistenceAdapter would build a fresh JPA entity with version=null on every
+    // save, and Spring Data JPA treats any entity with a null @Version as new — markSucceeded()/
+    // markFailed() would then try to INSERT a row whose id already exists instead of updating it.
+    private final Long version;
     private final List<Object> domainEvents = new ArrayList<>();
 
     private Payment(String paymentId, String bookingId, BigDecimal amount,
-                    String currency, PaymentStatus status, Instant createdAt) {
+                    String currency, PaymentStatus status, Instant createdAt, Long version) {
         this.paymentId = paymentId;
         this.bookingId = bookingId;
         this.amount = amount;
         this.currency = currency;
         this.status = status;
         this.createdAt = createdAt;
+        this.version = version;
     }
 
     // ----------------------------------------------------------------
@@ -50,7 +57,7 @@ public class Payment {
     public static Payment initiate(String bookingId, BigDecimal amount, String currency) {
         String paymentId = UUID.randomUUID().toString();
         Payment payment = new Payment(paymentId, bookingId, amount, currency,
-                PaymentStatus.INITIATED, Instant.now());
+                PaymentStatus.INITIATED, Instant.now(), null);
         payment.domainEvents.add(new PaymentInitiatedEvent(paymentId, bookingId, amount, currency));
         return payment;
     }
@@ -58,8 +65,8 @@ public class Payment {
     public static Payment reconstitute(String paymentId, String bookingId, BigDecimal amount,
                                         String currency, PaymentStatus status,
                                         String gatewayTransactionId, String failureReason,
-                                        Instant createdAt) {
-        Payment p = new Payment(paymentId, bookingId, amount, currency, status, createdAt);
+                                        Instant createdAt, Long version) {
+        Payment p = new Payment(paymentId, bookingId, amount, currency, status, createdAt, version);
         p.gatewayTransactionId = gatewayTransactionId;
         p.failureReason = failureReason;
         return p;
@@ -95,6 +102,7 @@ public class Payment {
     public String getGatewayTransactionId()   { return gatewayTransactionId; }
     public String getFailureReason()          { return failureReason; }
     public Instant getCreatedAt()             { return createdAt; }
+    public Long getVersion()                  { return version; }
 
     public List<Object> pullDomainEvents() {
         List<Object> events = Collections.unmodifiableList(new ArrayList<>(domainEvents));
