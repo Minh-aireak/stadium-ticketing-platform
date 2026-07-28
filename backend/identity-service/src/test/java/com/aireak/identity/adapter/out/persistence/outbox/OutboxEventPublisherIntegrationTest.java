@@ -4,9 +4,12 @@ import com.aireak.identity.adapter.out.persistence.AccountPersistenceAdapter;
 import com.aireak.identity.application.port.in.command.RegisterAccountCommand;
 import com.aireak.identity.application.port.out.PasswordHashPort;
 import com.aireak.identity.application.service.RegisterAccountService;
+import com.aireak.identity.config.JpaConfig;
 import com.aireak.identity.domain.model.HashedPassword;
 import com.aireak.identity.domain.model.RawPassword;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -30,11 +33,19 @@ import static org.assertj.core.api.Assertions.assertThat;
  * (via Testcontainers) with Flyway migrations applied — Debezium/Kafka are
  * out of scope here (see identity-service/infra/debezium/README.md for the
  * manual end-to-end CDC check).
+ *
+ * <p>{@code @DataJpaTest}'s slice only imports {@code DataJpaRepositoriesAutoConfiguration} and
+ * {@code HibernateJpaAutoConfiguration} — Flyway is NOT part of it, so migrations are run
+ * explicitly in {@link #migrateSchema()} before the Spring context (and Hibernate's
+ * {@code ddl-auto: validate}) starts; otherwise schema validation fails with
+ * "missing table [accounts]" against the empty Testcontainers Postgres.
  */
 @DataJpaTest
 @Testcontainers
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Import({
+        JpaConfig.class, // @EnableJpaAuditing — without it, BaseAuditEntity's updatedAt is
+                          // never populated and every insert fails a NOT NULL constraint.
         AccountPersistenceAdapter.class,
         OutboxEventPublisher.class,
         RegisterAccountService.class,
@@ -53,6 +64,14 @@ class OutboxEventPublisherIntegrationTest {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
+    }
+
+    @BeforeAll
+    static void migrateSchema() {
+        Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .load()
+                .migrate();
     }
 
     @Autowired
