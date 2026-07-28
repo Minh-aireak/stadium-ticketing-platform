@@ -1,6 +1,8 @@
 package com.aireak.booking.adapter.in.web;
 
-import com.aireak.booking.application.service.BookingOrchestrationService;
+import com.aireak.booking.application.port.in.CreateBookingUseCase;
+import com.aireak.booking.application.port.in.GetBookingUseCase;
+import com.aireak.booking.application.port.in.dto.BookingCreationResult;
 import com.aireak.booking.application.service.DuplicateRequestInProgressException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -22,13 +24,14 @@ import java.util.List;
 @RequiredArgsConstructor
 public class BookingController {
 
-    private final BookingOrchestrationService bookingOrchestrationService;
+    private final CreateBookingUseCase createBookingUseCase;
+    private final GetBookingUseCase getBookingUseCase;
 
     @PostMapping
     public ResponseEntity<CreateBookingResponse> createBooking(
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody CreateBookingRequest request) {
-        BookingOrchestrationService.BookingCreationResult result = bookingOrchestrationService.createBooking(
+        BookingCreationResult result = createBookingUseCase.createBooking(
                 idempotencyKey,
                 request.customerId(),
                 request.showtimeId(),
@@ -45,8 +48,8 @@ public class BookingController {
     }
 
     @GetMapping("/{bookingId}")
-    public ResponseEntity<BookingStatusResponse> getBooking(@PathVariable String bookingId) {
-        return bookingOrchestrationService.getBooking(bookingId)
+    public ResponseEntity<BookingStatusResponse> getBooking(@PathVariable("bookingId") String bookingId) {
+        return getBookingUseCase.getBooking(bookingId)
                 .map(b -> ResponseEntity.ok(new BookingStatusResponse(b.getBookingId(), b.getStatus().name())))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }

@@ -1,5 +1,8 @@
 package com.aireak.booking.application.service;
 
+import com.aireak.booking.application.port.in.CreateBookingUseCase;
+import com.aireak.booking.application.port.in.GetBookingUseCase;
+import com.aireak.booking.application.port.in.dto.BookingCreationResult;
 import com.aireak.booking.application.port.out.BookingRepository;
 import com.aireak.booking.application.port.out.IdempotencyClaim;
 import com.aireak.booking.application.port.out.IdempotencyStore;
@@ -21,7 +24,7 @@ import java.util.Optional;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class BookingOrchestrationService {
+public class BookingOrchestrationService implements CreateBookingUseCase, GetBookingUseCase {
 
     private final BookingSagaSteps sagaSteps;
     private final BookingRepository bookingRepository;
@@ -29,6 +32,7 @@ public class BookingOrchestrationService {
     private final PaymentPort paymentPort;
     private final IdempotencyStore idempotencyStore;
 
+    @Override
     public BookingCreationResult createBooking(String idempotencyKey, String customerId, String showtimeId,
                                 List<String> seatCodes, BigDecimal amount, String currency) {
         if (idempotencyKey != null) {
@@ -182,9 +186,6 @@ public class BookingOrchestrationService {
         return new BookingCreationResult(bookingId, status);
     }
 
-    // Result of {@link #createBooking}: the client must read {@code status}, not just presence of a bookingId, to know whether the booking is finalized. */
-    public record BookingCreationResult(String bookingId, BookingStatus status) {}
-
     // Outcome of {@link #createDraftBooking}: distinguishes a booking this request just created
     // from one it merely discovered after losing a unique-key race, so the caller knows whether
     // to keep driving the saga (Created) or stop and defer to the other request (WonByConcurrentRequest).
@@ -222,6 +223,7 @@ public class BookingOrchestrationService {
 
     // For GET /api/v1/bookings/{bookingId}: lets clients poll for the terminal status of a
     // booking that was returned as PENDING_PAYMENT (including the ambiguous-payment case).
+    @Override
     public Optional<Booking> getBooking(String bookingId) {
         return bookingRepository.findById(bookingId);
     }
