@@ -1,6 +1,7 @@
 package com.aireak.catalog.domain.model;
 
 import com.aireak.catalog.domain.event.MatchPublishedEvent;
+import com.aireak.catalog.domain.event.ShowtimeAddedEvent;
 import com.aireak.catalog.domain.exception.InvalidMatchStatusException;
 
 import java.time.Instant;
@@ -61,6 +62,8 @@ public class Match {
             throw new InvalidMatchStatusException("Cannot add showtime to match in status: " + status);
         }
         showtimes.add(showtime);
+        domainEvents.add(new ShowtimeAddedEvent(matchId, showtime.getShowtimeId(), showtime.getTotalSeats(),
+                showtime.getBasePrice(), showtime.getCurrency()));
     }
 
     /**

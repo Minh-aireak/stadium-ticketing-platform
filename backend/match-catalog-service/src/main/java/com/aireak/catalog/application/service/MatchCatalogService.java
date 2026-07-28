@@ -16,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -48,10 +49,12 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
 
     @Override
     @Transactional
-    public void addShowtime(String matchId, Instant startTime, String venueId, int totalSeats) {
+    public void addShowtime(String matchId, Instant startTime, String venueId, int totalSeats,
+                             BigDecimal basePrice, String currency) {
         Match match = findOrThrow(matchId);
-        match.addShowtime(new Showtime(startTime, venueId, totalSeats));
+        match.addShowtime(new Showtime(startTime, venueId, totalSeats, basePrice, currency));
         matchRepository.save(match);
+        eventPublisher.publishAll(match.pullDomainEvents());
     }
 
     @Override

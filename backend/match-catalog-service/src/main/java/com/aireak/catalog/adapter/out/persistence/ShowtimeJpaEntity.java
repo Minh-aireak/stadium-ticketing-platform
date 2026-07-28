@@ -3,6 +3,7 @@ package com.aireak.catalog.adapter.out.persistence;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 
 @Getter
@@ -33,4 +34,10 @@ public class ShowtimeJpaEntity {
 
     @Column(name = "available_seats", nullable = false)
     private int availableSeats;
+
+    @Column(name = "base_price", nullable = false, precision = 15, scale = 2)
+    private BigDecimal basePrice;
+
+    @Column(name = "currency", nullable = false, length = 3)
+    private String currency;
 }

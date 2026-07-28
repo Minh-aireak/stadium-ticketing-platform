@@ -21,6 +21,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
@@ -78,10 +79,28 @@ class OutboxEventPublisherIntegrationTest {
     private OutboxEventJpaRepository outboxEventJpaRepository;
 
     @Test
+    void addingShowtimeWritesOutboxRowInSameTransaction() {
+        String matchId = matchCatalogService.createMatch("Home FC", "Away FC", "Premier League");
+
+        matchCatalogService.addShowtime(matchId, Instant.now().plusSeconds(3600), "venue-1", 100,
+                new BigDecimal("150000"), "VND");
+
+        List<OutboxEventEntity> rows = outboxEventJpaRepository.findAll();
+
+        assertThat(rows).hasSize(1);
+        OutboxEventEntity row = rows.get(0);
+        assertThat(row.getAggregateType()).isEqualTo("catalog.showtime.created");
+        assertThat(row.getEventType()).isEqualTo("ShowtimeAddedEvent");
+        assertThat(row.getPayload()).contains("ShowtimeAddedEvent", matchId, "150000", "VND");
+    }
+
+    @Test
     void publishingMatchWritesOutboxRowInSameTransaction() {
         String matchId = matchCatalogService.createMatch("Home FC", "Away FC", "Premier League");
         // Match.publish() requires at least one showtime (see Match#publish invariant).
-        matchCatalogService.addShowtime(matchId, Instant.now().plusSeconds(3600), "venue-1", 100);
+        matchCatalogService.addShowtime(matchId, Instant.now().plusSeconds(3600), "venue-1", 100,
+                new BigDecimal("150000"), "VND");
+        outboxEventJpaRepository.deleteAll(); // drop the addShowtime row so only publish()'s row is asserted below
 
         matchCatalogService.publishMatch(matchId);
 

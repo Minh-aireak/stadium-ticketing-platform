@@ -1,9 +1,11 @@
 package com.aireak.catalog.domain.model;
 
 import com.aireak.catalog.domain.event.MatchPublishedEvent;
+import com.aireak.catalog.domain.event.ShowtimeAddedEvent;
 import com.aireak.catalog.domain.exception.InvalidMatchStatusException;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
@@ -12,9 +14,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class MatchTest {
 
+    private static final BigDecimal BASE_PRICE = new BigDecimal("150000");
+
     private Match matchWithShowtime() {
         Match match = Match.create("Home FC", "Away FC", "Premier League");
-        match.addShowtime(new Showtime(Instant.now().plusSeconds(3600), "venue-1", 100));
+        match.addShowtime(new Showtime(Instant.now().plusSeconds(3600), "venue-1", 100, BASE_PRICE, "VND"));
+        // Drain the ShowtimeAddedEvent this raises so tests using this helper to reach a
+        // "has one showtime" fixture can assert on their own event (e.g. MatchPublishedEvent)
+        // in isolation, without also having to account for this setup step's event.
+        match.pullDomainEvents();
         return match;
     }
 
@@ -32,9 +40,27 @@ class MatchTest {
     void addShowtimeAppendsToListWhenDraft() {
         Match match = Match.create("Home FC", "Away FC", "Premier League");
 
-        match.addShowtime(new Showtime(Instant.now().plusSeconds(3600), "venue-1", 100));
+        match.addShowtime(new Showtime(Instant.now().plusSeconds(3600), "venue-1", 100, BASE_PRICE, "VND"));
 
         assertThat(match.getShowtimes()).hasSize(1);
+    }
+
+    @Test
+    void addShowtimeRaisesShowtimeAddedEvent() {
+        Match match = Match.create("Home FC", "Away FC", "Premier League");
+        Showtime showtime = new Showtime(Instant.now().plusSeconds(3600), "venue-1", 100, BASE_PRICE, "VND");
+
+        match.addShowtime(showtime);
+
+        List<Object> events = match.pullDomainEvents();
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0)).isInstanceOf(ShowtimeAddedEvent.class);
+        ShowtimeAddedEvent event = (ShowtimeAddedEvent) events.get(0);
+        assertThat(event.matchId()).isEqualTo(match.getMatchId());
+        assertThat(event.showtimeId()).isEqualTo(showtime.getShowtimeId());
+        assertThat(event.totalSeats()).isEqualTo(100);
+        assertThat(event.basePrice()).isEqualByComparingTo(BASE_PRICE);
+        assertThat(event.currency()).isEqualTo("VND");
     }
 
     @Test
@@ -42,7 +68,7 @@ class MatchTest {
         Match match = matchWithShowtime();
         match.publish();
 
-        assertThatThrownBy(() -> match.addShowtime(new Showtime(Instant.now(), "venue-2", 50)))
+        assertThatThrownBy(() -> match.addShowtime(new Showtime(Instant.now(), "venue-2", 50, BASE_PRICE, "VND")))
                 .isInstanceOf(InvalidMatchStatusException.class);
     }
 
@@ -135,7 +161,7 @@ class MatchTest {
     @Test
     void reconstitutePreservesStateAndRaisesNoEvents() {
         Instant createdAt = Instant.parse("2024-01-01T00:00:00Z");
-        Showtime showtime = new Showtime("showtime-1", Instant.now(), "venue-1", 100, 80);
+        Showtime showtime = new Showtime("showtime-1", Instant.now(), "venue-1", 100, 80, BASE_PRICE, "VND");
 
         Match match = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
                 MatchStatus.PUBLISHED, createdAt, List.of(showtime));

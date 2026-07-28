@@ -55,6 +55,8 @@ public class MatchPersistenceAdapter implements MatchRepository {
                         .venueId(s.getVenueId())
                         .totalSeats(s.getTotalSeats())
                         .availableSeats(s.getAvailableSeats())
+                        .basePrice(s.getBasePrice())
+                        .currency(s.getCurrency())
                         .build())
                 .collect(Collectors.toList());
 
@@ -79,7 +81,8 @@ public class MatchPersistenceAdapter implements MatchRepository {
         List<Showtime> showtimes = e.getShowtimes().stream()
                 .map(s -> new Showtime(
                         s.getShowtimeId(), s.getStartTime(),
-                        s.getVenueId(), s.getTotalSeats(), s.getAvailableSeats()))
+                        s.getVenueId(), s.getTotalSeats(), s.getAvailableSeats(),
+                        s.getBasePrice(), s.getCurrency()))
                 .toList();
         return Match.reconstitute(
                 e.getMatchId(), e.getHomeTeam(), e.getAwayTeam(),

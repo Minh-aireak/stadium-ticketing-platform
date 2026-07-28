@@ -5,6 +5,7 @@ import com.aireak.catalog.application.port.out.DomainEventPublisher;
 import com.aireak.catalog.application.port.out.MatchRepository;
 import com.aireak.catalog.application.port.out.MatchSearchPort;
 import com.aireak.catalog.domain.event.MatchPublishedEvent;
+import com.aireak.catalog.domain.event.ShowtimeAddedEvent;
 import com.aireak.catalog.domain.exception.InvalidMatchStatusException;
 import com.aireak.catalog.domain.model.Match;
 import com.aireak.catalog.domain.model.MatchStatus;
@@ -16,6 +17,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -46,10 +48,13 @@ class MatchCatalogServiceTest {
         service = new MatchCatalogService(matchRepository, matchSearchPort, eventPublisher);
     }
 
+    private static final BigDecimal BASE_PRICE = new BigDecimal("150000");
+
     private Match matchWithShowtime(String matchId) {
         Match match = Match.reconstitute(matchId, "Home FC", "Away FC", "Premier League",
                 MatchStatus.DRAFT, Instant.now(),
-                List.of(new Showtime("showtime-1", Instant.now().plusSeconds(3600), "venue-1", 100, 100)));
+                List.of(new Showtime("showtime-1", Instant.now().plusSeconds(3600), "venue-1", 100, 100,
+                        BASE_PRICE, "VND")));
         return match;
     }
 
@@ -65,25 +70,30 @@ class MatchCatalogServiceTest {
     }
 
     @Test
-    void addShowtimeLoadsMutatesAndSaves() {
+    void addShowtimeLoadsMutatesSavesAndPublishesEvent() {
         Match existing = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
                 MatchStatus.DRAFT, Instant.now(), List.of());
         when(matchRepository.findById("match-1")).thenReturn(Optional.of(existing));
         Instant startTime = Instant.now().plusSeconds(7200);
 
-        service.addShowtime("match-1", startTime, "venue-1", 50);
+        service.addShowtime("match-1", startTime, "venue-1", 50, BASE_PRICE, "VND");
 
         ArgumentCaptor<Match> saved = ArgumentCaptor.forClass(Match.class);
         verify(matchRepository).save(saved.capture());
         assertThat(saved.getValue().getShowtimes()).hasSize(1);
         assertThat(saved.getValue().getShowtimes().get(0).getTotalSeats()).isEqualTo(50);
+
+        ArgumentCaptor<List<Object>> published = ArgumentCaptor.forClass(List.class);
+        verify(eventPublisher).publishAll(published.capture());
+        assertThat(published.getValue()).hasSize(1);
+        assertThat(published.getValue().get(0)).isInstanceOf(ShowtimeAddedEvent.class);
     }
 
     @Test
     void addShowtimeThrowsWhenMatchNotFound() {
         when(matchRepository.findById("missing")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.addShowtime("missing", Instant.now(), "venue-1", 50))
+        assertThatThrownBy(() -> service.addShowtime("missing", Instant.now(), "venue-1", 50, BASE_PRICE, "VND"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

@@ -7,14 +7,17 @@ import com.aireak.catalog.application.port.in.ListMatchesUseCase;
 import com.aireak.catalog.application.port.in.PublishMatchUseCase;
 import com.aireak.catalog.domain.model.Match;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
@@ -45,7 +48,8 @@ public class MatchController {
     @PostMapping("/{matchId}/showtimes")
     public ResponseEntity<Void> addShowtime(@PathVariable String matchId,
                                             @Valid @RequestBody AddShowtimeRequest req) {
-        addShowtimeUseCase.addShowtime(matchId, req.startTime(), req.venueId(), req.totalSeats());
+        addShowtimeUseCase.addShowtime(matchId, req.startTime(), req.venueId(), req.totalSeats(),
+                req.basePrice(), req.currency());
         return ResponseEntity.ok().build();
     }
 
@@ -90,7 +94,7 @@ public class MatchController {
     private MatchResponse toResponse(Match match) {
         List<ShowtimeResponse> showtimes = match.getShowtimes().stream()
                 .map(s -> new ShowtimeResponse(s.getShowtimeId(), s.getStartTime(), s.getVenueId(),
-                        s.getTotalSeats(), s.getAvailableSeats()))
+                        s.getTotalSeats(), s.getAvailableSeats(), s.getBasePrice(), s.getCurrency()))
                 .toList();
         return new MatchResponse(match.getMatchId(), match.getHomeTeam(), match.getAwayTeam(),
                 match.getCompetition(), match.getStatus().name(), match.getCreatedAt(), showtimes);
@@ -99,10 +103,12 @@ public class MatchController {
     record CreateMatchRequest(@NotBlank String homeTeam, @NotBlank String awayTeam,
                               @NotBlank String competition) {}
     record CreateMatchResponse(String matchId) {}
-    record AddShowtimeRequest(@NotNull Instant startTime, @NotBlank String venueId, @Positive int totalSeats) {}
+    record AddShowtimeRequest(@NotNull Instant startTime, @NotBlank String venueId, @Positive int totalSeats,
+                              @NotNull @DecimalMin(value = "0.0", inclusive = false) BigDecimal basePrice,
+                              @NotBlank @Pattern(regexp = "^[A-Z]{3}$") String currency) {}
 
     record ShowtimeResponse(String showtimeId, Instant startTime, String venueId,
-                            int totalSeats, int availableSeats) {}
+                            int totalSeats, int availableSeats, BigDecimal basePrice, String currency) {}
     record MatchResponse(String matchId, String homeTeam, String awayTeam, String competition,
                         String status, Instant createdAt, List<ShowtimeResponse> showtimes) {}
     record MatchListResponse(List<MatchResponse> items, long totalElements, int page, int size) {}
