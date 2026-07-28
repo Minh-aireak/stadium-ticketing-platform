@@ -3,7 +3,7 @@ spring:
     name: match-catalog-service
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/catalog_db
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5436}/catalog_db
     username: ${DB_USERNAME:aireak}
     password: ${DB_PASSWORD:aireak}
     driver-class-name: org.postgresql.Driver
