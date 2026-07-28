@@ -51,6 +51,17 @@ jwt:
   excluded-paths:
     - /actuator/**
 
+stripe:
+  # No default — must be injected via env var (STRIPE_SECRET_KEY), same rationale as jwt.secret.
+  secret-key: ${STRIPE_SECRET_KEY}
+  # Fixed Stripe test PaymentMethod: frontend doesn't collect real card details yet, so every
+  # charge in this environment uses this stand-in token (only valid against a test-mode secret key).
+  test-payment-method: ${STRIPE_TEST_PAYMENT_METHOD:pm_card_visa}
+  # SDK defaults (30s/80s) are too long to hold a Tomcat thread + Bulkhead permit on a bad
+  # network — shortened so a stalled call fails fast into Retry/CircuitBreaker.
+  connect-timeout-ms: ${STRIPE_CONNECT_TIMEOUT_MS:5000}
+  read-timeout-ms: ${STRIPE_READ_TIMEOUT_MS:10000}
+
 outbox:
   cleanup:
     # Debezium reads outbox_events via WAL, not the table itself — rows older than this are
@@ -66,10 +77,13 @@ resilience4j:
         failureRateThreshold: 50
         waitDurationInOpenState: 30s
         permittedNumberOfCallsInHalfOpenState: 2
-        # A Bulkhead rejection reflects OUR OWN concurrency cap, not the gateway's health — must
-        # not count toward tripping this circuit open.
         ignoreExceptions:
+          # A Bulkhead rejection reflects OUR OWN concurrency cap, not the gateway's health — must
+          # not count toward tripping this circuit open.
           - io.github.resilience4j.bulkhead.BulkheadFullException
+          # A card decline is a business outcome, not a gateway fault — many declines in a row
+          # (e.g. a fraud wave) must not trip the breaker and block unrelated bookings.
+          - com.aireak.payment.adapter.out.gateway.PaymentDeclinedException
   bulkhead:
     instances:
       # Caps concurrent in-flight gateway calls so a slow gateway can't consume every Tomcat
@@ -83,10 +97,9 @@ resilience4j:
         maxAttempts: 2
         waitDuration: 1s
         ignoreExceptions:
-          # 4xx: caller error, retrying won't help.
-          - org.springframework.web.client.HttpClientErrorException
-          # 503: gateway is explicitly shedding load — retrying just adds to the pile-on.
-          - org.springframework.web.client.HttpServerErrorException$ServiceUnavailable
+          # Card declined / bad request: a business outcome, not a transient gateway fault —
+          # retrying would just replay the identical Stripe-cached decline for this Idempotency-Key.
+          - com.aireak.payment.adapter.out.gateway.PaymentDeclinedException
           # Bulkhead already full locally — an immediate retry has zero chance of a free slot.
           - io.github.resilience4j.bulkhead.BulkheadFullException
 
