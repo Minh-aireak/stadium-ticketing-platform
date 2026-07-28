@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Navigate, useNavigate, useParams } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -12,14 +12,18 @@ import type { CheckoutState } from './CheckoutPage'
 
 const MAX_SEATS = 8
 
+// Seat inventory/pricing hasn't been designed on the backend yet (ticket-inventory-service
+// has no seat-map read endpoint or price/tier concept) — this screen stays on mock data
+// until that's tackled. `matchLabel` from MatchDetailPage's real match is used when present
+// so the header at least shows the real teams; seat prices remain a mock placeholder.
 export function SeatSelectionPage() {
   const { matchId } = useParams<{ matchId: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
+  const passedLabel = (location.state as { matchLabel?: string } | null)?.matchLabel
   const match = matchId ? getMockMatchById(matchId) : undefined
   const [selected, setSelected] = useState<string[]>([])
 
-  // TODO: showtimeId should come from match-catalog-service once it exposes a
-  // GET /matches/{id}/showtimes read endpoint — there's currently only a write side.
   const showtimeId = `${matchId}-showtime-1`
   const seats = useMemo(
     () => (match ? generateMockSeatMap(showtimeId, match.fromPrice) : []),
@@ -30,7 +34,7 @@ export function SeatSelectionPage() {
     return <Navigate to="/" replace />
   }
 
-  const matchLabel = `${match.homeTeam} vs ${match.awayTeam}`
+  const matchLabel = passedLabel ?? `${match.homeTeam} vs ${match.awayTeam}`
   const selectedSeats = seats.filter((s) => selected.includes(s.code))
   const total = selectedSeats.reduce((sum, s) => sum + s.price, 0)
 
@@ -65,7 +69,7 @@ export function SeatSelectionPage() {
         <div className="text-center">
           <h1 className="text-2xl font-bold sm:text-3xl">Chọn ghế</h1>
           <p className="text-muted">
-            {match.homeTeam} vs {match.awayTeam} — tối đa {MAX_SEATS} ghế mỗi lượt đặt
+            {matchLabel} — tối đa {MAX_SEATS} ghế mỗi lượt đặt
           </p>
         </div>
 

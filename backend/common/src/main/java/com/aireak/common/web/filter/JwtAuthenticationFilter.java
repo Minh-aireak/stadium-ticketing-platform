@@ -52,6 +52,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final Logger log = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
     private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();
     private static final String TYPE_BASE = "https://aireak.com/errors/";
+    private static final java.util.Set<String> HTTP_METHODS = java.util.Set.of(
+            "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS");
 
     private final SecretKey secretKey;
     private final JwtAuthProperties properties;
@@ -68,7 +70,24 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(@NonNull HttpServletRequest request) {
         String path = request.getRequestURI();
-        return properties.excludedPaths().stream().anyMatch(pattern -> PATH_MATCHER.match(pattern, path));
+        String method = request.getMethod();
+        return properties.excludedPaths().stream().anyMatch(pattern -> matches(pattern, method, path));
+    }
+
+    /**
+     * A pattern of the form {@code "GET:/api/v1/matches"} excludes only that HTTP method;
+     * a bare path pattern (e.g. {@code "/actuator/**"}) excludes all methods, as before.
+     * Needed when a public read (GET) and an authenticated write (POST) share the exact
+     * same path — {@code excludedPaths} alone can't tell those apart without a method.
+     */
+    private boolean matches(String pattern, String method, String path) {
+        int colon = pattern.indexOf(':');
+        if (colon > 0 && HTTP_METHODS.contains(pattern.substring(0, colon).toUpperCase(java.util.Locale.ROOT))) {
+            String patternMethod = pattern.substring(0, colon);
+            String patternPath = pattern.substring(colon + 1);
+            return patternMethod.equalsIgnoreCase(method) && PATH_MATCHER.match(patternPath, path);
+        }
+        return PATH_MATCHER.match(pattern, path);
     }
 
     @Override

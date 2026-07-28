@@ -6,18 +6,15 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { useCountdown } from '@/hooks/useCountdown'
-import { formatCurrency, formatKickoff } from '@/lib/format'
+import { formatKickoff } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { catalogStatus, nearestShowtime, teamInitials, ticketsRemaining, type CatalogStatus } from './matchView'
 import type { Match } from './types'
 
-const statusMeta: Record<
-  Match['status'],
-  { label: string; variant: 'accent' | 'warning' | 'danger' | 'outline' }
-> = {
+const statusMeta: Record<CatalogStatus, { label: string; variant: 'accent' | 'warning' | 'danger' }> = {
   on_sale: { label: 'Đang mở bán', variant: 'accent' },
   few_left: { label: 'Sắp hết vé', variant: 'warning' },
   sold_out: { label: 'Hết vé', variant: 'danger' },
-  upcoming: { label: 'Sắp mở bán', variant: 'outline' },
 }
 
 function TeamBadge({ initials }: { initials: string }) {
@@ -29,9 +26,10 @@ function TeamBadge({ initials }: { initials: string }) {
 }
 
 export function MatchCard({ match }: { match: Match }) {
-  const countdown = useCountdown(match.kickoffAt)
-  const status = statusMeta[match.status]
-  const soldOut = match.status === 'sold_out'
+  const showtime = nearestShowtime(match)
+  const status = statusMeta[catalogStatus(match)]
+  const soldOut = catalogStatus(match) === 'sold_out'
+  const countdown = useCountdown(showtime?.startTime ?? match.createdAt)
   const showCountdown = !soldOut && !countdown.isPast && countdown.days < 3
 
   return (
@@ -56,26 +54,28 @@ export function MatchCard({ match }: { match: Match }) {
         <CardContent className="flex flex-1 flex-col gap-5 pt-0">
           <div className="flex items-center justify-between gap-3">
             <div className="flex flex-1 flex-col items-center gap-2 text-center">
-              <TeamBadge initials={match.homeTeamInitials} />
+              <TeamBadge initials={teamInitials(match.homeTeam)} />
               <span className="text-sm font-medium">{match.homeTeam}</span>
             </div>
             <span className="text-xs font-semibold text-muted">VS</span>
             <div className="flex flex-1 flex-col items-center gap-2 text-center">
-              <TeamBadge initials={match.awayTeamInitials} />
+              <TeamBadge initials={teamInitials(match.awayTeam)} />
               <span className="text-sm font-medium">{match.awayTeam}</span>
             </div>
           </div>
 
-          <div className="flex flex-col gap-1.5 text-sm text-muted">
-            <div className="flex items-center gap-2">
-              <Clock className="size-4 text-accent" />
-              <span>{formatKickoff(match.kickoffAt)}</span>
+          {showtime && (
+            <div className="flex flex-col gap-1.5 text-sm text-muted">
+              <div className="flex items-center gap-2">
+                <Clock className="size-4 text-accent" />
+                <span>{formatKickoff(showtime.startTime)}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <MapPin className="size-4 text-accent" />
+                <span>{showtime.venueId}</span>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <MapPin className="size-4 text-accent" />
-              <span>{match.stadium}</span>
-            </div>
-          </div>
+          )}
 
           {showCountdown && (
             <div className="flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-3 py-2 font-mono text-sm animate-pulse-glow">
@@ -90,11 +90,10 @@ export function MatchCard({ match }: { match: Match }) {
         </CardContent>
 
         <CardFooter className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-xs text-muted">Từ</div>
-            <div className="text-lg font-bold">
-              {formatCurrency(match.fromPrice)}
-            </div>
+          <div className="text-sm text-muted">
+            {ticketsRemaining(match) > 0
+              ? `Còn ${ticketsRemaining(match).toLocaleString('vi-VN')} vé`
+              : 'Đã hết vé'}
           </div>
           {soldOut ? (
             <Button variant="outline" disabled>
@@ -102,7 +101,7 @@ export function MatchCard({ match }: { match: Match }) {
             </Button>
           ) : (
             <Button asChild variant="gradient">
-              <Link to={`/matches/${match.id}`}>Chọn vé</Link>
+              <Link to={`/matches/${match.matchId}`}>Chọn vé</Link>
             </Button>
           )}
         </CardFooter>

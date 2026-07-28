@@ -1,16 +1,28 @@
-// Shape returned by match-catalog-service via api-gateway (GET /api/matches).
+// Shape returned by match-catalog-service via api-gateway (GET /api/v1/matches, GET /api/v1/matches/{id}).
+// No price/tier data exists in the backend yet — do not fabricate fromPrice/currency here.
+export type MatchStatus = 'DRAFT' | 'PUBLISHED' | 'COMPLETED' | 'CANCELLED'
+
+export interface Showtime {
+  showtimeId: string
+  startTime: string // ISO timestamp
+  venueId: string
+  totalSeats: number
+  availableSeats: number
+}
+
 export interface Match {
-  id: string
+  matchId: string
   homeTeam: string
   awayTeam: string
-  // TODO: replace with real crest image URL once match-catalog-service exposes one.
-  homeTeamInitials: string
-  awayTeamInitials: string
   competition: string
-  stadium: string
-  kickoffAt: string // ISO timestamp
-  fromPrice: number
-  currency: 'VND'
-  ticketsRemaining: number
-  status: 'on_sale' | 'few_left' | 'sold_out' | 'upcoming'
+  status: MatchStatus
+  createdAt: string // ISO timestamp
+  showtimes: Showtime[]
+}
+
+export interface MatchListResponse {
+  items: Match[]
+  totalElements: number
+  page: number
+  size: number
 }

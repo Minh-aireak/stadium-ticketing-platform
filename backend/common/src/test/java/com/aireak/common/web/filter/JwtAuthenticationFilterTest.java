@@ -206,6 +206,36 @@ class JwtAuthenticationFilterTest {
         assertThat(response.getStatus()).isNotEqualTo(401);
     }
 
+    @Test
+    void methodScopedExclusionSkipsValidationOnlyForThatMethod() throws Exception {
+        JwtAuthProperties scoped = new JwtAuthProperties(
+                SECRET, ISSUER, AUDIENCE, List.of("GET:/api/v1/matches"));
+        JwtAuthenticationFilter scopedFilter = new JwtAuthenticationFilter(scoped);
+
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/matches");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        boolean[] chainInvoked = {false};
+
+        scopedFilter.doFilter(request, response, (req, res) -> chainInvoked[0] = true);
+
+        assertThat(chainInvoked[0]).isTrue();
+        assertThat(response.getStatus()).isNotEqualTo(401);
+    }
+
+    @Test
+    void methodScopedExclusionStillProtectsOtherMethodsOnTheSamePath() throws Exception {
+        JwtAuthProperties scoped = new JwtAuthProperties(
+                SECRET, ISSUER, AUDIENCE, List.of("GET:/api/v1/matches"));
+        JwtAuthenticationFilter scopedFilter = new JwtAuthenticationFilter(scoped);
+
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/matches");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        scopedFilter.doFilter(request, response, neverInvokedChain());
+
+        assertThat(response.getStatus()).isEqualTo(401);
+    }
+
     private String validToken(String subject, String email) {
         return Jwts.builder()
                 .subject(subject)

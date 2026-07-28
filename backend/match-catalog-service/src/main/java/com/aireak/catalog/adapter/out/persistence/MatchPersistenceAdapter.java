@@ -2,8 +2,11 @@ package com.aireak.catalog.adapter.out.persistence;
 
 import com.aireak.catalog.application.port.out.MatchRepository;
 import com.aireak.catalog.domain.model.Match;
+import com.aireak.catalog.domain.model.MatchStatus;
 import com.aireak.catalog.domain.model.Showtime;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -24,6 +27,19 @@ public class MatchPersistenceAdapter implements MatchRepository {
     @Override
     public Optional<Match> findById(String matchId) {
         return jpaRepository.findById(matchId).map(this::toDomain);
+    }
+
+    @Override
+    public List<Match> findByStatus(MatchStatus status, int page, int size) {
+        return jpaRepository
+                .findByStatus(status, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")))
+                .map(this::toDomain)
+                .getContent();
+    }
+
+    @Override
+    public long countByStatus(MatchStatus status) {
+        return jpaRepository.countByStatus(status);
     }
 
     // ----------------------------------------------------------------

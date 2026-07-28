@@ -156,6 +156,10 @@
                     <version>${maven-compiler-plugin.version}</version>
                     <configuration>
                         <release>${java.version}</release>
+                        <!-- Spring MVC's parameter-name discovery for @PathVariable/@RequestParam without an
+                             explicit name falls back to reading this metadata (no LocalVariableTable fallback
+                             on this Spring version) — without it, any such binding 500s at request time. -->
+                        <parameters>true</parameters>
                         <annotationProcessorPaths>
                             <path>
                                 <groupId>org.projectlombok</groupId>

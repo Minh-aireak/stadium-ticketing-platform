@@ -29,6 +29,10 @@ jwt:
   audience: ${JWT_AUDIENCE:aireak-platform}
   excluded-paths:
     - /actuator/**
+    # Public catalog browse/search — same paths as the admin-only POST/PUT above, so these
+    # must be method-scoped (see JwtAuthenticationFilter) rather than excluding the whole path.
+    - "GET:/api/v1/matches"
+    - "GET:/api/v1/matches/*"
 
 # Elasticsearch connection
 elasticsearch:

@@ -1,5 +1,6 @@
 package com.aireak.catalog.application.service;
 
+import com.aireak.catalog.application.port.in.ListMatchesUseCase;
 import com.aireak.catalog.application.port.out.DomainEventPublisher;
 import com.aireak.catalog.application.port.out.MatchRepository;
 import com.aireak.catalog.application.port.out.MatchSearchPort;
@@ -22,6 +23,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -152,5 +154,77 @@ class MatchCatalogServiceTest {
 
         assertThatThrownBy(() -> service.completeMatch("missing"))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void listMatchesWithBlankQueryListsPublishedFromRepository() {
+        Match published = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
+                MatchStatus.PUBLISHED, Instant.now(), List.of());
+        when(matchRepository.findByStatus(MatchStatus.PUBLISHED, 0, 20)).thenReturn(List.of(published));
+        when(matchRepository.countByStatus(MatchStatus.PUBLISHED)).thenReturn(1L);
+
+        ListMatchesUseCase.MatchPage page = service.listMatches(null, 0, 20);
+
+        assertThat(page.items()).containsExactly(published);
+        assertThat(page.totalElements()).isEqualTo(1L);
+        verify(matchSearchPort, never()).search(any());
+    }
+
+    @Test
+    void listMatchesWithQueryDelegatesToSearchThenHydratesFromRepository() {
+        Match stub = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
+                MatchStatus.PUBLISHED, Instant.now(), List.of());
+        Match hydrated = matchWithShowtime("match-1");
+        // publish() only ever leaves the aggregate DRAFT or PUBLISHED in these fixtures — force it
+        // PUBLISHED here since listMatches() must filter out anything else after re-hydration.
+        Match hydratedPublished = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
+                MatchStatus.PUBLISHED, hydrated.getCreatedAt(), hydrated.getShowtimes());
+        when(matchSearchPort.search("Home")).thenReturn(List.of(stub));
+        when(matchRepository.findById("match-1")).thenReturn(Optional.of(hydratedPublished));
+
+        ListMatchesUseCase.MatchPage page = service.listMatches("Home", 0, 20);
+
+        assertThat(page.items()).containsExactly(hydratedPublished);
+        assertThat(page.totalElements()).isEqualTo(1L);
+        verify(matchRepository, never()).findByStatus(any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void listMatchesWithQueryDropsHitsThatAreNoLongerPublished() {
+        Match stub = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
+                MatchStatus.PUBLISHED, Instant.now(), List.of());
+        Match nowCancelled = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
+                MatchStatus.CANCELLED, Instant.now(), List.of());
+        when(matchSearchPort.search("Home")).thenReturn(List.of(stub));
+        when(matchRepository.findById("match-1")).thenReturn(Optional.of(nowCancelled));
+
+        ListMatchesUseCase.MatchPage page = service.listMatches("Home", 0, 20);
+
+        assertThat(page.items()).isEmpty();
+    }
+
+    @Test
+    void getMatchReturnsPublishedMatch() {
+        Match published = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
+                MatchStatus.PUBLISHED, Instant.now(), List.of());
+        when(matchRepository.findById("match-1")).thenReturn(Optional.of(published));
+
+        assertThat(service.getMatch("match-1")).contains(published);
+    }
+
+    @Test
+    void getMatchHidesDraftMatches() {
+        Match draft = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
+                MatchStatus.DRAFT, Instant.now(), List.of());
+        when(matchRepository.findById("match-1")).thenReturn(Optional.of(draft));
+
+        assertThat(service.getMatch("match-1")).isEmpty();
+    }
+
+    @Test
+    void getMatchReturnsEmptyWhenNotFound() {
+        when(matchRepository.findById("missing")).thenReturn(Optional.empty());
+
+        assertThat(service.getMatch("missing")).isEmpty();
     }
 }

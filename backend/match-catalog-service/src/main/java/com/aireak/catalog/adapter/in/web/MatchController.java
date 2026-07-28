@@ -2,7 +2,10 @@ package com.aireak.catalog.adapter.in.web;
 
 import com.aireak.catalog.application.port.in.AddShowtimeUseCase;
 import com.aireak.catalog.application.port.in.CreateMatchUseCase;
+import com.aireak.catalog.application.port.in.GetMatchUseCase;
+import com.aireak.catalog.application.port.in.ListMatchesUseCase;
 import com.aireak.catalog.application.port.in.PublishMatchUseCase;
+import com.aireak.catalog.domain.model.Match;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -13,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
+import java.util.List;
 
 /** Inbound REST adapter: match catalog management endpoints. */
 @RestController
@@ -20,9 +24,15 @@ import java.time.Instant;
 @RequiredArgsConstructor
 public class MatchController {
 
+    private static final int MIN_PAGE_SIZE = 1;
+    private static final int MAX_PAGE_SIZE = 100;
+    private static final int DEFAULT_PAGE_SIZE = 20;
+
     private final CreateMatchUseCase createMatchUseCase;
     private final AddShowtimeUseCase addShowtimeUseCase;
     private final PublishMatchUseCase publishMatchUseCase;
+    private final ListMatchesUseCase listMatchesUseCase;
+    private final GetMatchUseCase getMatchUseCase;
 
     /** POST /api/v1/matches */
     @PostMapping
@@ -46,8 +56,54 @@ public class MatchController {
         return ResponseEntity.ok().build();
     }
 
+    /**
+     * GET /api/v1/matches?q=&page=&size= — public catalog browse/search, no auth required
+     * (see match-catalog-service's {@code jwt.excluded-paths}: method-scoped so the POST above
+     * on the same path still requires a token).
+     */
+    @GetMapping
+    public ResponseEntity<MatchListResponse> list(
+            @RequestParam(required = false) String q,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "" + DEFAULT_PAGE_SIZE) int size) {
+        int safePage = Math.max(page, 0);
+        int safeSize = Math.min(Math.max(size, MIN_PAGE_SIZE), MAX_PAGE_SIZE);
+
+        ListMatchesUseCase.MatchPage result = listMatchesUseCase.listMatches(q, safePage, safeSize);
+        return ResponseEntity.ok(toListResponse(result));
+    }
+
+    /** GET /api/v1/matches/{matchId} — public match detail, no auth required (method-scoped exclusion). */
+    @GetMapping("/{matchId}")
+    public ResponseEntity<MatchResponse> get(@PathVariable String matchId) {
+        return getMatchUseCase.getMatch(matchId)
+                .map(m -> ResponseEntity.ok(toResponse(m)))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    private MatchListResponse toListResponse(ListMatchesUseCase.MatchPage result) {
+        return new MatchListResponse(
+                result.items().stream().map(this::toResponse).toList(),
+                result.totalElements(), result.page(), result.size());
+    }
+
+    private MatchResponse toResponse(Match match) {
+        List<ShowtimeResponse> showtimes = match.getShowtimes().stream()
+                .map(s -> new ShowtimeResponse(s.getShowtimeId(), s.getStartTime(), s.getVenueId(),
+                        s.getTotalSeats(), s.getAvailableSeats()))
+                .toList();
+        return new MatchResponse(match.getMatchId(), match.getHomeTeam(), match.getAwayTeam(),
+                match.getCompetition(), match.getStatus().name(), match.getCreatedAt(), showtimes);
+    }
+
     record CreateMatchRequest(@NotBlank String homeTeam, @NotBlank String awayTeam,
                               @NotBlank String competition) {}
     record CreateMatchResponse(String matchId) {}
     record AddShowtimeRequest(@NotNull Instant startTime, @NotBlank String venueId, @Positive int totalSeats) {}
+
+    record ShowtimeResponse(String showtimeId, Instant startTime, String venueId,
+                            int totalSeats, int availableSeats) {}
+    record MatchResponse(String matchId, String homeTeam, String awayTeam, String competition,
+                        String status, Instant createdAt, List<ShowtimeResponse> showtimes) {}
+    record MatchListResponse(List<MatchResponse> items, long totalElements, int page, int size) {}
 }

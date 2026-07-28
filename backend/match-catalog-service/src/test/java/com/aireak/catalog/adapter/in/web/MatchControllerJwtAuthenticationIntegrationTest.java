@@ -2,6 +2,8 @@ package com.aireak.catalog.adapter.in.web;
 
 import com.aireak.catalog.application.port.in.AddShowtimeUseCase;
 import com.aireak.catalog.application.port.in.CreateMatchUseCase;
+import com.aireak.catalog.application.port.in.GetMatchUseCase;
+import com.aireak.catalog.application.port.in.ListMatchesUseCase;
 import com.aireak.catalog.application.port.in.PublishMatchUseCase;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -20,6 +22,7 @@ import java.util.Date;
 import java.util.UUID;
 
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -35,7 +38,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @TestPropertySource(properties = {
         "jwt.secret=test-secret-key-at-least-32-bytes-long-for-hs256!!",
         "jwt.issuer=identity-service",
-        "jwt.audience=stadium-clients"
+        "jwt.audience=stadium-clients",
+        "jwt.excluded-paths[0]=GET:/api/v1/matches",
+        "jwt.excluded-paths[1]=GET:/api/v1/matches/*"
 })
 class MatchControllerJwtAuthenticationIntegrationTest {
 
@@ -55,6 +60,12 @@ class MatchControllerJwtAuthenticationIntegrationTest {
     @MockitoBean
     private PublishMatchUseCase publishMatchUseCase;
 
+    @MockitoBean
+    private ListMatchesUseCase listMatchesUseCase;
+
+    @MockitoBean
+    private GetMatchUseCase getMatchUseCase;
+
     @Test
     void rejectsRequestWithoutBearerToken() throws Exception {
         mockMvc.perform(post("/api/v1/matches")
@@ -63,6 +74,23 @@ class MatchControllerJwtAuthenticationIntegrationTest {
                 .andExpect(status().isUnauthorized());
 
         verifyNoInteractions(createMatchUseCase, addShowtimeUseCase, publishMatchUseCase);
+    }
+
+    @Test
+    void listMatchesIsReachableWithoutABearerToken() throws Exception {
+        org.mockito.Mockito.when(listMatchesUseCase.listMatches(null, 0, 20))
+                .thenReturn(new ListMatchesUseCase.MatchPage(java.util.List.of(), 0, 0, 20));
+
+        mockMvc.perform(get("/api/v1/matches"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void getMatchIsReachableWithoutABearerToken() throws Exception {
+        org.mockito.Mockito.when(getMatchUseCase.getMatch("match-1")).thenReturn(java.util.Optional.empty());
+
+        mockMvc.perform(get("/api/v1/matches/match-1"))
+                .andExpect(status().isNotFound());
     }
 
     @Test
