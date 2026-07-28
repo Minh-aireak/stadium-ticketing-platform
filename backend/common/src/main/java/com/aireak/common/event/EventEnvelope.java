@@ -1,5 +1,7 @@
 package com.aireak.common.event;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import lombok.Getter;
 
@@ -37,16 +39,22 @@ public class EventEnvelope<T> {
     @JsonTypeInfo(use = JsonTypeInfo.Id.CLASS)
     private final T payload;
 
-    // Jackson deserialization constructor
-    protected EventEnvelope() {
-        this.eventId = null;
-        this.eventType = null;
-        this.occurredAt = null;
-        this.traceId = null;
-        this.payload = null;
-    }
-
-    private EventEnvelope(String eventId, String eventType, Instant occurredAt, String traceId, T payload) {
+    // @JsonCreator + @JsonProperty, not a bare private constructor: all four fields other than
+    // payload are private with no setters and no public getters Jackson would treat as implicit
+    // accessors for a no-arg-constructor-then-populate strategy — @Getter's generated getters are
+    // only usable for serialization. Without an explicit creator, deserialization silently falls
+    // back to a no-arg constructor and leaves eventId/eventType/occurredAt/traceId null (payload
+    // alone survived, because its own @JsonTypeInfo annotation makes Jackson treat it as visible
+    // regardless of field visibility rules). That silently broke every real consumer that reads
+    // eventId/eventType off a wire-deserialized envelope — e.g. NotificationDispatchService's
+    // idempotency check (existsByEventId) and its TEMPLATES.get(eventType) lookup.
+    @JsonCreator
+    private EventEnvelope(
+            @JsonProperty("eventId") String eventId,
+            @JsonProperty("eventType") String eventType,
+            @JsonProperty("occurredAt") Instant occurredAt,
+            @JsonProperty("traceId") String traceId,
+            @JsonProperty("payload") T payload) {
         this.eventId = eventId;
         this.eventType = eventType;
         this.occurredAt = occurredAt;

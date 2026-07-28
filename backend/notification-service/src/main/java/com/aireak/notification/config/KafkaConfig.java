@@ -19,6 +19,9 @@ import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.serializer.JacksonJsonDeserializer;
 import org.springframework.kafka.support.serializer.JacksonJsonSerializer;
 import org.springframework.util.backoff.ExponentialBackOff;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
+import tools.jackson.databind.jsontype.PolymorphicTypeValidator;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -47,8 +50,31 @@ public class KafkaConfig {
 
     @Bean
     public ConsumerFactory<String, EventEnvelope<?>> consumerFactory() {
-        // JacksonJsonDeserializer (Jackson 3) — replaces deprecated JsonDeserializer
-        JacksonJsonDeserializer<EventEnvelope<?>> deserializer = new JacksonJsonDeserializer<>();
+        // JacksonJsonDeserializer (Jackson 3) — replaces deprecated JsonDeserializer.
+        // Explicit target type, not new JacksonJsonDeserializer<>(): the no-arg form has no
+        // default type and falls back to reading the __TypeId__ header — but these topics are
+        // populated by Debezium's outbox EventRouter (see infra/debezium/*.json), which forwards
+        // the outbox payload column as-is and never sets that header. Without a default type,
+        // every real record throws SerializationException("No type information in headers and
+        // no default type provided") and ends up on the DLT.
+        //
+        // EventEnvelope.payload is generic (erases to Object) and carries its own
+        // @JsonTypeInfo(use = Id.CLASS) for polymorphic resolution — but Jackson 3's default
+        // PolymorphicTypeValidator unconditionally refuses to resolve subtypes of a declared base
+        // type that generic (InvalidDefinitionException: "too generic base type can open a
+        // security hole"), regardless of addTrustedPackages() below (that only governs spring-kafka's
+        // OWN header-based type mapper, not Jackson's internal one). The JsonMapper here needs its
+        // own validator, scoped to the same trusted package tree, or every payload fails to parse.
+        PolymorphicTypeValidator polymorphicTypeValidator = BasicPolymorphicTypeValidator.builder()
+                .allowIfBaseType(Object.class)
+                .allowIfSubType("com.aireak.")
+                .build();
+        JsonMapper jsonMapper = JsonMapper.builder()
+                .findAndAddModules(KafkaConfig.class.getClassLoader())
+                .polymorphicTypeValidator(polymorphicTypeValidator)
+                .build();
+        JacksonJsonDeserializer<EventEnvelope<?>> deserializer =
+                new JacksonJsonDeserializer<>(EventEnvelope.class, jsonMapper);
         deserializer.addTrustedPackages("com.aireak.*");
 
         Map<String, Object> props = new HashMap<>();
