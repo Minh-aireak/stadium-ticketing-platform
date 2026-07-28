@@ -1,5 +1,8 @@
 package com.aireak.catalog.application.service;
 
+import com.aireak.catalog.application.port.in.AddShowtimeUseCase;
+import com.aireak.catalog.application.port.in.CreateMatchUseCase;
+import com.aireak.catalog.application.port.in.PublishMatchUseCase;
 import com.aireak.catalog.application.port.out.DomainEventPublisher;
 import com.aireak.catalog.application.port.out.MatchRepository;
 import com.aireak.catalog.application.port.out.MatchSearchPort;
@@ -21,12 +24,13 @@ import java.time.Instant;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class MatchCatalogService {
+public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCase, PublishMatchUseCase {
 
     private final MatchRepository matchRepository;
     private final MatchSearchPort matchSearchPort;
     private final DomainEventPublisher eventPublisher;
 
+    @Override
     @Transactional
     public String createMatch(String homeTeam, String awayTeam, String competition) {
         Match match = Match.create(homeTeam, awayTeam, competition);
@@ -35,6 +39,7 @@ public class MatchCatalogService {
         return match.getMatchId();
     }
 
+    @Override
     @Transactional
     public void addShowtime(String matchId, Instant startTime, String venueId, int totalSeats) {
         Match match = findOrThrow(matchId);
@@ -42,6 +47,7 @@ public class MatchCatalogService {
         matchRepository.save(match);
     }
 
+    @Override
     @Transactional
     public void publishMatch(String matchId) {
         Match match = findOrThrow(matchId);

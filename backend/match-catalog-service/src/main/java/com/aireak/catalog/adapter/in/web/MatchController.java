@@ -1,6 +1,8 @@
 package com.aireak.catalog.adapter.in.web;
 
-import com.aireak.catalog.application.service.MatchCatalogService;
+import com.aireak.catalog.application.port.in.AddShowtimeUseCase;
+import com.aireak.catalog.application.port.in.CreateMatchUseCase;
+import com.aireak.catalog.application.port.in.PublishMatchUseCase;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
@@ -16,12 +18,14 @@ import java.time.Instant;
 @RequiredArgsConstructor
 public class MatchController {
 
-    private final MatchCatalogService matchCatalogService;
+    private final CreateMatchUseCase createMatchUseCase;
+    private final AddShowtimeUseCase addShowtimeUseCase;
+    private final PublishMatchUseCase publishMatchUseCase;
 
     /** POST /api/v1/matches */
     @PostMapping
     public ResponseEntity<CreateMatchResponse> create(@Valid @RequestBody CreateMatchRequest req) {
-        String matchId = matchCatalogService.createMatch(req.homeTeam(), req.awayTeam(), req.competition());
+        String matchId = createMatchUseCase.createMatch(req.homeTeam(), req.awayTeam(), req.competition());
         return ResponseEntity.status(HttpStatus.CREATED).body(new CreateMatchResponse(matchId));
     }
 
@@ -29,14 +33,14 @@ public class MatchController {
     @PostMapping("/{matchId}/showtimes")
     public ResponseEntity<Void> addShowtime(@PathVariable String matchId,
                                             @Valid @RequestBody AddShowtimeRequest req) {
-        matchCatalogService.addShowtime(matchId, req.startTime(), req.venueId(), req.totalSeats());
+        addShowtimeUseCase.addShowtime(matchId, req.startTime(), req.venueId(), req.totalSeats());
         return ResponseEntity.ok().build();
     }
 
     /** PUT /api/v1/matches/{matchId}/publish */
     @PutMapping("/{matchId}/publish")
     public ResponseEntity<Void> publish(@PathVariable String matchId) {
-        matchCatalogService.publishMatch(matchId);
+        publishMatchUseCase.publishMatch(matchId);
         return ResponseEntity.ok().build();
     }
 
