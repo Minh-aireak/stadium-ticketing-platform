@@ -1,40 +1,75 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
+import { Loader2 } from 'lucide-react'
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { getMockMatchById } from '@/features/matches/mockMatches'
-import { generateMockSeatMap } from '@/features/seats/mockSeatMap'
+import { getSeatMap } from '@/features/seats/seatsApi'
 import { SeatMap } from '@/features/seats/SeatMap'
+import type { Seat } from '@/features/seats/types'
+import { useToast } from '@/hooks/useToast'
+import { getErrorMessage } from '@/lib/errors'
 import { formatCurrency } from '@/lib/format'
 import type { CheckoutState } from './CheckoutPage'
 
 const MAX_SEATS = 8
 
-// Seat inventory/pricing hasn't been designed on the backend yet (ticket-inventory-service
-// has no seat-map read endpoint or price/tier concept) — this screen stays on mock data
-// until that's tackled. `matchLabel` from MatchDetailPage's real match is used when present
-// so the header at least shows the real teams; seat prices remain a mock placeholder.
+export interface SeatSelectionState {
+  matchLabel: string
+  showtimeId: string
+}
+
 export function SeatSelectionPage() {
   const { matchId } = useParams<{ matchId: string }>()
   const navigate = useNavigate()
   const location = useLocation()
-  const passedLabel = (location.state as { matchLabel?: string } | null)?.matchLabel
-  const match = matchId ? getMockMatchById(matchId) : undefined
+  const { toast } = useToast()
+  const state = location.state as SeatSelectionState | null
+
+  const [seats, setSeats] = useState<Seat[]>([])
+  const [loading, setLoading] = useState(true)
+  const [failed, setFailed] = useState(false)
   const [selected, setSelected] = useState<string[]>([])
 
-  const showtimeId = `${matchId}-showtime-1`
-  const seats = useMemo(
-    () => (match ? generateMockSeatMap(showtimeId, match.fromPrice) : []),
-    [match, showtimeId],
-  )
+  useEffect(() => {
+    if (!state?.showtimeId) return
+    let cancelled = false
+    setLoading(true)
+    setFailed(false)
 
-  if (!match) {
-    return <Navigate to="/" replace />
+    getSeatMap(state.showtimeId)
+      .then((data) => {
+        if (!cancelled) setSeats(data.seats)
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        toast({
+          title: 'Không thể tải sơ đồ ghế',
+          description: getErrorMessage(err),
+          variant: 'error',
+        })
+        setFailed(true)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [state?.showtimeId, toast])
+
+  // No showtimeId to load from (e.g. a direct/reloaded URL) — the match can have several
+  // showtimes, so there's no safe default to fall back to; send the user to pick one again.
+  if (!matchId || !state?.showtimeId) {
+    return <Navigate to={matchId ? `/matches/${matchId}` : '/'} replace />
   }
 
-  const matchLabel = passedLabel ?? `${match.homeTeam} vs ${match.awayTeam}`
+  if (failed) {
+    return <Navigate to={`/matches/${matchId}`} replace />
+  }
+
   const selectedSeats = seats.filter((s) => selected.includes(s.code))
   const total = selectedSeats.reduce((sum, s) => sum + s.price, 0)
 
@@ -47,15 +82,16 @@ export function SeatSelectionPage() {
   }
 
   function handleContinue() {
-    const state: CheckoutState = {
+    if (!state?.showtimeId) return
+    const checkoutState: CheckoutState = {
       matchId: matchId!,
-      matchLabel,
-      showtimeId,
+      matchLabel: state.matchLabel,
+      showtimeId: state.showtimeId,
       seatCodes: selected,
       amount: total,
       currency: 'VND',
     }
-    navigate('/checkout', { state })
+    navigate('/checkout', { state: checkoutState })
   }
 
   return (
@@ -69,13 +105,19 @@ export function SeatSelectionPage() {
         <div className="text-center">
           <h1 className="text-2xl font-bold sm:text-3xl">Chọn ghế</h1>
           <p className="text-muted">
-            {matchLabel} — tối đa {MAX_SEATS} ghế mỗi lượt đặt
+            {state.matchLabel} — tối đa {MAX_SEATS} ghế mỗi lượt đặt
           </p>
         </div>
 
         <Card>
           <CardContent className="overflow-x-auto p-6">
-            <SeatMap seats={seats} selected={selected} onToggle={toggleSeat} />
+            {loading ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="size-8 animate-spin text-accent" />
+              </div>
+            ) : (
+              <SeatMap seats={seats} selected={selected} onToggle={toggleSeat} />
+            )}
           </CardContent>
         </Card>
 

@@ -3,8 +3,6 @@ import { motion } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import type { Seat } from './types'
 
-const ROW_ORDER = ['A', 'B', 'C', 'D', 'E', 'F']
-
 interface SeatMapProps {
   seats: Seat[]
   selected: string[]
@@ -19,7 +17,11 @@ const legend: { status: Seat['status'] | 'selected'; label: string; className: s
 ]
 
 export function SeatMap({ seats, selected, onToggle }: SeatMapProps) {
-  const byRow = ROW_ORDER.map((row) => ({
+  // Row count/letters come from the backend layout (see SeatMapLayout), not a fixed A-F —
+  // derive them from the actual seats instead of hardcoding, so showtimes with more/fewer
+  // seats than the old 6-row mock still render every row.
+  const rows = Array.from(new Set(seats.map((s) => s.row))).sort()
+  const byRow = rows.map((row) => ({
     row,
     seats: seats.filter((s) => s.row === row).sort((a, b) => a.number - b.number),
   }))

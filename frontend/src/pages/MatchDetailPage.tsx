@@ -7,11 +7,12 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { getMatch } from '@/features/matches/matchesApi'
-import { catalogStatus, ticketsRemaining } from '@/features/matches/matchView'
+import { ticketsRemaining } from '@/features/matches/matchView'
 import type { Match } from '@/features/matches/types'
 import { useToast } from '@/hooks/useToast'
 import { getErrorMessage } from '@/lib/errors'
-import { formatKickoff } from '@/lib/format'
+import { formatCurrency, formatKickoff } from '@/lib/format'
+import type { SeatSelectionState } from './SeatSelectionPage'
 
 export function MatchDetailPage() {
   const { matchId } = useParams<{ matchId: string }>()
@@ -64,7 +65,6 @@ export function MatchDetailPage() {
     )
   }
 
-  const soldOut = catalogStatus(match) === 'sold_out'
   const showtimes = [...match.showtimes].sort(
     (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime(),
   )
@@ -93,43 +93,47 @@ export function MatchDetailPage() {
         </div>
 
         <div className="mt-10 flex flex-col gap-4">
-          {showtimes.map((showtime) => (
-            <Card key={showtime.showtimeId}>
-              <CardContent className="flex flex-col gap-3 p-6 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-col gap-1.5 text-sm text-muted">
-                  <span className="flex items-center gap-2">
-                    <Clock className="size-4 text-accent" />
-                    {formatKickoff(showtime.startTime)}
-                  </span>
-                  <span className="flex items-center gap-2">
-                    <MapPin className="size-4 text-accent" />
-                    {showtime.venueId}
-                  </span>
-                </div>
-                <div className="text-sm font-medium">
-                  {showtime.availableSeats.toLocaleString('vi-VN')} /{' '}
-                  {showtime.totalSeats.toLocaleString('vi-VN')} ghế trống
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
-        <div className="mt-10 flex justify-center">
-          {soldOut ? (
-            <Button variant="outline" size="lg" disabled>
-              Đã hết vé
-            </Button>
-          ) : (
-            <Button asChild variant="gradient" size="lg">
-              <Link
-                to={`/matches/${match.matchId}/seats`}
-                state={{ matchLabel: `${match.homeTeam} vs ${match.awayTeam}` }}
-              >
-                Chọn ghế
-              </Link>
-            </Button>
-          )}
+          {showtimes.map((showtime) => {
+            const showtimeSoldOut = showtime.availableSeats <= 0
+            const seatSelectionState: SeatSelectionState = {
+              matchLabel: `${match.homeTeam} vs ${match.awayTeam}`,
+              showtimeId: showtime.showtimeId,
+            }
+            return (
+              <Card key={showtime.showtimeId}>
+                <CardContent className="flex flex-col gap-3 p-6 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-col gap-1.5 text-sm text-muted">
+                    <span className="flex items-center gap-2">
+                      <Clock className="size-4 text-accent" />
+                      {formatKickoff(showtime.startTime)}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <MapPin className="size-4 text-accent" />
+                      {showtime.venueId}
+                    </span>
+                    <span className="text-xs">Giá từ {formatCurrency(showtime.basePrice)}</span>
+                  </div>
+                  <div className="flex flex-col items-end gap-2">
+                    <div className="text-sm font-medium">
+                      {showtime.availableSeats.toLocaleString('vi-VN')} /{' '}
+                      {showtime.totalSeats.toLocaleString('vi-VN')} ghế trống
+                    </div>
+                    {showtimeSoldOut ? (
+                      <Button variant="outline" size="sm" disabled>
+                        Đã hết vé
+                      </Button>
+                    ) : (
+                      <Button asChild variant="gradient" size="sm">
+                        <Link to={`/matches/${match.matchId}/seats`} state={seatSelectionState}>
+                          Chọn ghế
+                        </Link>
+                      </Button>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
         </div>
       </motion.div>
     </section>
