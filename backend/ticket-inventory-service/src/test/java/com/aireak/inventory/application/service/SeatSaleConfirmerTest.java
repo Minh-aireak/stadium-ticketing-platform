@@ -4,14 +4,17 @@ import com.aireak.inventory.application.port.out.DomainEventPublisher;
 import com.aireak.inventory.application.port.out.SeatInventoryRepository;
 import com.aireak.inventory.domain.event.SeatsSoldEvent;
 import com.aireak.inventory.domain.exception.SeatInventoryNotFoundException;
+import com.aireak.inventory.domain.model.Seat;
 import com.aireak.inventory.domain.model.SeatCode;
 import com.aireak.inventory.domain.model.SeatInventory;
+import com.aireak.inventory.domain.model.SeatTier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 
@@ -24,6 +27,7 @@ import static org.mockito.Mockito.when;
 class SeatSaleConfirmerTest {
 
     private static final SeatCode A1 = new SeatCode("A1");
+    private static final BigDecimal PRICE = new BigDecimal("150000");
 
     @Mock
     private SeatInventoryRepository seatInventoryRepository;
@@ -39,7 +43,8 @@ class SeatSaleConfirmerTest {
     @Test
     void confirmSaleSellsSeatsSavesAndPublishesEvent() {
         newConfirmer();
-        SeatInventory inventory = SeatInventory.create("showtime-1", List.of(A1));
+        SeatInventory inventory = SeatInventory.create("showtime-1",
+                List.of(new Seat(A1, SeatTier.STANDARD, PRICE)));
         when(seatInventoryRepository.findByShowtimeId("showtime-1")).thenReturn(Optional.of(inventory));
 
         confirmer.confirmSale("showtime-1", List.of(A1), "booking-1");

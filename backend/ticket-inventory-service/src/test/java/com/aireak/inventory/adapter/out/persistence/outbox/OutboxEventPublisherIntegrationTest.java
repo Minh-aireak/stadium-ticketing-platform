@@ -4,8 +4,10 @@ import com.aireak.inventory.adapter.out.persistence.SeatInventoryPersistenceAdap
 import com.aireak.inventory.application.port.out.DomainEventPublisher;
 import com.aireak.inventory.application.port.out.SeatInventoryRepository;
 import com.aireak.inventory.config.InfraConfig;
+import com.aireak.inventory.domain.model.Seat;
 import com.aireak.inventory.domain.model.SeatCode;
 import com.aireak.inventory.domain.model.SeatInventory;
+import com.aireak.inventory.domain.model.SeatTier;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
@@ -22,6 +24,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -88,7 +91,10 @@ class OutboxEventPublisherIntegrationTest {
     void confirmingSeatsSoldWritesOutboxRowInSameTransaction() {
         SeatCode seatA1 = new SeatCode("A1");
         SeatCode seatA2 = new SeatCode("A2");
-        SeatInventory inventory = SeatInventory.create("showtime-1", List.of(seatA1, seatA2));
+        BigDecimal price = new BigDecimal("150000");
+        SeatInventory inventory = SeatInventory.create("showtime-1", List.of(
+                new Seat(seatA1, SeatTier.STANDARD, price),
+                new Seat(seatA2, SeatTier.STANDARD, price)));
         inventory.sellSeats(List.of(seatA1, seatA2), "booking-1");
 
         seatInventoryRepository.save(inventory);

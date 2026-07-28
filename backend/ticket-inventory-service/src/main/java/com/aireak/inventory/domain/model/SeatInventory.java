@@ -28,11 +28,11 @@ public class SeatInventory {
         this.seats = new LinkedHashMap<>(seats);
     }
 
-    /** Factory: create a new inventory for a showtime with given seat codes. */
-    public static SeatInventory create(String showtimeId, List<SeatCode> seatCodes) {
-        Map<SeatCode, Seat> seats = new LinkedHashMap<>();
-        seatCodes.forEach(code -> seats.put(code, new Seat(code)));
-        return new SeatInventory(showtimeId, seats);
+    /** Factory: create a new inventory for a showtime from already-built seats (see {@link SeatMapLayout}). */
+    public static SeatInventory create(String showtimeId, List<Seat> seats) {
+        Map<SeatCode, Seat> bySeatCode = new LinkedHashMap<>();
+        seats.forEach(seat -> bySeatCode.put(seat.getSeatCode(), seat));
+        return new SeatInventory(showtimeId, bySeatCode);
     }
 
     /** Reconstitute from persistence. */

@@ -30,6 +30,13 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
+  # Only bootstrap-servers is read (via @Value in KafkaConfig) — consumer
+  # factory, deserializer, group-id, and error handling are all defined
+  # programmatically in KafkaConfig.java, which fully overrides Boot's
+  # consumer autoconfiguration.
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
 server:
   port: 8083
   tomcat:

@@ -90,6 +90,8 @@ public class SeatInventoryPersistenceAdapter implements SeatInventoryRepository 
                         .seatCode(s.getSeatCode().value())
                         .status(s.getStatus())
                         .reservedByBookingId(s.getReservedByBookingId())
+                        .tier(s.getTier())
+                        .price(s.getPrice())
                         .build())
                 .collect(Collectors.toList());
 
@@ -110,7 +112,9 @@ public class SeatInventoryPersistenceAdapter implements SeatInventoryRepository 
                 .map(s -> new Seat(
                         new SeatCode(s.getSeatCode()),
                         s.getStatus(),
-                        s.getReservedByBookingId()))
+                        s.getReservedByBookingId(),
+                        s.getTier(),
+                        s.getPrice()))
                 .toList();
         return SeatInventory.reconstitute(entity.getShowtimeId(), seats);
     }

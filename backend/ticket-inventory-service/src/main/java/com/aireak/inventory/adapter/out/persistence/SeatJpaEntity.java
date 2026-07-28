@@ -1,8 +1,11 @@
 package com.aireak.inventory.adapter.out.persistence;
 
 import com.aireak.inventory.domain.model.SeatStatus;
+import com.aireak.inventory.domain.model.SeatTier;
 import jakarta.persistence.*;
 import lombok.*;
+
+import java.math.BigDecimal;
 
 /**
  * JPA entity for Seat — owned by SeatInventoryJpaEntity.
@@ -37,4 +40,11 @@ public class SeatJpaEntity {
 
     @Column(name = "reserved_by_booking_id", length = 36)
     private String reservedByBookingId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "tier", nullable = false, length = 20)
+    private SeatTier tier;
+
+    @Column(name = "price", nullable = false, precision = 15, scale = 2)
+    private BigDecimal price;
 }

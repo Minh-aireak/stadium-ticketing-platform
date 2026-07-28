@@ -2,6 +2,7 @@ package com.aireak.inventory.adapter.in.web;
 
 import com.aireak.inventory.adapter.in.web.dto.ReserveSeatsRequest;
 import com.aireak.inventory.application.port.in.ConfirmSeatsUseCase;
+import com.aireak.inventory.application.port.in.GetSeatMapUseCase;
 import com.aireak.inventory.application.port.in.ReleaseSeatsUseCase;
 import com.aireak.inventory.application.port.in.ReserveSeatsUseCase;
 import com.aireak.inventory.application.port.in.command.ConfirmSeatsCommand;
@@ -14,9 +15,13 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
+import java.util.List;
+
 /**
  * Inbound REST adapter for seat inventory.
- * Called synchronously by booking-service during saga execution.
+ * reserve/release/confirm are called synchronously by booking-service during saga execution;
+ * the seat-map GET below is called by the frontend to render seat selection.
  */
 @RestController
 @RequestMapping("/api/v1/inventory")
@@ -27,6 +32,7 @@ public class SeatInventoryController {
     private final ReserveSeatsUseCase reserveSeatsUseCase;
     private final ReleaseSeatsUseCase releaseSeatsUseCase;
     private final ConfirmSeatsUseCase confirmSeatsUseCase;
+    private final GetSeatMapUseCase getSeatMapUseCase;
 
     /** POST /api/v1/inventory/{showtimeId}/reserve — places a TTL hold (see SeatHoldPort), no DB write. */
     @PostMapping("/{showtimeId}/reserve")
@@ -55,4 +61,28 @@ public class SeatInventoryController {
                 new ConfirmSeatsCommand(showtimeId, request.bookingId(), request.seatCodes()));
         return ResponseEntity.ok().build();
     }
+
+    /** GET /api/v1/inventory/{showtimeId}/seats — seat map for seat selection, incl. live Redis holds. */
+    @GetMapping("/{showtimeId}/seats")
+    public ResponseEntity<SeatMapResponse> getSeatMap(@PathVariable String showtimeId) {
+        return getSeatMapUseCase.getSeatMap(showtimeId)
+                .map(result -> ResponseEntity.ok(toResponse(result)))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    private SeatMapResponse toResponse(GetSeatMapUseCase.SeatMapResult result) {
+        List<SeatResponse> seats = result.seats().stream().map(this::toSeatResponse).toList();
+        return new SeatMapResponse(result.showtimeId(), seats);
+    }
+
+    private SeatResponse toSeatResponse(GetSeatMapUseCase.SeatSummary seat) {
+        String code = seat.seatCode();
+        String row = code.substring(0, 1);
+        int number = Integer.parseInt(code.substring(1));
+        return new SeatResponse(code, row, number, seat.status().toLowerCase(), seat.tier().toLowerCase(),
+                seat.price());
+    }
+
+    record SeatResponse(String code, String row, int number, String status, String tier, BigDecimal price) {}
+    record SeatMapResponse(String showtimeId, List<SeatResponse> seats) {}
 }

@@ -1,6 +1,7 @@
 package com.aireak.inventory.adapter.in.web;
 
 import com.aireak.inventory.application.port.in.ConfirmSeatsUseCase;
+import com.aireak.inventory.application.port.in.GetSeatMapUseCase;
 import com.aireak.inventory.application.port.in.ReleaseSeatsUseCase;
 import com.aireak.inventory.application.port.in.ReserveSeatsUseCase;
 import io.jsonwebtoken.Jwts;
@@ -17,9 +18,12 @@ import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Date;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -55,6 +59,9 @@ class SeatInventoryControllerJwtAuthenticationIntegrationTest {
     @MockitoBean
     private ConfirmSeatsUseCase confirmSeatsUseCase;
 
+    @MockitoBean
+    private GetSeatMapUseCase getSeatMapUseCase;
+
     @Test
     void rejectsRequestWithoutBearerToken() throws Exception {
         mockMvc.perform(post("/api/v1/inventory/{showtimeId}/reserve", "showtime-1")
@@ -63,6 +70,23 @@ class SeatInventoryControllerJwtAuthenticationIntegrationTest {
                 .andExpect(status().isUnauthorized());
 
         verifyNoInteractions(reserveSeatsUseCase);
+    }
+
+    @Test
+    void getSeatMapRejectsRequestWithoutBearerToken() throws Exception {
+        mockMvc.perform(get("/api/v1/inventory/{showtimeId}/seats", "showtime-1"))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(getSeatMapUseCase);
+    }
+
+    @Test
+    void getSeatMapWithValidTokenReturns404WhenNotFound() throws Exception {
+        when(getSeatMapUseCase.getSeatMap("showtime-1")).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/v1/inventory/{showtimeId}/seats", "showtime-1")
+                        .header("Authorization", "Bearer " + validToken()))
+                .andExpect(status().isNotFound());
     }
 
     @Test
