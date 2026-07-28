@@ -59,6 +59,26 @@
         <!-- Kafka constants only (no kafka runtime here — services pull spring-kafka themselves) -->
         <!-- KafkaTopics.java is just a class with String constants, no runtime dep needed -->
 
+        <!-- JWT — JwtAuthenticationFilter validates the Authorization bearer token locally in
+             every downstream service (defense in depth: services must not trust api-gateway's
+             edge check alone). Version managed by root pom.xml's dependencyManagement. Transitive
+             to every service that depends on common, same as identity-service/api-gateway's own
+             direct jjwt-impl/jjwt-jackson runtime deps. -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

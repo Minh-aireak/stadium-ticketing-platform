@@ -30,7 +30,7 @@ public class SeatInventoryController {
 
     /** POST /api/v1/inventory/{showtimeId}/reserve — places a TTL hold (see SeatHoldPort), no DB write. */
     @PostMapping("/{showtimeId}/reserve")
-    public ResponseEntity<Void> reserve(@PathVariable String showtimeId,
+    public ResponseEntity<Void> reserve(@PathVariable("showtimeId") String showtimeId,
                                         @Valid @RequestBody ReserveSeatsRequest request) {
         reserveSeatsUseCase.execute(
                 new ReserveSeatsCommand(showtimeId, request.bookingId(), request.seatCodes()));

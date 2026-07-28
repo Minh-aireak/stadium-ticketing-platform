@@ -40,6 +40,17 @@ server:
       min-spare: 20
     accept-count: 100
 
+# Must match identity-service's jwt.secret/issuer/audience exactly — validated independently
+# here so this service is never unauthenticated just because a caller bypassed api-gateway.
+jwt:
+  # No default — must be injected via env var in every environment. A hardcoded fallback here
+  # would let anyone who reads the source mint valid tokens if the env var is ever left unset.
+  secret: ${JWT_SECRET}
+  issuer: ${JWT_ISSUER:https://auth.aireak.com}
+  audience: ${JWT_AUDIENCE:aireak-platform}
+  excluded-paths:
+    - /actuator/**
+
 inventory:
   hold:
     # Seat hold TTL — Redis auto-expires an abandoned reservation this long

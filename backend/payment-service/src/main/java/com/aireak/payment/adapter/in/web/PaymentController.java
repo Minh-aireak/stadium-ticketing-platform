@@ -36,7 +36,7 @@ public class PaymentController {
     }
 
     @GetMapping("/{bookingId}")
-    public ResponseEntity<PaymentStatusResponse> getByBookingId(@PathVariable String bookingId) {
+    public ResponseEntity<PaymentStatusResponse> getByBookingId(@PathVariable("bookingId") String bookingId) {
         return getPaymentUseCase.getByBookingId(bookingId)
                 .map(p -> ResponseEntity.ok(new PaymentStatusResponse(
                         p.getPaymentId(), p.getBookingId(), p.getStatus().name(),

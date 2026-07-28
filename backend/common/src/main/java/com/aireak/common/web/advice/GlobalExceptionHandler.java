@@ -1,6 +1,7 @@
 package com.aireak.common.web.advice;
 
 import com.aireak.common.exception.DomainException;
+import com.aireak.common.exception.IdentityMismatchException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -37,6 +38,22 @@ public class GlobalExceptionHandler {
                 HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
         problem.setType(URI.create(TYPE_BASE + "domain-error"));
         problem.setTitle("Domain Rule Violation");
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+
+    /**
+     * Handles a customerId/userId in the request that doesn't match the JWT-authenticated
+     * caller → 403 Forbidden. Distinct from {@link DomainException} (422): this is an
+     * authorization failure, not a correctable input error.
+     */
+    @ExceptionHandler(IdentityMismatchException.class)
+    public ProblemDetail handleIdentityMismatch(IdentityMismatchException ex) {
+        log.warn("Identity mismatch: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.FORBIDDEN, ex.getMessage());
+        problem.setType(URI.create(TYPE_BASE + "identity-mismatch"));
+        problem.setTitle("Identity Mismatch");
         problem.setProperty("timestamp", Instant.now());
         return problem;
     }
