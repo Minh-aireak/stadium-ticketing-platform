@@ -14,7 +14,7 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
- * Reactive WebFilter: injects X-Correlation-ID header and sets MDC for log tracing.
+ * Reactive WebFilter: injects X-Correlation-Id header and sets MDC for log tracing.
  *
  * <p>WebFlux equivalent of {@code common}'s CorrelationIdFilter (which is Servlet-based).
  * This one works in the reactive pipeline.
@@ -34,7 +34,7 @@ import java.util.regex.Pattern;
 @Order(-100)
 public class CorrelationIdWebFilter implements WebFilter, Ordered {
 
-    public static final String HEADER_NAME = "X-Correlation-ID";
+    public static final String HEADER_NAME = "X-Correlation-Id";
     public static final String MDC_KEY     = "correlationId";
 
     private static final int MAX_INBOUND_LENGTH = 64;
