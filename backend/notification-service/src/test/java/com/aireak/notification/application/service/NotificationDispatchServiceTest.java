@@ -5,8 +5,10 @@ import com.aireak.booking.domain.event.BookingConfirmedEvent;
 import com.aireak.common.event.EventEnvelope;
 import com.aireak.identity.domain.event.AccountRegisteredEvent;
 import com.aireak.notification.application.port.out.EmailSenderPort;
+import com.aireak.notification.application.port.out.NotificationRepository;
 import com.aireak.notification.application.port.out.ProcessedEventRepository;
 import com.aireak.notification.application.port.out.SmsSenderPort;
+import com.aireak.notification.domain.model.Notification;
 import freemarker.template.Configuration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,6 +46,8 @@ class NotificationDispatchServiceTest {
     private SmsSenderPort smsSenderPort;
     @Mock
     private ProcessedEventRepository processedEventRepository;
+    @Mock
+    private NotificationRepository notificationRepository;
 
     private NotificationDispatchService service;
 
@@ -54,7 +58,7 @@ class NotificationDispatchServiceTest {
         freemarkerConfig.setDefaultEncoding("UTF-8");
 
         service = new NotificationDispatchService(
-                emailSenderPort, smsSenderPort, processedEventRepository, freemarkerConfig);
+                emailSenderPort, smsSenderPort, processedEventRepository, notificationRepository, freemarkerConfig);
     }
 
     @Test
@@ -75,6 +79,11 @@ class NotificationDispatchServiceTest {
                 .doesNotContain("Failed to render")
                 .contains("100")
                 .contains("VND");
+
+        ArgumentCaptor<Notification> notification = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).save(notification.capture());
+        assertThat(notification.getValue().getRecipientId()).isEqualTo("customer-1");
+        assertThat(notification.getValue().isRead()).isFalse();
     }
 
     @Test
@@ -109,5 +118,9 @@ class NotificationDispatchServiceTest {
         verify(emailSenderPort).send(to.capture(), anyString(), body.capture());
         assertThat(to.getValue()).isEqualTo("new-user@example.com");
         assertThat(body.getValue()).doesNotContain("Failed to render");
+
+        ArgumentCaptor<Notification> notification = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).save(notification.capture());
+        assertThat(notification.getValue().getRecipientId()).isEqualTo("acc-1");
     }
 }

@@ -1,11 +1,14 @@
 package com.aireak.notification.web;
 
+import com.aireak.notification.application.port.in.ListNotificationsUseCase;
+import com.aireak.notification.application.port.in.MarkNotificationReadUseCase;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import javax.crypto.SecretKey;
@@ -42,6 +45,12 @@ class JwtAuthenticationIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @MockitoBean
+    private ListNotificationsUseCase listNotificationsUseCase;
+
+    @MockitoBean
+    private MarkNotificationReadUseCase markNotificationReadUseCase;
 
     @Test
     void rejectsRequestWithoutBearerToken() throws Exception {
