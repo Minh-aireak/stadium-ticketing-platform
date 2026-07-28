@@ -2,8 +2,10 @@ package com.aireak.booking.adapter.in.web;
 
 import com.aireak.booking.application.port.in.CreateBookingUseCase;
 import com.aireak.booking.application.port.in.GetBookingUseCase;
+import com.aireak.booking.application.port.in.ListBookingsUseCase;
 import com.aireak.booking.application.port.in.dto.BookingCreationResult;
 import com.aireak.booking.application.service.DuplicateRequestInProgressException;
+import com.aireak.booking.domain.model.Booking;
 import com.aireak.common.exception.IdentityMismatchException;
 import com.aireak.common.security.AuthenticatedUser;
 import com.aireak.common.security.AuthenticatedUserContext;
@@ -27,8 +29,13 @@ import java.util.List;
 @RequiredArgsConstructor
 public class BookingController {
 
+    private static final int MIN_PAGE_SIZE = 1;
+    private static final int MAX_PAGE_SIZE = 100;
+    private static final int DEFAULT_PAGE_SIZE = 20;
+
     private final CreateBookingUseCase createBookingUseCase;
     private final GetBookingUseCase getBookingUseCase;
+    private final ListBookingsUseCase listBookingsUseCase;
 
     @PostMapping
     public ResponseEntity<CreateBookingResponse> createBooking(
@@ -58,12 +65,45 @@ public class BookingController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
+    /**
+     * GET /api/v1/bookings?page=&size= — "my tickets": always scoped to the JWT-authenticated
+     * caller, never to a client-supplied customerId (same reasoning as {@link #requireMatchingIdentity}
+     * below — otherwise any authenticated user could list anyone else's bookings).
+     */
+    @GetMapping
+    public ResponseEntity<BookingListResponse> listMine(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "" + DEFAULT_PAGE_SIZE) int size) {
+        int safePage = Math.max(page, 0);
+        int safeSize = Math.min(Math.max(size, MIN_PAGE_SIZE), MAX_PAGE_SIZE);
+
+        String customerId = currentUser().userId();
+        ListBookingsUseCase.BookingPage result = listBookingsUseCase.listByCustomer(customerId, safePage, safeSize);
+        return ResponseEntity.ok(toListResponse(result));
+    }
+
+    private BookingListResponse toListResponse(ListBookingsUseCase.BookingPage result) {
+        return new BookingListResponse(
+                result.items().stream().map(this::toSummary).toList(),
+                result.totalElements(), result.page(), result.size());
+    }
+
+    private BookingSummaryResponse toSummary(Booking booking) {
+        return new BookingSummaryResponse(
+                booking.getBookingId(), booking.getShowtimeId(), booking.getSeatSelection().seatCodes(),
+                booking.getAmount().amount(), booking.getAmount().currency(),
+                booking.getStatus().name(), booking.getCreatedAt());
+    }
+
+    private AuthenticatedUser currentUser() {
+        return AuthenticatedUserContext.get()
+                .orElseThrow(() -> new IllegalStateException("JwtAuthenticationFilter did not run for this request"));
+    }
+
     // customerId is client-supplied in the body — without this check, any authenticated caller
     // could create bookings billed to someone else's account.
     private void requireMatchingIdentity(String customerId) {
-        AuthenticatedUser user = AuthenticatedUserContext.get()
-                .orElseThrow(() -> new IllegalStateException("JwtAuthenticationFilter did not run for this request"));
-        if (!user.userId().equals(customerId)) {
+        if (!currentUser().userId().equals(customerId)) {
             throw new IdentityMismatchException(
                     "customerId does not match the authenticated caller");
         }
@@ -80,6 +120,11 @@ public class BookingController {
     public record CreateBookingResponse(String bookingId, String status) {}
 
     public record BookingStatusResponse(String bookingId, String status) {}
+
+    public record BookingSummaryResponse(String bookingId, String showtimeId, List<String> seatCodes,
+                                        BigDecimal amount, String currency, String status, Instant createdAt) {}
+
+    public record BookingListResponse(List<BookingSummaryResponse> items, long totalElements, int page, int size) {}
 
     // Handles duplicate in-flight requests with 409 Conflict
     @ExceptionHandler(DuplicateRequestInProgressException.class)

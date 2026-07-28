@@ -2,6 +2,7 @@ package com.aireak.booking.adapter.in.web;
 
 import com.aireak.booking.application.port.in.CreateBookingUseCase;
 import com.aireak.booking.application.port.in.GetBookingUseCase;
+import com.aireak.booking.application.port.in.ListBookingsUseCase;
 import com.aireak.booking.application.port.in.dto.BookingCreationResult;
 import com.aireak.booking.domain.model.BookingStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -61,10 +62,30 @@ class BookingControllerJwtAuthenticationIntegrationTest {
     @MockitoBean
     private GetBookingUseCase getBookingUseCase;
 
+    @MockitoBean
+    private ListBookingsUseCase listBookingsUseCase;
+
     @Test
     void rejectsRequestWithoutBearerToken() throws Exception {
         mockMvc.perform(get("/api/v1/bookings/{id}", "nonexistent"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void rejectsListMineRequestWithoutBearerToken() throws Exception {
+        mockMvc.perform(get("/api/v1/bookings"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void listMineScopesToTheAuthenticatedCallerNotAClientSuppliedId() throws Exception {
+        String accountId = UUID.randomUUID().toString();
+        when(listBookingsUseCase.listByCustomer(accountId, 0, 20))
+                .thenReturn(new ListBookingsUseCase.BookingPage(List.of(), 0, 0, 20));
+
+        mockMvc.perform(get("/api/v1/bookings")
+                        .header("Authorization", "Bearer " + validToken(accountId)))
+                .andExpect(status().isOk());
     }
 
     @Test

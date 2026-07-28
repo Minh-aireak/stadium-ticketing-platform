@@ -2,6 +2,7 @@ package com.aireak.booking.application.service;
 
 import com.aireak.booking.application.port.in.CreateBookingUseCase;
 import com.aireak.booking.application.port.in.GetBookingUseCase;
+import com.aireak.booking.application.port.in.ListBookingsUseCase;
 import com.aireak.booking.application.port.in.dto.BookingCreationResult;
 import com.aireak.booking.application.port.out.BookingRepository;
 import com.aireak.booking.application.port.out.IdempotencyClaim;
@@ -24,7 +25,7 @@ import java.util.Optional;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class BookingOrchestrationService implements CreateBookingUseCase, GetBookingUseCase {
+public class BookingOrchestrationService implements CreateBookingUseCase, GetBookingUseCase, ListBookingsUseCase {
 
     private final BookingSagaSteps sagaSteps;
     private final BookingRepository bookingRepository;
@@ -226,6 +227,15 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
     @Override
     public Optional<Booking> getBooking(String bookingId) {
         return bookingRepository.findById(bookingId);
+    }
+
+    // For GET /api/v1/bookings ("my tickets"): the controller resolves customerId from the
+    // JWT-authenticated caller, never from client input, so one customer can't list another's.
+    @Override
+    public BookingPage listByCustomer(String customerId, int page, int size) {
+        List<Booking> items = bookingRepository.findByCustomerId(customerId, page, size);
+        long total = bookingRepository.countByCustomerId(customerId);
+        return new BookingPage(items, total, page, size);
     }
 
     // Called by PaymentResultConsumer on PAYMENT_SUCCEEDED.

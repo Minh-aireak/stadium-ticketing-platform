@@ -2,6 +2,8 @@ package com.aireak.booking.adapter.out.persistence;
 
 import com.aireak.booking.domain.model.BookingStatus;
 import org.springframework.data.domain.Limit;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.time.Instant;
@@ -13,4 +15,7 @@ interface BookingJpaRepository extends JpaRepository<BookingJpaEntity, String> {
 
     List<BookingJpaEntity> findByStatusAndInventoryConfirmedFalseAndUpdatedAtBefore(
             BookingStatus status, Instant updatedBefore, Limit limit);
+
+    Page<BookingJpaEntity> findByCustomerId(String customerId, Pageable pageable);
+    long countByCustomerId(String customerId);
 }

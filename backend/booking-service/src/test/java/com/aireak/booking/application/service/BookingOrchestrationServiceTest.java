@@ -471,6 +471,24 @@ class BookingOrchestrationServiceTest {
         }
     }
 
+    @Nested
+    class ListMyBookings {
+
+        @Test
+        void returnsThePageAndTotalFromTheRepository() {
+            Booking booking = confirmedBooking(BOOKING_ID);
+            when(bookingRepository.findByCustomerId(CUSTOMER_ID, 0, 20)).thenReturn(List.of(booking));
+            when(bookingRepository.countByCustomerId(CUSTOMER_ID)).thenReturn(1L);
+
+            var page = service.listByCustomer(CUSTOMER_ID, 0, 20);
+
+            assertThat(page.items()).containsExactly(booking);
+            assertThat(page.totalElements()).isEqualTo(1L);
+            assertThat(page.page()).isEqualTo(0);
+            assertThat(page.size()).isEqualTo(20);
+        }
+    }
+
     private static Booking pendingPaymentBooking(String bookingId) {
         Booking booking = reconstituted(bookingId, BookingStatus.DRAFT);
         booking.markPendingPayment();

@@ -7,6 +7,8 @@ import com.aireak.booking.domain.model.BookingStatus;
 import com.aireak.booking.domain.model.SeatSelection;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Limit;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -43,6 +45,19 @@ public class BookingPersistenceAdapter implements BookingRepository {
                 .stream()
                 .map(this::toDomain)
                 .toList();
+    }
+
+    @Override
+    public List<Booking> findByCustomerId(String customerId, int page, int size) {
+        return jpaRepository
+                .findByCustomerId(customerId, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")))
+                .map(this::toDomain)
+                .getContent();
+    }
+
+    @Override
+    public long countByCustomerId(String customerId) {
+        return jpaRepository.countByCustomerId(customerId);
     }
 
     private BookingJpaEntity toJpaEntity(Booking booking) {

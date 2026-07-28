@@ -23,4 +23,8 @@ public interface BookingRepository {
      *              and every scheduled run would re-walk the entire thing.
      */
     List<Booking> findConfirmedAwaitingInventoryConfirmation(Instant updatedBefore, int limit);
+
+    /** Page of a customer's bookings, newest first. */
+    List<Booking> findByCustomerId(String customerId, int page, int size);
+    long countByCustomerId(String customerId);
 }
