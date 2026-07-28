@@ -1,6 +1,8 @@
 package com.aireak.booking.adapter.out.client;
 
 import com.aireak.booking.application.port.out.TicketInventoryPort;
+import com.aireak.common.security.AuthenticatedUser;
+import com.aireak.common.security.AuthenticatedUserContext;
 import io.github.resilience4j.bulkhead.annotation.Bulkhead;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
@@ -8,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -25,6 +28,8 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
     @Qualifier("restClient")
     private final RestClient restClient;
 
+    private final InternalServiceTokenProvider internalServiceTokenProvider;
+
     @Value("${services.ticket-inventory.base-url:http://localhost:8083}")
     private String baseUrl;
 
@@ -39,6 +44,7 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
         restClient.post()
                 .uri(baseUrl + "/api/v1/inventory/{showtimeId}/reserve", showtimeId)
                 .header("Idempotency-Key", bookingId)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + authorizationToken())
                 .body(new ReservationRequest(bookingId, seatCodes))
                 .retrieve()
                 .toBodilessEntity();
@@ -53,6 +59,7 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
         restClient.delete()
                 .uri(baseUrl + "/api/v1/inventory/{showtimeId}/reserve/{bookingId}?seatCodes={codes}",
                         showtimeId, bookingId, String.join(",", seatCodes))
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + authorizationToken())
                 .retrieve()
                 .toBodilessEntity();
     }
@@ -63,11 +70,24 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
     @Retry(name = "ticket-inventory")
     public void confirmReservation(String showtimeId, String bookingId, List<String> seatCodes) {
         log.debug("Confirming reservation: showtime={}, booking={}", showtimeId, bookingId);
+        // Always the internal service token: confirmReservation only ever runs from
+        // PaymentResultConsumer (Kafka listener thread) or InventoryConfirmationReconciler
+        // (scheduled thread) — never inside the original caller's HTTP request.
         restClient.post()
                 .uri(baseUrl + "/api/v1/inventory/{showtimeId}/confirm", showtimeId)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + internalServiceTokenProvider.mintServiceToken())
                 .body(new ReservationRequest(bookingId, seatCodes))
                 .retrieve()
                 .toBodilessEntity();
+    }
+
+    // Forwards the original caller's JWT when this call happens inside their HTTP request
+    // (reserveSeats, and releaseSeats' createBooking-compensation path); falls back to a minted
+    // internal service token when it doesn't (releaseSeats' PAYMENT_FAILED-compensation path,
+    // triggered from a Kafka listener thread with no AuthenticatedUserContext set).
+    private String authorizationToken() {
+        return AuthenticatedUserContext.get().map(AuthenticatedUser::token)
+                .orElseGet(internalServiceTokenProvider::mintServiceToken);
     }
 
     // Fallback: propagate as RuntimeException so saga compensates

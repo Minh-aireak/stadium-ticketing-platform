@@ -2,6 +2,8 @@ package com.aireak.booking.adapter.out.client;
 
 import com.aireak.booking.application.port.out.OutboundServiceUnavailableException;
 import com.aireak.booking.application.port.out.PaymentPort;
+import com.aireak.common.security.AuthenticatedUser;
+import com.aireak.common.security.AuthenticatedUserContext;
 import io.github.resilience4j.bulkhead.annotation.Bulkhead;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
@@ -9,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestClient;
@@ -29,6 +32,8 @@ public class PaymentRestAdapter implements PaymentPort {
     @Qualifier("paymentStatusRestClient")
     private final RestClient paymentStatusRestClient;
 
+    private final InternalServiceTokenProvider internalServiceTokenProvider;
+
     @Value("${services.payment.base-url:http://localhost:8084}")
     private String baseUrl;
 
@@ -39,13 +44,21 @@ public class PaymentRestAdapter implements PaymentPort {
     public void initiatePayment(String bookingId, BigDecimal amount, String currency) {
         log.debug("Initiating payment: bookingId={}, amount={} {}", bookingId, amount, currency);
         // bookingId doubles as the Idempotency-Key so @Retry re-sends dedupe instead of
-        // starting a second charge.
+        // starting a second charge. Always called from within the caller's own HTTP request
+        // (createBooking), so a real end-user token is always available to forward.
         restClient.post()
                 .uri(baseUrl + "/api/v1/payments")
                 .header("Idempotency-Key", bookingId)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + authorizationToken())
                 .body(new InitiatePaymentRequest(bookingId, amount, currency))
                 .retrieve()
                 .toBodilessEntity();
+    }
+
+    // See TicketInventoryRestAdapter#authorizationToken — same fallback rationale.
+    private String authorizationToken() {
+        return AuthenticatedUserContext.get().map(AuthenticatedUser::token)
+                .orElseGet(internalServiceTokenProvider::mintServiceToken);
     }
 
     private void initiatePaymentFallback(String bookingId, BigDecimal amount,
@@ -70,6 +83,7 @@ public class PaymentRestAdapter implements PaymentPort {
         try {
             PaymentStatusResponse response = paymentStatusRestClient.get()
                     .uri(baseUrl + "/api/v1/payments/{bookingId}", bookingId)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + authorizationToken())
                     .retrieve()
                     .body(PaymentStatusResponse.class);
             if (response == null) {

@@ -4,6 +4,9 @@ import com.aireak.booking.application.port.in.CreateBookingUseCase;
 import com.aireak.booking.application.port.in.GetBookingUseCase;
 import com.aireak.booking.application.port.in.dto.BookingCreationResult;
 import com.aireak.booking.application.service.DuplicateRequestInProgressException;
+import com.aireak.common.exception.IdentityMismatchException;
+import com.aireak.common.security.AuthenticatedUser;
+import com.aireak.common.security.AuthenticatedUserContext;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
@@ -31,6 +34,7 @@ public class BookingController {
     public ResponseEntity<CreateBookingResponse> createBooking(
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody CreateBookingRequest request) {
+        requireMatchingIdentity(request.customerId());
         BookingCreationResult result = createBookingUseCase.createBooking(
                 idempotencyKey,
                 request.customerId(),
@@ -52,6 +56,17 @@ public class BookingController {
         return getBookingUseCase.getBooking(bookingId)
                 .map(b -> ResponseEntity.ok(new BookingStatusResponse(b.getBookingId(), b.getStatus().name())))
                 .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    // customerId is client-supplied in the body — without this check, any authenticated caller
+    // could create bookings billed to someone else's account.
+    private void requireMatchingIdentity(String customerId) {
+        AuthenticatedUser user = AuthenticatedUserContext.get()
+                .orElseThrow(() -> new IllegalStateException("JwtAuthenticationFilter did not run for this request"));
+        if (!user.userId().equals(customerId)) {
+            throw new IdentityMismatchException(
+                    "customerId does not match the authenticated caller");
+        }
     }
 
     public record CreateBookingRequest(
