@@ -10,6 +10,7 @@
     "topic.prefix": "identity",
     "plugin.name": "pgoutput",
     "publication.autocreate.mode": "filtered",
+    "publication.name": "identity_outbox_publication",
     "slot.name": "identity_outbox_slot",
     "table.include.list": "public.outbox_events",
 

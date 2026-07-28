@@ -10,6 +10,7 @@
     "topic.prefix": "payment",
     "plugin.name": "pgoutput",
     "publication.autocreate.mode": "filtered",
+    "publication.name": "payment_outbox_publication",
     "slot.name": "payment_outbox_slot",
     "table.include.list": "public.outbox_events",
 

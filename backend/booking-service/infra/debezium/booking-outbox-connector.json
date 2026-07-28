@@ -10,6 +10,7 @@
     "topic.prefix": "booking",
     "plugin.name": "pgoutput",
     "publication.autocreate.mode": "filtered",
+    "publication.name": "booking_outbox_publication",
     "slot.name": "booking_outbox_slot",
     "table.include.list": "public.outbox_events",
 
