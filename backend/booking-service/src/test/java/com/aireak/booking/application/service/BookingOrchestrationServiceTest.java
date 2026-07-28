@@ -1,5 +1,6 @@
 package com.aireak.booking.application.service;
 
+import com.aireak.booking.application.port.in.dto.BookingCreationResult;
 import com.aireak.booking.application.port.out.BookingRepository;
 import com.aireak.booking.application.port.out.IdempotencyClaim;
 import com.aireak.booking.application.port.out.IdempotencyStore;
@@ -83,7 +84,7 @@ class BookingOrchestrationServiceTest {
         void createBookingWithoutIdempotencyKeyReturnsPendingPaymentAndNeverTouchesIdempotencyStore() {
             stubCreateDraftBooking();
 
-            BookingOrchestrationService.BookingCreationResult result =
+            BookingCreationResult result =
                     service.createBooking(null, CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
 
             assertThat(result.bookingId()).isEqualTo(BOOKING_ID);
@@ -117,7 +118,7 @@ class BookingOrchestrationServiceTest {
             when(bookingRepository.findById("existing-booking"))
                     .thenReturn(Optional.of(confirmedBooking("existing-booking")));
 
-            BookingOrchestrationService.BookingCreationResult result =
+            BookingCreationResult result =
                     service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
 
             assertThat(result.bookingId()).isEqualTo("existing-booking");
@@ -142,7 +143,7 @@ class BookingOrchestrationServiceTest {
             Booking existing = pendingPaymentBooking("existing-booking");
             when(bookingRepository.findByIdempotencyKey("idem-1")).thenReturn(Optional.of(existing));
 
-            BookingOrchestrationService.BookingCreationResult result =
+            BookingCreationResult result =
                     service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
 
             assertThat(result.bookingId()).isEqualTo("existing-booking");
@@ -161,7 +162,7 @@ class BookingOrchestrationServiceTest {
                     .thenReturn(Optional.empty())
                     .thenReturn(Optional.of(winner));
 
-            BookingOrchestrationService.BookingCreationResult result =
+            BookingCreationResult result =
                     service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
 
             assertThat(result.bookingId()).isEqualTo("other-request-booking");
@@ -250,7 +251,7 @@ class BookingOrchestrationServiceTest {
             when(bookingRepository.findById(BOOKING_ID))
                     .thenReturn(Optional.of(confirmedBooking(BOOKING_ID)));
 
-            BookingOrchestrationService.BookingCreationResult result =
+            BookingCreationResult result =
                     service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
 
             assertThat(result.bookingId()).isEqualTo(BOOKING_ID);
