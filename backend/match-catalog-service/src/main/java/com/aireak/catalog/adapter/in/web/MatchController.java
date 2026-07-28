@@ -5,6 +5,8 @@ import com.aireak.catalog.application.port.in.CreateMatchUseCase;
 import com.aireak.catalog.application.port.in.PublishMatchUseCase;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -47,5 +49,5 @@ public class MatchController {
     record CreateMatchRequest(@NotBlank String homeTeam, @NotBlank String awayTeam,
                               @NotBlank String competition) {}
     record CreateMatchResponse(String matchId) {}
-    record AddShowtimeRequest(Instant startTime, @NotBlank String venueId, int totalSeats) {}
+    record AddShowtimeRequest(@NotNull Instant startTime, @NotBlank String venueId, @Positive int totalSeats) {}
 }
