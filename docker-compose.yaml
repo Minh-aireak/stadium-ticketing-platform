@@ -17,6 +17,7 @@ volumes:
   postgres_booking:
   postgres_payment:
   postgres_catalog:
+  postgres_notification:
   redis_data:
   kafka_data:
   zookeeper_data:
@@ -130,6 +131,29 @@ services:
       - postgres_catalog:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U aireak -d catalog_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---- PostgreSQL — notification-service --------------------------------
+  # No Debezium connector reads this one (notification-service is a pure Kafka
+  # consumer, not an outbox producer) — wal_level=logical is kept only for
+  # consistency with the other 5 Postgres containers, not because it's needed.
+  postgres-notification:
+    image: postgres:16-alpine
+    container_name: postgres-notification
+    command: ["postgres", "-c", "wal_level=logical"]
+    networks: [stadium-net]
+    environment:
+      POSTGRES_DB: notification_db
+      POSTGRES_USER: aireak
+      POSTGRES_PASSWORD: aireak
+    ports:
+      - "5437:5432"
+    volumes:
+      - postgres_notification:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aireak -d notification_db"]
       interval: 10s
       timeout: 5s
       retries: 5
