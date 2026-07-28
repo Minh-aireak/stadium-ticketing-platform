@@ -5,8 +5,10 @@ import com.aireak.booking.domain.event.BookingConfirmedEvent;
 import com.aireak.identity.domain.event.AccountRegisteredEvent;
 import com.aireak.notification.application.port.in.SendNotificationUseCase;
 import com.aireak.notification.application.port.out.EmailSenderPort;
+import com.aireak.notification.application.port.out.NotificationRepository;
 import com.aireak.notification.application.port.out.ProcessedEventRepository;
 import com.aireak.notification.application.port.out.SmsSenderPort;
+import com.aireak.notification.domain.model.Notification;
 import com.aireak.notification.domain.model.NotificationChannel;
 import com.aireak.notification.domain.model.NotificationTemplate;
 import freemarker.template.Configuration;
@@ -38,6 +40,7 @@ public class NotificationDispatchService implements SendNotificationUseCase {
     private final EmailSenderPort emailSenderPort;
     private final SmsSenderPort smsSenderPort;
     private final ProcessedEventRepository processedEventRepository;
+    private final NotificationRepository notificationRepository;
     private final Configuration freemarkerConfig;
 
     /**
@@ -100,6 +103,16 @@ public class NotificationDispatchService implements SendNotificationUseCase {
             );
             default -> log.warn("Unhandled channel: {}", template.getChannel());
         }
+
+        // In-app record for GET /api/v1/notifications — separate from the email/SMS side
+        // effect above; reuses the same rendered subject/body instead of a second template pass.
+        String recipientId = extractRecipientId(payload);
+        if (recipientId != null) {
+            notificationRepository.save(Notification.create(recipientId, template.getSubjectTemplate(), renderedBody));
+        } else {
+            log.warn("No recipientId resolvable for eventType={} — skipping in-app notification record",
+                    template.getEventType());
+        }
     }
 
     private String renderTemplate(String templateName, Object payload) {
@@ -155,5 +168,16 @@ public class NotificationDispatchService implements SendNotificationUseCase {
 
     private String extractPhone(Object payload) {
         return "+84000000000";
+    }
+
+    private String extractRecipientId(Object payload) {
+        if (payload instanceof AccountRegisteredEvent event) {
+            return event.accountId().value();
+        } else if (payload instanceof BookingConfirmedEvent event) {
+            return event.customerId();
+        } else if (payload instanceof BookingCancelledEvent event) {
+            return event.customerId();
+        }
+        return null;
     }
 }
