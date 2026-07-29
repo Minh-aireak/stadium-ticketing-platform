@@ -2,8 +2,10 @@ package com.aireak.payment.adapter.in.web;
 
 import com.aireak.payment.application.port.in.GetPaymentUseCase;
 import com.aireak.payment.application.port.in.InitiatePaymentUseCase;
+import com.aireak.payment.application.port.in.RetryPaymentUseCase;
 import com.aireak.payment.application.port.in.command.InitiatePaymentCommand;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +28,7 @@ public class PaymentController {
 
     private final InitiatePaymentUseCase initiatePaymentUseCase;
     private final GetPaymentUseCase getPaymentUseCase;
+    private final RetryPaymentUseCase retryPaymentUseCase;
 
     @PostMapping
     public ResponseEntity<InitiatePaymentResponse> initiate(@Valid @RequestBody InitiatePaymentRequest request) {
@@ -33,6 +36,14 @@ public class PaymentController {
                 new InitiatePaymentCommand(request.bookingId(), request.amount(), request.currency()));
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(new InitiatePaymentResponse(paymentId));
+    }
+
+    /** POST /api/v1/payments/{paymentId}/retry — re-attempts a FAILED payment on the same row. */
+    @PostMapping("/{paymentId}/retry")
+    public ResponseEntity<InitiatePaymentResponse> retry(@PathVariable("paymentId") String paymentId) {
+        return retryPaymentUseCase.retry(paymentId)
+                .map(id -> ResponseEntity.ok(new InitiatePaymentResponse(id)))
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @GetMapping("/{bookingId}")
@@ -44,9 +55,12 @@ public class PaymentController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
+    // fraction = 2 for every currency (simplification: no zero-decimal currency support like
+    // JPY yet) — mirrors the `amount` column's own precision(15,2), and rejects sub-cent values
+    // before they can round unpredictably or blow up BigDecimal division at the gateway.
     record InitiatePaymentRequest(
             @NotBlank String bookingId,
-            @Positive BigDecimal amount,
+            @Positive @Digits(integer = 13, fraction = 2) BigDecimal amount,
             @NotBlank String currency
     ) {}
 

@@ -90,6 +90,34 @@ class PaymentTest {
     }
 
     @Test
+    void retryTransitionsFromFailedToInitiatedAndClearsFailureReason() {
+        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+        payment.markFailed("gateway timeout");
+
+        payment.retry();
+
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.INITIATED);
+        assertThat(payment.getFailureReason()).isNull();
+    }
+
+    @Test
+    void retryRejectsWhenNotFailed() {
+        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+
+        assertThatThrownBy(payment::retry)
+                .isInstanceOf(InvalidPaymentStatusException.class);
+    }
+
+    @Test
+    void retryRejectsWhenAlreadySucceeded() {
+        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+        payment.markSucceeded("gw-tx-1");
+
+        assertThatThrownBy(payment::retry)
+                .isInstanceOf(InvalidPaymentStatusException.class);
+    }
+
+    @Test
     void reconstitutePreservesVersionStatusAndRaisesNoEvents() {
         Instant createdAt = Instant.parse("2024-01-01T00:00:00Z");
 

@@ -200,6 +200,52 @@ class PaymentServiceTest {
     }
 
     @Test
+    void retryReturnsEmptyWhenPaymentNotFound() {
+        newService();
+        when(paymentRepository.findById("missing")).thenReturn(Optional.empty());
+
+        Optional<String> result = service.retry("missing");
+
+        assertThat(result).isEmpty();
+        verify(sagaSteps, never()).retry(any());
+        verify(paymentGatewayPort, never()).charge(any(), any(), any());
+    }
+
+    @Test
+    void retryChargesGatewayAndMarksSucceededOnSuccess() {
+        newService();
+        Payment reopened = Payment.reconstitute("payment-1", "booking-1", new BigDecimal("100.00"), "USD",
+                PaymentStatus.INITIATED, null, null, Instant.now(), 1L);
+        when(paymentRepository.findById("payment-1")).thenReturn(Optional.of(reopened));
+        when(sagaSteps.retry("payment-1")).thenReturn(reopened);
+        when(paymentGatewayPort.charge("booking-1", reopened.getAmount(), reopened.getCurrency()))
+                .thenReturn("gw-tx-2");
+
+        Optional<String> result = service.retry("payment-1");
+
+        assertThat(result).contains("payment-1");
+        verify(sagaSteps).markSucceeded("payment-1", "gw-tx-2");
+        verify(sagaSteps, never()).markFailed(any(), any());
+    }
+
+    @Test
+    void retryMarksFailedInsteadOfPropagatingWhenGatewayThrows() {
+        newService();
+        Payment reopened = Payment.reconstitute("payment-1", "booking-1", new BigDecimal("100.00"), "USD",
+                PaymentStatus.INITIATED, null, null, Instant.now(), 1L);
+        when(paymentRepository.findById("payment-1")).thenReturn(Optional.of(reopened));
+        when(sagaSteps.retry("payment-1")).thenReturn(reopened);
+        when(paymentGatewayPort.charge(any(), any(), any()))
+                .thenThrow(new RuntimeException("gateway unreachable"));
+
+        Optional<String> result = service.retry("payment-1");
+
+        assertThat(result).contains("payment-1");
+        verify(sagaSteps).markFailed(eq("payment-1"), anyString());
+        verify(sagaSteps, never()).markSucceeded(any(), any());
+    }
+
+    @Test
     void getByBookingIdDelegatesToRepository() {
         newService();
         Payment payment = existingPayment("payment-1");

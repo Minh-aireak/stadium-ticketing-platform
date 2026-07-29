@@ -43,6 +43,16 @@ class PaymentSagaSteps {
         saveAndPublish(payment);
     }
 
+    // Returns the reopened Payment so the caller (PaymentService) can read bookingId/amount/
+    // currency for the follow-up gateway charge without a second lookup.
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public Payment retry(String paymentId) {
+        Payment payment = findOrThrow(paymentId);
+        payment.retry();
+        paymentRepository.save(payment);
+        return payment;
+    }
+
     private void saveAndPublish(Payment payment) {
         paymentRepository.save(payment);
         eventPublisher.publishAll(payment.pullDomainEvents());

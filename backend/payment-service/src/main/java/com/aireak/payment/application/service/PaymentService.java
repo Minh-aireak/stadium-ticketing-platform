@@ -2,6 +2,7 @@ package com.aireak.payment.application.service;
 
 import com.aireak.payment.application.port.in.GetPaymentUseCase;
 import com.aireak.payment.application.port.in.InitiatePaymentUseCase;
+import com.aireak.payment.application.port.in.RetryPaymentUseCase;
 import com.aireak.payment.application.port.in.command.InitiatePaymentCommand;
 import com.aireak.payment.application.port.out.PaymentGatewayPort;
 import com.aireak.payment.application.port.out.PaymentIdempotencyPort;
@@ -45,7 +46,7 @@ import java.util.Optional;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase {
+public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase, RetryPaymentUseCase {
 
     private static final String IDEMPOTENCY_KEY_PREFIX = "payment:idempotency:booking:";
     private static final Duration IDEMPOTENCY_TTL = Duration.ofMinutes(5);
@@ -151,6 +152,33 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
     @Override
     public Optional<Payment> getByBookingId(String bookingId) {
         return paymentRepository.findByBookingId(bookingId);
+    }
+
+    /**
+     * Re-opens a FAILED payment (see {@link Payment#retry}) and re-attempts the gateway charge —
+     * same two-phase shape as {@link #execute}: reopen-and-persist commits first (so the row is
+     * never left "stuck" mid-retry), then the gateway call runs with no local transaction held.
+     */
+    @Override
+    public Optional<String> retry(String paymentId) {
+        if (paymentRepository.findById(paymentId).isEmpty()) {
+            return Optional.empty();
+        }
+
+        Payment payment = sagaSteps.retry(paymentId);
+        log.info("Payment retry initiated: id={}, bookingId={}", paymentId, payment.getBookingId());
+
+        String gatewayTxId;
+        try {
+            gatewayTxId = paymentGatewayPort.charge(payment.getBookingId(), payment.getAmount(), payment.getCurrency());
+        } catch (Exception e) {
+            log.error("Payment retry charge failed: id={}, reason={}", paymentId, e.getMessage());
+            sagaSteps.markFailed(paymentId, e.getMessage());
+            return Optional.of(paymentId);
+        }
+
+        persistSucceededOutcome(paymentId, payment.getBookingId(), gatewayTxId, payment.getAmount(), payment.getCurrency());
+        return Optional.of(paymentId);
     }
 
     private String existingPaymentIdOrThrow(String bookingId) {

@@ -2,6 +2,7 @@ package com.aireak.payment.adapter.in.web;
 
 import com.aireak.payment.application.port.in.GetPaymentUseCase;
 import com.aireak.payment.application.port.in.InitiatePaymentUseCase;
+import com.aireak.payment.application.port.in.RetryPaymentUseCase;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.Test;
@@ -47,6 +48,9 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
 
     @MockitoBean
     private GetPaymentUseCase getPaymentUseCase;
+
+    @MockitoBean
+    private RetryPaymentUseCase retryPaymentUseCase;
 
     @Test
     void rejectsRequestWithoutBearerToken() throws Exception {

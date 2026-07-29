@@ -20,6 +20,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -100,6 +101,33 @@ class PaymentSagaStepsTest {
         ArgumentCaptor<List<Object>> published = ArgumentCaptor.forClass(List.class);
         verify(eventPublisher).publishAll(published.capture());
         assertThat(published.getValue().get(0)).isInstanceOf(PaymentFailedEvent.class);
+    }
+
+    @Test
+    void retryReopensAFailedPaymentAndSavesButDoesNotPublish() {
+        newSagaSteps();
+        Payment existing = Payment.reconstitute("payment-1", "booking-1", new BigDecimal("100.00"),
+                "USD", PaymentStatus.FAILED, null, "gateway timeout", Instant.now(), 0L);
+        when(paymentRepository.findById("payment-1")).thenReturn(Optional.of(existing));
+
+        Payment result = sagaSteps.retry("payment-1");
+
+        assertThat(result.getStatus()).isEqualTo(PaymentStatus.INITIATED);
+        ArgumentCaptor<Payment> saved = ArgumentCaptor.forClass(Payment.class);
+        verify(paymentRepository).save(saved.capture());
+        assertThat(saved.getValue()).isSameAs(existing);
+        // retry() itself raises no domain event (mirrors tryInitiate) — only the follow-up
+        // gateway outcome (markSucceeded/markFailed) publishes anything.
+        verify(eventPublisher, never()).publishAll(any());
+    }
+
+    @Test
+    void retryThrowsWhenPaymentNotFound() {
+        newSagaSteps();
+        when(paymentRepository.findById("missing")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> sagaSteps.retry("missing"))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @Test

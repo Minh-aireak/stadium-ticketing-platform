@@ -90,6 +90,20 @@ public class Payment {
         domainEvents.add(new PaymentFailedEvent(paymentId, bookingId, reason));
     }
 
+    /**
+     * Re-opens a FAILED payment for another gateway attempt, on the same row — bookingId has a
+     * unique constraint (see {@code PaymentJpaEntity}), so a fresh {@link #initiate} for the same
+     * booking would just violate it. Resets back to {@link PaymentStatus#INITIATED}: the domain
+     * has no separate "PENDING" status, and INITIATED already means exactly that ("payment
+     * request sent to gateway" — see {@link PaymentStatus}), the same state a brand-new payment
+     * starts in.
+     */
+    public void retry() {
+        requireStatus(PaymentStatus.FAILED, "retry");
+        this.status = PaymentStatus.INITIATED;
+        this.failureReason = null;
+    }
+
     // ----------------------------------------------------------------
     // Accessors
     // ----------------------------------------------------------------
