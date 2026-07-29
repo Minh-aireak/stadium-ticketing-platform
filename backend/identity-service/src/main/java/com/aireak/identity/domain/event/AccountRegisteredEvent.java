@@ -12,9 +12,10 @@ import java.time.Instant;
 public record AccountRegisteredEvent(
         AccountId accountId,
         Email email,
+        String verificationToken,
         Instant occurredAt
 ) {
-    public AccountRegisteredEvent(AccountId accountId, Email email) {
-        this(accountId, email, Instant.now());
+    public AccountRegisteredEvent(AccountId accountId, Email email, String verificationToken) {
+        this(accountId, email, verificationToken, Instant.now());
     }
 }

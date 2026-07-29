@@ -3,6 +3,7 @@ package com.aireak.identity.application.service;
 import com.aireak.identity.application.port.in.command.RegisterAccountCommand;
 import com.aireak.identity.application.port.out.AccountRepository;
 import com.aireak.identity.application.port.out.DomainEventPublisher;
+import com.aireak.identity.application.port.out.EmailVerificationTokenPort;
 import com.aireak.identity.application.port.out.PasswordHashPort;
 import com.aireak.identity.domain.event.AccountRegisteredEvent;
 import com.aireak.identity.domain.exception.EmailAlreadyRegisteredException;
@@ -21,6 +22,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -35,9 +37,11 @@ class RegisterAccountServiceTest {
     private PasswordHashPort passwordHashPort;
     @Mock
     private DomainEventPublisher eventPublisher;
+    @Mock
+    private EmailVerificationTokenPort verificationTokenPort;
 
     private RegisterAccountService newService() {
-        return new RegisterAccountService(accountRepository, passwordHashPort, eventPublisher);
+        return new RegisterAccountService(accountRepository, passwordHashPort, eventPublisher, verificationTokenPort);
     }
 
     @Test
@@ -47,6 +51,7 @@ class RegisterAccountServiceTest {
         HashedPassword hashed = new HashedPassword("$2a$12$hashedValue");
         when(accountRepository.existsByEmail(email)).thenReturn(false);
         when(passwordHashPort.hash(any(RawPassword.class))).thenReturn(hashed);
+        when(verificationTokenPort.generate()).thenReturn("generated-verification-token");
 
         String accountId = service.execute(new RegisterAccountCommand(email.value(), "Abcdefg1"));
 
@@ -55,11 +60,14 @@ class RegisterAccountServiceTest {
         verify(accountRepository).save(savedAccount.capture());
         assertThat(savedAccount.getValue().getEmail()).isEqualTo(email);
         assertThat(savedAccount.getValue().getPassword()).isEqualTo(hashed);
+        verify(verificationTokenPort).store(eq("generated-verification-token"), eq(savedAccount.getValue().getId()));
 
         ArgumentCaptor<List<Object>> publishedEvents = ArgumentCaptor.forClass(List.class);
         verify(eventPublisher).publishAll(publishedEvents.capture());
         assertThat(publishedEvents.getValue()).hasSize(1);
         assertThat(publishedEvents.getValue().get(0)).isInstanceOf(AccountRegisteredEvent.class);
+        assertThat(((AccountRegisteredEvent) publishedEvents.getValue().get(0)).verificationToken())
+                .isEqualTo("generated-verification-token");
     }
 
     @Test

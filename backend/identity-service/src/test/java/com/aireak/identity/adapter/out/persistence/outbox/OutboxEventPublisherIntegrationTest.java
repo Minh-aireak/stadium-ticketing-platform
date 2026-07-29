@@ -2,9 +2,11 @@ package com.aireak.identity.adapter.out.persistence.outbox;
 
 import com.aireak.identity.adapter.out.persistence.AccountPersistenceAdapter;
 import com.aireak.identity.application.port.in.command.RegisterAccountCommand;
+import com.aireak.identity.application.port.out.EmailVerificationTokenPort;
 import com.aireak.identity.application.port.out.PasswordHashPort;
 import com.aireak.identity.application.service.RegisterAccountService;
 import com.aireak.identity.config.JpaConfig;
+import com.aireak.identity.domain.model.AccountId;
 import com.aireak.identity.domain.model.HashedPassword;
 import com.aireak.identity.domain.model.RawPassword;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -90,7 +92,7 @@ class OutboxEventPublisherIntegrationTest {
         OutboxEventEntity row = rows.get(0);
         assertThat(row.getAggregateType()).isEqualTo("identity.account.registered");
         assertThat(row.getEventType()).isEqualTo("AccountRegisteredEvent");
-        assertThat(row.getPayload()).contains("AccountRegisteredEvent", "outbox-test@example.com");
+        assertThat(row.getPayload()).contains("AccountRegisteredEvent", "outbox-test@example.com", "test-verification-token");
     }
 
     @TestConfiguration
@@ -112,6 +114,28 @@ class OutboxEventPublisherIntegrationTest {
                 @Override
                 public boolean matches(RawPassword rawPassword, HashedPassword hashedPassword) {
                     return hashedPassword.value().equals("hashed:" + rawPassword.exposeForHashing());
+                }
+            };
+        }
+
+        // Real token storage needs Redis, out of scope for this @DataJpaTest slice — this test
+        // only verifies the outbox row written alongside the Account insert.
+        @Bean
+        EmailVerificationTokenPort emailVerificationTokenPort() {
+            return new EmailVerificationTokenPort() {
+                @Override
+                public String generate() {
+                    return "test-verification-token";
+                }
+
+                @Override
+                public void store(String rawToken, AccountId accountId) {
+                    // no-op
+                }
+
+                @Override
+                public AccountId consume(String rawToken) {
+                    throw new UnsupportedOperationException("not used in this test");
                 }
             };
         }

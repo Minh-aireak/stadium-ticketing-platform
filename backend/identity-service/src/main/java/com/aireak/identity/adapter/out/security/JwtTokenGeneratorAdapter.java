@@ -18,7 +18,7 @@ import java.util.UUID;
  * Outbound adapter: generates signed JWT access tokens using JJWT 0.12.x.
  * Implements {@link TokenGeneratorPort}.
  *
- * <p>Claims: sub=accountId, email, status, iss, aud, jti. Signed with HS256 —
+ * <p>Claims: sub=accountId, email, status, role, iss, aud, jti. Signed with HS256 —
  * the key length is validated by {@link Keys#hmacShaKeyFor} (rejects weak/short secrets).
  */
 @Component
@@ -44,6 +44,7 @@ public class JwtTokenGeneratorAdapter implements TokenGeneratorPort {
                 .audience().add(properties.audience()).and()
                 .claim("email", account.getEmail().value())
                 .claim("status", account.getStatus().name())
+                .claim("role", account.getRole().name())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expiry))
                 .signWith(secretKey, SignatureAlgorithm.HS256)

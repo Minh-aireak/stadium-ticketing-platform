@@ -168,9 +168,33 @@ class JwtAuthenticationFilterTest {
 
         assertThat(chainInvoked[0]).isTrue();
         assertThat(response.getStatus()).isNotEqualTo(401);
-        assertThat(seenDuringChain.get()).contains(new AuthenticatedUser(accountId, "user@example.com", token));
+        assertThat(seenDuringChain.get()).contains(new AuthenticatedUser(accountId, "user@example.com", null, token));
         // Must not leak into whatever request the pooled thread handles next.
         assertThat(AuthenticatedUserContext.get()).isEmpty();
+    }
+
+    @Test
+    void validTokenWithRoleClaimPopulatesRole() throws Exception {
+        String accountId = UUID.randomUUID().toString();
+        String token = Jwts.builder()
+                .subject(accountId)
+                .issuer(ISSUER)
+                .audience().add(AUDIENCE).and()
+                .claim("email", "admin@example.com")
+                .claim("role", "ADMIN")
+                .issuedAt(Date.from(Instant.now()))
+                .expiration(Date.from(Instant.now().plusSeconds(300)))
+                .signWith(secretKey)
+                .compact();
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/bookings/123");
+        request.addHeader("Authorization", "Bearer " + token);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        AtomicReference<Optional<AuthenticatedUser>> seenDuringChain = new AtomicReference<>();
+        filter.doFilter(request, response, (req, res) -> seenDuringChain.set(AuthenticatedUserContext.get()));
+
+        assertThat(seenDuringChain.get()).contains(
+                new AuthenticatedUser(accountId, "admin@example.com", "ADMIN", token));
     }
 
     @Test
@@ -191,7 +215,7 @@ class JwtAuthenticationFilterTest {
         AtomicReference<Optional<AuthenticatedUser>> seenDuringChain = new AtomicReference<>();
         filter.doFilter(request, response, (req, res) -> seenDuringChain.set(AuthenticatedUserContext.get()));
 
-        assertThat(seenDuringChain.get()).contains(new AuthenticatedUser(accountId, null, tokenWithoutEmail));
+        assertThat(seenDuringChain.get()).contains(new AuthenticatedUser(accountId, null, null, tokenWithoutEmail));
     }
 
     @Test

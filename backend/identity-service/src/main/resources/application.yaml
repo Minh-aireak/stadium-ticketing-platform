@@ -37,6 +37,16 @@ refresh-token:
   # Absolute cap on a refresh session's lifetime — rotation does NOT extend this. Forces re-login every 30 days.
   absolute-ttl-seconds: ${REFRESH_TOKEN_ABSOLUTE_TTL_SECONDS:2592000}
 
+email-verification:
+  # How long the link in the welcome email stays valid; the token is one-time-use regardless.
+  ttl-seconds: ${EMAIL_VERIFICATION_TTL_SECONDS:86400}
+
+admin-bootstrap:
+  # Optional — when both are set and no ADMIN account exists yet, AdminBootstrapRunner creates
+  # (or promotes an existing account with this email to) the platform's first ADMIN on startup.
+  email: ${ADMIN_BOOTSTRAP_EMAIL:}
+  password: ${ADMIN_BOOTSTRAP_PASSWORD:}
+
 auth-cookie:
   name: ${AUTH_COOKIE_NAME:refresh_token}
   path: ${AUTH_COOKIE_PATH:/api/v1/auth}

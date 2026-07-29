@@ -47,7 +47,7 @@ class RefreshTokenServiceTest {
     private Account activeAccount(AccountId id) {
         Account account = Account.reconstitute(id, new Email("user@example.com"),
                 new HashedPassword("$2a$12$hash"), com.aireak.identity.domain.model.AccountStatus.ACTIVE,
-                Instant.now());
+                Instant.now(), com.aireak.identity.domain.model.AccountRole.USER);
         return account;
     }
 
@@ -112,7 +112,7 @@ class RefreshTokenServiceTest {
         when(refreshSessionStorePort.rotate("raw-token")).thenReturn(rotated);
         Account suspended = Account.reconstitute(accountId, new Email("user@example.com"),
                 new HashedPassword("$2a$12$hash"), com.aireak.identity.domain.model.AccountStatus.SUSPENDED,
-                Instant.now());
+                Instant.now(), com.aireak.identity.domain.model.AccountRole.USER);
         when(accountRepository.findById(accountId)).thenReturn(Optional.of(suspended));
 
         assertThatThrownBy(() -> service().execute("raw-token"))

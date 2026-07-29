@@ -1,11 +1,13 @@
 package com.aireak.common.web.advice;
 
 import com.aireak.common.exception.DomainException;
+import com.aireak.common.exception.ForbiddenException;
 import com.aireak.common.exception.IdentityMismatchException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -59,6 +61,22 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Handles a caller whose role doesn't satisfy an endpoint's authorization requirement →
+     * 403 Forbidden. Distinct from {@link IdentityMismatchException}: this is a role/permission
+     * failure, not an identity/ownership mismatch.
+     */
+    @ExceptionHandler(ForbiddenException.class)
+    public ProblemDetail handleForbidden(ForbiddenException ex) {
+        log.warn("Forbidden: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.FORBIDDEN, ex.getMessage());
+        problem.setType(URI.create(TYPE_BASE + "forbidden"));
+        problem.setTitle("Forbidden");
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+
+    /**
      * Handles Bean Validation failures → 400 Bad Request.
      */
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -69,6 +87,20 @@ public class GlobalExceptionHandler {
         log.debug("Validation failed: {}", fieldErrors);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.BAD_REQUEST, fieldErrors);
+        problem.setType(URI.create(TYPE_BASE + "validation-error"));
+        problem.setTitle("Validation Failed");
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+
+    /**
+     * Handles a missing required {@code @RequestParam} → 400 Bad Request.
+     */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ProblemDetail handleMissingParameter(MissingServletRequestParameterException ex) {
+        log.debug("Missing request parameter: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST, ex.getMessage());
         problem.setType(URI.create(TYPE_BASE + "validation-error"));
         problem.setTitle("Validation Failed");
         problem.setProperty("timestamp", Instant.now());

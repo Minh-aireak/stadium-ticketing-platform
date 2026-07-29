@@ -4,6 +4,7 @@ import com.aireak.identity.application.port.in.RegisterAccountUseCase;
 import com.aireak.identity.application.port.in.command.RegisterAccountCommand;
 import com.aireak.identity.application.port.out.AccountRepository;
 import com.aireak.identity.application.port.out.DomainEventPublisher;
+import com.aireak.identity.application.port.out.EmailVerificationTokenPort;
 import com.aireak.identity.application.port.out.PasswordHashPort;
 import com.aireak.identity.domain.exception.EmailAlreadyRegisteredException;
 import com.aireak.identity.domain.model.Account;
@@ -36,6 +37,7 @@ public class RegisterAccountService implements RegisterAccountUseCase {
     private final AccountRepository accountRepository;
     private final PasswordHashPort passwordHashPort;
     private final DomainEventPublisher eventPublisher;
+    private final EmailVerificationTokenPort verificationTokenPort;
 
     @Override
     @Transactional
@@ -49,9 +51,13 @@ public class RegisterAccountService implements RegisterAccountUseCase {
         }
 
         var hashedPassword = passwordHashPort.hash(rawPassword);
-        Account account = Account.register(email, hashedPassword);
+        String verificationToken = verificationTokenPort.generate();
+        Account account = Account.register(email, hashedPassword, verificationToken);
 
         accountRepository.save(account);
+        // Bound to accountId only after the account row exists, so a token never outlives (or
+        // precedes) the account it activates.
+        verificationTokenPort.store(verificationToken, account.getId());
 
         // Publish domain events after successful persistence
         var events = account.pullDomainEvents();

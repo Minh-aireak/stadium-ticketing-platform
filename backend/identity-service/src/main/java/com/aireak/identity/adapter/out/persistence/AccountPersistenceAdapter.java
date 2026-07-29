@@ -52,6 +52,11 @@ public class AccountPersistenceAdapter implements AccountRepository {
         return jpaRepository.existsByEmail(email.value());
     }
 
+    @Override
+    public boolean existsByRole(AccountRole role) {
+        return jpaRepository.existsByRole(role);
+    }
+
     // ---- Mapping ----
 
     private AccountJpaEntity toNewJpaEntity(Account account) {
@@ -60,6 +65,7 @@ public class AccountPersistenceAdapter implements AccountRepository {
                 .email(account.getEmail().value())
                 .passwordHash(account.getPassword().value())
                 .status(account.getStatus())
+                .role(account.getRole())
                 .registeredAt(account.getRegisteredAt())
                 .build();
     }
@@ -68,6 +74,7 @@ public class AccountPersistenceAdapter implements AccountRepository {
         entity.setEmail(account.getEmail().value());
         entity.setPasswordHash(account.getPassword().value());
         entity.setStatus(account.getStatus());
+        entity.setRole(account.getRole());
         return entity;
     }
 
@@ -77,7 +84,8 @@ public class AccountPersistenceAdapter implements AccountRepository {
                 new Email(entity.getEmail()),
                 new HashedPassword(entity.getPasswordHash()),
                 entity.getStatus(),
-                entity.getRegisteredAt()
+                entity.getRegisteredAt(),
+                entity.getRole()
         );
     }
 }

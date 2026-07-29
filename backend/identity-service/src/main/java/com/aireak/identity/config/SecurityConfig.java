@@ -10,6 +10,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -46,6 +47,11 @@ public class SecurityConfig {
                 .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
                 .ignoringRequestMatchers("/api/v1/auth/register", "/api/v1/auth/login")
             )
+            // CsrfFilter only defers token resolution to a request attribute; without forcing
+            // it here, CookieCsrfTokenRepository never actually writes the XSRF-TOKEN cookie.
+            // Must be BEFORE CsrfFilter: if CsrfFilter rejects the request (403) it does not
+            // call doFilter(), so a filter placed after it would never materialise the token.
+            .addFilterBefore(new CsrfCookieFilter(), CsrfFilter.class)
             .sessionManagement(session ->
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
@@ -54,6 +60,7 @@ public class SecurityConfig {
                     "/api/v1/auth/login",
                     "/api/v1/auth/refresh",
                     "/api/v1/auth/logout",
+                    "/api/v1/auth/verify-email",
                     "/actuator/health",
                     "/actuator/info"
                 ).permitAll()

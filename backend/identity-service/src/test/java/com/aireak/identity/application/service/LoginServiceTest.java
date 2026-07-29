@@ -37,6 +37,7 @@ class LoginServiceTest {
     private static final Email EMAIL = new Email("user@example.com");
     private static final HashedPassword STORED_HASH = new HashedPassword("$2a$12$storedHash");
     private static final HashedPassword DUMMY_HASH = new HashedPassword("$2a$12$dummyHash");
+    private static final String VERIFICATION_TOKEN = "test-verification-token";
 
     @Mock
     private AccountRepository accountRepository;
@@ -61,7 +62,7 @@ class LoginServiceTest {
     }
 
     private Account activeAccount() {
-        Account account = Account.register(EMAIL, STORED_HASH);
+        Account account = Account.register(EMAIL, STORED_HASH, VERIFICATION_TOKEN);
         account.activate();
         account.pullDomainEvents();
         return account;
@@ -122,7 +123,7 @@ class LoginServiceTest {
 
     @Test
     void inactiveAccountIsRejectedWithTheSameGenericMessage() {
-        Account pending = Account.register(EMAIL, STORED_HASH); // still PENDING_VERIFICATION
+        Account pending = Account.register(EMAIL, STORED_HASH, VERIFICATION_TOKEN); // still PENDING_VERIFICATION
         when(accountRepository.findByEmail(EMAIL)).thenReturn(java.util.Optional.of(pending));
         when(passwordHashPort.matches(any(RawPassword.class), eq(STORED_HASH))).thenReturn(true);
 
@@ -133,7 +134,7 @@ class LoginServiceTest {
 
     @Test
     void suspendedAccountIsRejectedEvenWithTheCorrectPassword() {
-        Account account = Account.register(EMAIL, STORED_HASH);
+        Account account = Account.register(EMAIL, STORED_HASH, VERIFICATION_TOKEN);
         account.activate();
         account.suspend();
         when(accountRepository.findByEmail(EMAIL)).thenReturn(java.util.Optional.of(account));

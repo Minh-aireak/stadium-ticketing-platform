@@ -6,6 +6,9 @@ import com.aireak.catalog.application.port.in.GetMatchUseCase;
 import com.aireak.catalog.application.port.in.ListMatchesUseCase;
 import com.aireak.catalog.application.port.in.PublishMatchUseCase;
 import com.aireak.catalog.domain.model.Match;
+import com.aireak.common.exception.ForbiddenException;
+import com.aireak.common.security.AuthenticatedUser;
+import com.aireak.common.security.AuthenticatedUserContext;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
@@ -30,6 +33,7 @@ public class MatchController {
     private static final int MIN_PAGE_SIZE = 1;
     private static final int MAX_PAGE_SIZE = 100;
     private static final int DEFAULT_PAGE_SIZE = 20;
+    private static final String ROLE_ADMIN = "ADMIN";
 
     private final CreateMatchUseCase createMatchUseCase;
     private final AddShowtimeUseCase addShowtimeUseCase;
@@ -37,27 +41,43 @@ public class MatchController {
     private final ListMatchesUseCase listMatchesUseCase;
     private final GetMatchUseCase getMatchUseCase;
 
-    /** POST /api/v1/matches */
+    /** POST /api/v1/matches — ADMIN only. */
     @PostMapping
     public ResponseEntity<CreateMatchResponse> create(@Valid @RequestBody CreateMatchRequest req) {
+        requireAdminRole();
         String matchId = createMatchUseCase.createMatch(req.homeTeam(), req.awayTeam(), req.competition());
         return ResponseEntity.status(HttpStatus.CREATED).body(new CreateMatchResponse(matchId));
     }
 
-    /** POST /api/v1/matches/{matchId}/showtimes */
+    /** POST /api/v1/matches/{matchId}/showtimes — ADMIN only. */
     @PostMapping("/{matchId}/showtimes")
     public ResponseEntity<Void> addShowtime(@PathVariable String matchId,
                                             @Valid @RequestBody AddShowtimeRequest req) {
+        requireAdminRole();
         addShowtimeUseCase.addShowtime(matchId, req.startTime(), req.venueId(), req.totalSeats(),
                 req.basePrice(), req.currency());
         return ResponseEntity.ok().build();
     }
 
-    /** PUT /api/v1/matches/{matchId}/publish */
+    /** PUT /api/v1/matches/{matchId}/publish — ADMIN only. */
     @PutMapping("/{matchId}/publish")
     public ResponseEntity<Void> publish(@PathVariable String matchId) {
+        requireAdminRole();
         publishMatchUseCase.publishMatch(matchId);
         return ResponseEntity.ok().build();
+    }
+
+    /**
+     * No Spring Security in this service (see JwtAuthenticationFilter's javadoc) — so
+     * {@code @PreAuthorize} isn't available. Enforces ADMIN-only mutation endpoints by reading
+     * the role claim {@link com.aireak.common.web.filter.JwtAuthenticationFilter} already
+     * validated and stashed in {@link AuthenticatedUserContext}.
+     */
+    private void requireAdminRole() {
+        String role = AuthenticatedUserContext.get().map(AuthenticatedUser::role).orElse(null);
+        if (!ROLE_ADMIN.equals(role)) {
+            throw new ForbiddenException("ADMIN role required for this operation");
+        }
     }
 
     /**

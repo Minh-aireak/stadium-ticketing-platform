@@ -124,8 +124,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         Object email = claims.get("email");
+        Object role = claims.get("role");
         AuthenticatedUserContext.set(new AuthenticatedUser(
-                claims.getSubject(), email != null ? String.valueOf(email) : null, token));
+                claims.getSubject(), email != null ? String.valueOf(email) : null,
+                role != null ? String.valueOf(role) : null, token));
         try {
             filterChain.doFilter(request, response);
         } finally {

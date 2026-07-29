@@ -8,13 +8,17 @@ import com.aireak.identity.application.port.in.LoginUseCase;
 import com.aireak.identity.application.port.in.LogoutUseCase;
 import com.aireak.identity.application.port.in.RefreshTokenUseCase;
 import com.aireak.identity.application.port.in.RegisterAccountUseCase;
+import com.aireak.identity.application.port.in.VerifyEmailUseCase;
 import com.aireak.identity.application.port.in.command.LoginCommand;
 import com.aireak.identity.application.port.in.command.RegisterAccountCommand;
 import com.aireak.identity.application.port.in.dto.AuthResult;
 import com.aireak.identity.config.AuthCookieProperties;
+import com.aireak.identity.config.CorsProperties;
 import com.aireak.identity.domain.exception.InvalidRefreshTokenException;
+import com.aireak.identity.domain.exception.InvalidVerificationTokenException;
 import com.aireak.identity.domain.exception.RefreshSessionStoreUnavailableException;
 import com.aireak.identity.domain.exception.RefreshTokenReuseException;
+import com.aireak.identity.domain.exception.VerificationTokenStoreUnavailableException;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -22,13 +26,16 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
@@ -55,7 +62,9 @@ public class AuthController {
     private final LoginUseCase loginUseCase;
     private final RefreshTokenUseCase refreshTokenUseCase;
     private final LogoutUseCase logoutUseCase;
+    private final VerifyEmailUseCase verifyEmailUseCase;
     private final AuthCookieProperties cookieProperties;
+    private final CorsProperties corsProperties;
 
     /**
      * POST /api/v1/auth/register
@@ -82,6 +91,19 @@ public class AuthController {
                 .header(HttpHeaders.SET_COOKIE, refreshCookie(result.refreshToken().rawToken(),
                         result.refreshToken().expiresAt()).toString())
                 .body(toLoginResponse(result));
+    }
+
+    /**
+     * GET /api/v1/auth/verify-email?token=...
+     * Activates the account bound to the (one-time, TTL-bound) email verification token sent in
+     * the welcome email. Browser-navigated, so responses are a small HTML page, not JSON.
+     */
+    @GetMapping("/verify-email")
+    public ResponseEntity<String> verifyEmail(@RequestParam("token") String token) {
+        verifyEmailUseCase.execute(token);
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_HTML)
+                .body(verificationPage("Email verified", "Your account is now active — you can log in.", true));
     }
 
     /**
@@ -137,6 +159,21 @@ public class AuthController {
                 .body(problem);
     }
 
+    @ExceptionHandler(InvalidVerificationTokenException.class)
+    public ResponseEntity<String> handleInvalidVerificationToken(InvalidVerificationTokenException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .contentType(MediaType.TEXT_HTML)
+                .body(verificationPage("Verification failed", ex.getMessage(), false));
+    }
+
+    @ExceptionHandler(VerificationTokenStoreUnavailableException.class)
+    public ResponseEntity<String> handleVerificationStoreUnavailable(VerificationTokenStoreUnavailableException ex) {
+        log.error("Verification token store unavailable", ex);
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .contentType(MediaType.TEXT_HTML)
+                .body(verificationPage("Service unavailable", "Please try again shortly.", false));
+    }
+
     @ExceptionHandler(RefreshSessionStoreUnavailableException.class)
     public ResponseEntity<ProblemDetail> handleStoreUnavailable(RefreshSessionStoreUnavailableException ex) {
         log.error("Refresh session store unavailable", ex);
@@ -148,6 +185,32 @@ public class AuthController {
     }
 
     // ---- helpers ----
+
+    private String verificationPage(String title, String message, boolean success) {
+        String color = success ? "#1e7a3a" : "#a31515";
+        String loginUrl = (corsProperties.allowedOrigins() == null || corsProperties.allowedOrigins().isEmpty())
+                ? "/" : corsProperties.allowedOrigins().get(0) + "/login";
+        return """
+                <!DOCTYPE html>
+                <html>
+                <head><title>%s</title>
+                <style>
+                  body { font-family: Arial, sans-serif; color: #333; display: flex; justify-content: center; padding-top: 60px; }
+                  .card { max-width: 480px; padding: 24px; border: 1px solid #ddd; border-radius: 8px; text-align: center; }
+                  h2 { color: %s; }
+                  a { color: #1e3a8a; }
+                </style>
+                </head>
+                <body>
+                  <div class="card">
+                    <h2>%s</h2>
+                    <p>%s</p>
+                    <p><a href="%s">Go to login</a></p>
+                  </div>
+                </body>
+                </html>
+                """.formatted(title, color, title, message, loginUrl);
+    }
 
     private LoginResponse toLoginResponse(AuthResult result) {
         long expiresIn = Duration.between(Instant.now(), result.accessTokenExpiresAt()).getSeconds();

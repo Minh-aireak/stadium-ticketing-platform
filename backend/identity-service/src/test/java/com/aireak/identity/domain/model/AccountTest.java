@@ -15,10 +15,11 @@ class AccountTest {
 
     private static final Email EMAIL = new Email("user@example.com");
     private static final HashedPassword PASSWORD = new HashedPassword("$2a$12$hashedvalue");
+    private static final String VERIFICATION_TOKEN = "test-verification-token";
 
     @Test
     void registerStartsInPendingVerificationAndRaisesAccountRegisteredEvent() {
-        Account account = Account.register(EMAIL, PASSWORD);
+        Account account = Account.register(EMAIL, PASSWORD, VERIFICATION_TOKEN);
 
         assertThat(account.getStatus()).isEqualTo(AccountStatus.PENDING_VERIFICATION);
         assertThat(account.getEmail()).isEqualTo(EMAIL);
@@ -26,12 +27,14 @@ class AccountTest {
         List<Object> events = account.pullDomainEvents();
         assertThat(events).hasSize(1);
         assertThat(events.get(0)).isInstanceOf(AccountRegisteredEvent.class);
-        assertThat(((AccountRegisteredEvent) events.get(0)).accountId()).isEqualTo(account.getId());
+        AccountRegisteredEvent registered = (AccountRegisteredEvent) events.get(0);
+        assertThat(registered.accountId()).isEqualTo(account.getId());
+        assertThat(registered.verificationToken()).isEqualTo(VERIFICATION_TOKEN);
     }
 
     @Test
     void activateFromPendingVerificationRaisesAccountActivatedEvent() {
-        Account account = Account.register(EMAIL, PASSWORD);
+        Account account = Account.register(EMAIL, PASSWORD, VERIFICATION_TOKEN);
         account.pullDomainEvents();
 
         account.activate();
@@ -44,7 +47,7 @@ class AccountTest {
 
     @Test
     void activateRejectsWhenAlreadyActive() {
-        Account account = Account.register(EMAIL, PASSWORD);
+        Account account = Account.register(EMAIL, PASSWORD, VERIFICATION_TOKEN);
         account.activate();
 
         assertThatThrownBy(account::activate).isInstanceOf(InvalidAccountStatusException.class);
@@ -52,14 +55,14 @@ class AccountTest {
 
     @Test
     void suspendRequiresActiveStatus() {
-        Account account = Account.register(EMAIL, PASSWORD);
+        Account account = Account.register(EMAIL, PASSWORD, VERIFICATION_TOKEN);
 
         assertThatThrownBy(account::suspend).isInstanceOf(InvalidAccountStatusException.class);
     }
 
     @Test
     void suspendFromActiveSucceeds() {
-        Account account = Account.register(EMAIL, PASSWORD);
+        Account account = Account.register(EMAIL, PASSWORD, VERIFICATION_TOKEN);
         account.activate();
 
         account.suspend();
@@ -69,7 +72,7 @@ class AccountTest {
 
     @Test
     void reactivateRequiresSuspendedStatus() {
-        Account account = Account.register(EMAIL, PASSWORD);
+        Account account = Account.register(EMAIL, PASSWORD, VERIFICATION_TOKEN);
         account.activate();
 
         assertThatThrownBy(account::reactivate).isInstanceOf(InvalidAccountStatusException.class);
@@ -77,7 +80,7 @@ class AccountTest {
 
     @Test
     void reactivateFromSuspendedReturnsToActive() {
-        Account account = Account.register(EMAIL, PASSWORD);
+        Account account = Account.register(EMAIL, PASSWORD, VERIFICATION_TOKEN);
         account.activate();
         account.suspend();
 
@@ -88,7 +91,7 @@ class AccountTest {
 
     @Test
     void changePasswordRequiresActiveStatus() {
-        Account account = Account.register(EMAIL, PASSWORD);
+        Account account = Account.register(EMAIL, PASSWORD, VERIFICATION_TOKEN);
         HashedPassword newPassword = new HashedPassword("$2a$12$newhash");
 
         assertThatThrownBy(() -> account.changePassword(newPassword))
@@ -97,7 +100,7 @@ class AccountTest {
 
     @Test
     void changePasswordWhenActiveUpdatesThePassword() {
-        Account account = Account.register(EMAIL, PASSWORD);
+        Account account = Account.register(EMAIL, PASSWORD, VERIFICATION_TOKEN);
         account.activate();
         HashedPassword newPassword = new HashedPassword("$2a$12$newhash");
 
@@ -108,7 +111,7 @@ class AccountTest {
 
     @Test
     void pullDomainEventsClearsTheList() {
-        Account account = Account.register(EMAIL, PASSWORD);
+        Account account = Account.register(EMAIL, PASSWORD, VERIFICATION_TOKEN);
 
         List<Object> firstPull = account.pullDomainEvents();
         List<Object> secondPull = account.pullDomainEvents();
@@ -122,10 +125,36 @@ class AccountTest {
         Instant registeredAt = Instant.parse("2024-01-01T00:00:00Z");
 
         Account account = Account.reconstitute(AccountId.generate(), EMAIL, PASSWORD,
-                AccountStatus.SUSPENDED, registeredAt);
+                AccountStatus.SUSPENDED, registeredAt, AccountRole.USER);
 
         assertThat(account.getStatus()).isEqualTo(AccountStatus.SUSPENDED);
         assertThat(account.getRegisteredAt()).isEqualTo(registeredAt);
         assertThat(account.pullDomainEvents()).isEmpty();
+    }
+
+    @Test
+    void registerDefaultsToUserRole() {
+        Account account = Account.register(EMAIL, PASSWORD, VERIFICATION_TOKEN);
+
+        assertThat(account.getRole()).isEqualTo(AccountRole.USER);
+    }
+
+    @Test
+    void registerAdminIsActiveWithAdminRoleAndRaisesNoEvents() {
+        Account account = Account.registerAdmin(EMAIL, PASSWORD);
+
+        assertThat(account.getStatus()).isEqualTo(AccountStatus.ACTIVE);
+        assertThat(account.getRole()).isEqualTo(AccountRole.ADMIN);
+        assertThat(account.pullDomainEvents()).isEmpty();
+    }
+
+    @Test
+    void promoteToAdminEscalatesRoleAndForcesActiveEvenFromPendingVerification() {
+        Account account = Account.register(EMAIL, PASSWORD, VERIFICATION_TOKEN);
+
+        account.promoteToAdmin();
+
+        assertThat(account.getRole()).isEqualTo(AccountRole.ADMIN);
+        assertThat(account.getStatus()).isEqualTo(AccountStatus.ACTIVE);
     }
 }

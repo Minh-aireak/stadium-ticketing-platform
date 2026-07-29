@@ -1,6 +1,7 @@
 package com.aireak.identity.adapter.out.persistence;
 
 import com.aireak.common.persistence.BaseAuditEntity;
+import com.aireak.identity.domain.model.AccountRole;
 import com.aireak.identity.domain.model.AccountStatus;
 import jakarta.persistence.*;
 import lombok.*;
@@ -36,6 +37,10 @@ public class AccountJpaEntity extends BaseAuditEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30)
     private AccountStatus status;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "role", nullable = false, length = 20)
+    private AccountRole role;
 
     @Column(name = "registered_at", nullable = false, updatable = false)
     private Instant registeredAt;

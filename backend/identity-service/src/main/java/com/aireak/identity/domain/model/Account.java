@@ -31,6 +31,7 @@ public class Account {
     private Email email;
     private HashedPassword password;
     private AccountStatus status;
+    private AccountRole role;
     private final Instant registeredAt;
     private final List<Object> domainEvents = new ArrayList<>();
 
@@ -38,12 +39,13 @@ public class Account {
      * Private constructor — use factory method {@link #register}.
      */
     private Account(AccountId id, Email email, HashedPassword password,
-                    AccountStatus status, Instant registeredAt) {
+                    AccountStatus status, Instant registeredAt, AccountRole role) {
         this.id = id;
         this.email = email;
         this.password = password;
         this.status = status;
         this.registeredAt = registeredAt;
+        this.role = role;
     }
 
     // ----------------------------------------------------------------
@@ -54,12 +56,23 @@ public class Account {
      * Creates a new Account in PENDING_VERIFICATION state.
      * Records {@link AccountRegisteredEvent} for async notification.
      */
-    public static Account register(Email email, HashedPassword password) {
+    public static Account register(Email email, HashedPassword password, String verificationToken) {
         AccountId id = AccountId.generate();
         Account account = new Account(id, email, password,
-                AccountStatus.PENDING_VERIFICATION, Instant.now());
-        account.domainEvents.add(new AccountRegisteredEvent(id, email));
+                AccountStatus.PENDING_VERIFICATION, Instant.now(), AccountRole.USER);
+        account.domainEvents.add(new AccountRegisteredEvent(id, email, verificationToken));
         return account;
+    }
+
+    /**
+     * Creates a new Account already ACTIVE with the ADMIN role, bypassing email verification.
+     * Used only by the startup admin-bootstrap process (see {@code AdminBootstrapRunner}) — never
+     * exposed via a public registration endpoint. No domain event is raised: there is no welcome/
+     * verification email to send for an operator-provisioned admin.
+     */
+    public static Account registerAdmin(Email email, HashedPassword password) {
+        AccountId id = AccountId.generate();
+        return new Account(id, email, password, AccountStatus.ACTIVE, Instant.now(), AccountRole.ADMIN);
     }
 
     /**
@@ -67,8 +80,8 @@ public class Account {
      * Used by the persistence adapter to rebuild state from DB.
      */
     public static Account reconstitute(AccountId id, Email email, HashedPassword password,
-                                       AccountStatus status, Instant registeredAt) {
-        return new Account(id, email, password, status, registeredAt);
+                                       AccountStatus status, Instant registeredAt, AccountRole role) {
+        return new Account(id, email, password, status, registeredAt, role);
     }
 
     // ----------------------------------------------------------------
@@ -123,6 +136,16 @@ public class Account {
         this.password = newPassword;
     }
 
+    /**
+     * Escalates an existing account to ADMIN and forces it ACTIVE, bypassing the normal status
+     * state machine. Used only by the startup admin-bootstrap process (see
+     * {@code AdminBootstrapRunner}) when the operator-designated email already has an account.
+     */
+    public void promoteToAdmin() {
+        this.role = AccountRole.ADMIN;
+        this.status = AccountStatus.ACTIVE;
+    }
+
     // ----------------------------------------------------------------
     // Accessors
     // ----------------------------------------------------------------
@@ -131,6 +154,7 @@ public class Account {
     public Email getEmail()           { return email; }
     public HashedPassword getPassword() { return password; }
     public AccountStatus getStatus()  { return status; }
+    public AccountRole getRole()      { return role; }
     public Instant getRegisteredAt()  { return registeredAt; }
 
     /**
