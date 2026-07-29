@@ -66,7 +66,12 @@ public class BookingController {
     @GetMapping("/{bookingId}")
     public ResponseEntity<BookingStatusResponse> getBooking(@PathVariable("bookingId") String bookingId) {
         return getBookingUseCase.getBooking(bookingId)
-                .map(b -> ResponseEntity.ok(new BookingStatusResponse(b.getBookingId(), b.getStatus().name())))
+                .map(b -> {
+                    // bookingId alone is guessable/enumerable — without this, any authenticated
+                    // caller could poll another customer's booking status by ID.
+                    requireMatchingIdentity(b.getCustomerId());
+                    return ResponseEntity.ok(new BookingStatusResponse(b.getBookingId(), b.getStatus().name()));
+                })
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 

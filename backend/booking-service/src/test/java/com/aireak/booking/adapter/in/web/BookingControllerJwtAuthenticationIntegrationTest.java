@@ -4,7 +4,10 @@ import com.aireak.booking.application.port.in.CreateBookingUseCase;
 import com.aireak.booking.application.port.in.GetBookingUseCase;
 import com.aireak.booking.application.port.in.ListBookingsUseCase;
 import com.aireak.booking.application.port.in.dto.BookingCreationResult;
+import com.aireak.booking.domain.model.Booking;
+import com.aireak.booking.domain.model.BookingAmount;
 import com.aireak.booking.domain.model.BookingStatus;
+import com.aireak.booking.domain.model.SeatSelection;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -102,6 +105,33 @@ class BookingControllerJwtAuthenticationIntegrationTest {
         mockMvc.perform(get("/api/v1/bookings/{id}", "nonexistent")
                         .header("Authorization", "Bearer " + validToken(UUID.randomUUID().toString())))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void rejectsGetBookingWhenOwnerDoesNotMatchTheAuthenticatedCaller() throws Exception {
+        String ownerAccountId = UUID.randomUUID().toString();
+        String someoneElsesAccountId = UUID.randomUUID().toString();
+        Booking booking = Booking.reconstitute("booking-1", ownerAccountId, "owner@example.com", "showtime-1",
+                new SeatSelection(List.of("A1")), BookingAmount.of(new BigDecimal("50.00"), "USD"),
+                BookingStatus.PENDING_PAYMENT, Instant.now(), null, 0L, false);
+        when(getBookingUseCase.getBooking("booking-1")).thenReturn(Optional.of(booking));
+
+        mockMvc.perform(get("/api/v1/bookings/{id}", "booking-1")
+                        .header("Authorization", "Bearer " + validToken(someoneElsesAccountId)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void allowsGetBookingWhenOwnerMatchesTheAuthenticatedCaller() throws Exception {
+        String ownerAccountId = UUID.randomUUID().toString();
+        Booking booking = Booking.reconstitute("booking-1", ownerAccountId, "owner@example.com", "showtime-1",
+                new SeatSelection(List.of("A1")), BookingAmount.of(new BigDecimal("50.00"), "USD"),
+                BookingStatus.PENDING_PAYMENT, Instant.now(), null, 0L, false);
+        when(getBookingUseCase.getBooking("booking-1")).thenReturn(Optional.of(booking));
+
+        mockMvc.perform(get("/api/v1/bookings/{id}", "booking-1")
+                        .header("Authorization", "Bearer " + validToken(ownerAccountId)))
+                .andExpect(status().isOk());
     }
 
     @Test
