@@ -50,10 +50,17 @@ jwt:
   audience: ${JWT_AUDIENCE:aireak-platform}
   excluded-paths:
     - /actuator/**
+    # Stripe calls this directly — authenticated by Stripe-Signature (see StripeWebhookController),
+    # not a platform JWT, since Stripe is not a logged-in user.
+    - "POST:/api/v1/payments/webhook"
 
 stripe:
   # No default — must be injected via env var (STRIPE_SECRET_KEY), same rationale as jwt.secret.
   secret-key: ${STRIPE_SECRET_KEY}
+  # Signing secret for the webhook endpoint (Stripe CLI/Dashboard-issued, starts with "whsec_").
+  # No default — same rationale as jwt.secret: a hardcoded fallback would let anyone who reads
+  # the source forge webhook deliveries.
+  webhook-secret: ${STRIPE_WEBHOOK_SECRET}
   # Fixed Stripe test PaymentMethod: frontend doesn't collect real card details yet, so every
   # charge in this environment uses this stand-in token (only valid against a test-mode secret key).
   test-payment-method: ${STRIPE_TEST_PAYMENT_METHOD:pm_card_visa}

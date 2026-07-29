@@ -3,6 +3,7 @@ package com.aireak.payment.application.service;
 import com.aireak.payment.application.port.in.command.InitiatePaymentCommand;
 import com.aireak.payment.application.port.out.PaymentGatewayPort;
 import com.aireak.payment.application.port.out.PaymentIdempotencyPort;
+import com.aireak.payment.application.port.out.PaymentReconciliationPort;
 import com.aireak.payment.application.port.out.PaymentRepository;
 import com.aireak.payment.domain.exception.DuplicatePaymentException;
 import com.aireak.payment.domain.model.Payment;
@@ -22,7 +23,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -46,11 +49,14 @@ class PaymentServiceTest {
     private PaymentGatewayPort paymentGatewayPort;
     @Mock
     private PaymentIdempotencyPort idempotencyPort;
+    @Mock
+    private PaymentReconciliationPort reconciliationPort;
 
     private PaymentService service;
 
     private void newService() {
-        service = new PaymentService(sagaSteps, paymentRepository, paymentGatewayPort, idempotencyPort);
+        service = new PaymentService(
+                sagaSteps, paymentRepository, paymentGatewayPort, idempotencyPort, reconciliationPort);
     }
 
     private Payment existingPayment(String paymentId) {
@@ -111,6 +117,68 @@ class PaymentServiceTest {
         assertThat(paymentId).isEqualTo("payment-1");
         verify(sagaSteps).markSucceeded("payment-1", "gw-tx-1");
         verify(sagaSteps, never()).markFailed(any(), any());
+        verify(reconciliationPort, never()).recordUnpersistedSuccess(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void executeRetriesPersistingSucceededOutcomeAndStopsOnceItSucceeds() {
+        newService();
+        when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(true);
+        when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.amount()), eq(COMMAND.currency())))
+                .thenReturn(new PaymentSagaSteps.InitiateOutcome.Created("payment-1"));
+        when(paymentGatewayPort.charge("booking-1", COMMAND.amount(), COMMAND.currency()))
+                .thenReturn("gw-tx-1");
+        doThrow(new RuntimeException("transient db error"))
+                .doNothing()
+                .when(sagaSteps).markSucceeded("payment-1", "gw-tx-1");
+
+        String paymentId = service.execute(COMMAND);
+
+        assertThat(paymentId).isEqualTo("payment-1");
+        verify(sagaSteps, times(2)).markSucceeded("payment-1", "gw-tx-1");
+        verify(sagaSteps, never()).markFailed(any(), any());
+        verify(reconciliationPort, never()).recordUnpersistedSuccess(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void executeRecordsForManualReconciliationInsteadOfMarkingFailedWhenPersistingSucceededOutcomeKeepsFailing() {
+        newService();
+        when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(true);
+        when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.amount()), eq(COMMAND.currency())))
+                .thenReturn(new PaymentSagaSteps.InitiateOutcome.Created("payment-1"));
+        when(paymentGatewayPort.charge("booking-1", COMMAND.amount(), COMMAND.currency()))
+                .thenReturn("gw-tx-1");
+        doThrow(new RuntimeException("db down"))
+                .when(sagaSteps).markSucceeded("payment-1", "gw-tx-1");
+
+        // The gateway already charged the customer here — this must NOT throw out of execute(),
+        // and must NEVER fall through to markFailed() (that would record a real charge as FAILED).
+        String paymentId = service.execute(COMMAND);
+
+        assertThat(paymentId).isEqualTo("payment-1");
+        verify(sagaSteps, times(3)).markSucceeded("payment-1", "gw-tx-1");
+        verify(sagaSteps, never()).markFailed(any(), any());
+        verify(reconciliationPort).recordUnpersistedSuccess(
+                eq("payment-1"), eq("booking-1"), eq("gw-tx-1"), eq(COMMAND.amount()), eq(COMMAND.currency()), any());
+    }
+
+    @Test
+    void executeSwallowsAFailureRecordingForManualReconciliationInsteadOfThrowing() {
+        newService();
+        when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(true);
+        when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.amount()), eq(COMMAND.currency())))
+                .thenReturn(new PaymentSagaSteps.InitiateOutcome.Created("payment-1"));
+        when(paymentGatewayPort.charge("booking-1", COMMAND.amount(), COMMAND.currency()))
+                .thenReturn("gw-tx-1");
+        doThrow(new RuntimeException("db down")).when(sagaSteps).markSucceeded("payment-1", "gw-tx-1");
+        doThrow(new RuntimeException("reconciliation table unreachable too"))
+                .when(reconciliationPort).recordUnpersistedSuccess(any(), any(), any(), any(), any(), any());
+
+        // Even the last-resort durable write failing must not propagate — there is nothing left
+        // to compensate with at this point, only logging.
+        String paymentId = service.execute(COMMAND);
+
+        assertThat(paymentId).isEqualTo("payment-1");
     }
 
     @Test

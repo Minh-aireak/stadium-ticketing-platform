@@ -5,6 +5,7 @@ import com.aireak.payment.application.port.in.InitiatePaymentUseCase;
 import com.aireak.payment.application.port.in.command.InitiatePaymentCommand;
 import com.aireak.payment.application.port.out.PaymentGatewayPort;
 import com.aireak.payment.application.port.out.PaymentIdempotencyPort;
+import com.aireak.payment.application.port.out.PaymentReconciliationPort;
 import com.aireak.payment.application.port.out.PaymentRepository;
 import com.aireak.payment.domain.exception.DuplicatePaymentException;
 import com.aireak.payment.domain.model.Payment;
@@ -12,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.Optional;
 
@@ -33,6 +35,12 @@ import java.util.Optional;
  *
  * <p>booking-service listens to PaymentSucceeded/Failed via Kafka
  * and drives the saga to CONFIRMED or CANCELLED accordingly.
+ *
+ * <p><strong>Charge vs. persist are deliberately separate phases</strong> (step 2 vs. step 3):
+ * once {@link PaymentGatewayPort#charge} returns a {@code gatewayTxId}, the customer has
+ * actually been charged — a failure persisting that outcome must never fall through to
+ * {@code sagaSteps.markFailed}, which would record a successful charge as FAILED while the
+ * money was already taken. See {@link #persistSucceededOutcome}.
  */
 @Slf4j
 @Service
@@ -42,10 +50,16 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
     private static final String IDEMPOTENCY_KEY_PREFIX = "payment:idempotency:booking:";
     private static final Duration IDEMPOTENCY_TTL = Duration.ofMinutes(5);
 
+    // Short backoff for persisting an already-successful charge — this is retrying our own DB
+    // write, not the gateway call, so attempts stay few and fast.
+    private static final int PERSIST_MAX_ATTEMPTS = 3;
+    private static final Duration PERSIST_RETRY_BACKOFF = Duration.ofMillis(200);
+
     private final PaymentSagaSteps sagaSteps;
     private final PaymentRepository paymentRepository;
     private final PaymentGatewayPort paymentGatewayPort;
     private final PaymentIdempotencyPort idempotencyPort;
+    private final PaymentReconciliationPort reconciliationPort;
 
     @Override
     public String execute(InitiatePaymentCommand command) {
@@ -68,18 +82,70 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
         String paymentId = ((PaymentSagaSteps.InitiateOutcome.Created) outcome).paymentId();
         log.info("Payment initiated: id={}, bookingId={}", paymentId, bookingId);
 
-        // Step 2 & 3: call gateway (REST call, no local transaction), then commit outcome
+        // Step 2: charge via the gateway (REST call, no local transaction). A failure here means
+        // the charge itself never went through (or was definitively declined) — safe to mark FAILED.
+        String gatewayTxId;
         try {
-            String gatewayTxId = paymentGatewayPort.charge(
-                    bookingId, command.amount(), command.currency());
-            sagaSteps.markSucceeded(paymentId, gatewayTxId);
-            log.info("Payment succeeded: id={}, gatewayTxId={}", paymentId, gatewayTxId);
+            gatewayTxId = paymentGatewayPort.charge(bookingId, command.amount(), command.currency());
         } catch (Exception e) {
-            log.error("Payment failed: id={}, reason={}", paymentId, e.getMessage());
+            log.error("Payment charge failed: id={}, reason={}", paymentId, e.getMessage());
             sagaSteps.markFailed(paymentId, e.getMessage());
+            return paymentId;
         }
 
+        // Step 3: persist the successful charge outcome — entirely separate from step 2's
+        // try/catch (see class javadoc): the customer is already charged at this point.
+        persistSucceededOutcome(paymentId, bookingId, gatewayTxId, command.amount(), command.currency());
         return paymentId;
+    }
+
+    /**
+     * Retries {@code markSucceeded} a few times on failure; if it still can't be persisted, the
+     * outcome is handed to {@link PaymentReconciliationPort} instead of being silently lost — the
+     * gateway transaction is real and must never be recorded as FAILED (see class javadoc).
+     */
+    private void persistSucceededOutcome(String paymentId, String bookingId, String gatewayTxId,
+                                          BigDecimal amount, String currency) {
+        for (int attempt = 1; attempt <= PERSIST_MAX_ATTEMPTS; attempt++) {
+            try {
+                sagaSteps.markSucceeded(paymentId, gatewayTxId);
+                log.info("Payment succeeded: id={}, gatewayTxId={}", paymentId, gatewayTxId);
+                return;
+            } catch (Exception e) {
+                log.error("Persisting successful charge failed (attempt {}/{}): id={}, gatewayTxId={}, reason={}",
+                        attempt, PERSIST_MAX_ATTEMPTS, paymentId, gatewayTxId, e.getMessage());
+                if (attempt == PERSIST_MAX_ATTEMPTS) {
+                    recordForManualReconciliation(paymentId, bookingId, gatewayTxId, amount, currency, e.getMessage());
+                    return;
+                }
+                sleep(PERSIST_RETRY_BACKOFF.multipliedBy(attempt));
+            }
+        }
+    }
+
+    // Last resort once retries are exhausted: this itself must not throw and abandon the outcome
+    // with nothing but a log line — if even this durable write fails, that failure is the true
+    // last resort and is logged at its own level so it's easy to alert on.
+    private void recordForManualReconciliation(String paymentId, String bookingId, String gatewayTxId,
+                                                BigDecimal amount, String currency, String reason) {
+        try {
+            reconciliationPort.recordUnpersistedSuccess(paymentId, bookingId, gatewayTxId, amount, currency, reason);
+            log.error("Payment succeeded at the gateway but could not be persisted after {} attempts — " +
+                            "recorded for manual reconciliation: id={}, bookingId={}, gatewayTxId={}",
+                    PERSIST_MAX_ATTEMPTS, paymentId, bookingId, gatewayTxId);
+        } catch (Exception e) {
+            log.error("CRITICAL: payment succeeded at the gateway but could not be persisted NOR recorded " +
+                            "for reconciliation — id={}, bookingId={}, gatewayTxId={}, amount={} {}: {}",
+                    paymentId, bookingId, gatewayTxId, amount, currency, e.getMessage(), e);
+        }
+    }
+
+    private void sleep(Duration duration) {
+        try {
+            Thread.sleep(duration.toMillis());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Override
