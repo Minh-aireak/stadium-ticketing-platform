@@ -42,6 +42,11 @@ spring:
 server:
   port: 8085
 
+app:
+  # Base URL embedded in the account-welcome email's verify-email link. Must be reachable by the
+  # end user's browser — not identity-service's internal container hostname in a real deployment.
+  identity-service-base-url: ${IDENTITY_SERVICE_BASE_URL:http://localhost:8081}
+
 # Must match identity-service's jwt.secret/issuer/audience exactly — validated independently
 # here so this service is never unauthenticated just because a caller bypassed api-gateway.
 jwt:

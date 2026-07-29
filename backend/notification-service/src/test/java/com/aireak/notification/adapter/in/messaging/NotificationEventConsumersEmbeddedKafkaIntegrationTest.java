@@ -141,6 +141,7 @@ class NotificationEventConsumersEmbeddedKafkaIntegrationTest {
         AccountRegisteredEvent registered = new AccountRegisteredEvent(
                 new AccountRegisteredEvent.AccountId("acc-1"),
                 new AccountRegisteredEvent.Email("new-user@example.com"),
+                "test-verification-token",
                 Instant.now());
         String eventId = publishAsDebeziumWouldForwardTheOutboxRow(ACCOUNT_REGISTERED, registered);
 

@@ -15,6 +15,7 @@ import freemarker.template.Configuration;
 import freemarker.template.Template;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,6 +43,12 @@ public class NotificationDispatchService implements SendNotificationUseCase {
     private final ProcessedEventRepository processedEventRepository;
     private final NotificationRepository notificationRepository;
     private final Configuration freemarkerConfig;
+
+    // Field injection (not a constructor param): keeps the Lombok @RequiredArgsConstructor used
+    // in tests (which construct this service directly, outside Spring) working unchanged. The
+    // literal default matches application.yaml's so a plain `new` in a test still gets a usable URL.
+    @Value("${app.identity-service-base-url:http://localhost:8081}")
+    private String identityServiceBaseUrl = "http://localhost:8081";
 
     /**
      * Static template registry.
@@ -147,6 +154,8 @@ public class NotificationDispatchService implements SendNotificationUseCase {
         } else if (payload instanceof AccountRegisteredEvent event) {
             model.put("accountId", event.accountId().value());
             model.put("email", event.email().value());
+            model.put("verificationUrl", identityServiceBaseUrl
+                    + "/api/v1/auth/verify-email?token=" + event.verificationToken());
             model.put("occurredAt", event.occurredAt());
         } else if (payload instanceof Map<?, ?> map) {
             // Fallback for map type payloads

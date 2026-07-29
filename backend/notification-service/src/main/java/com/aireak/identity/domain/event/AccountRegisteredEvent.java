@@ -5,6 +5,7 @@ import java.time.Instant;
 public record AccountRegisteredEvent(
         AccountId accountId,
         Email email,
+        String verificationToken,
         Instant occurredAt
 ) {
     public record AccountId(String value) {}

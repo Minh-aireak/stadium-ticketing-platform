@@ -107,6 +107,7 @@ class NotificationDispatchServiceTest {
         AccountRegisteredEvent registered = new AccountRegisteredEvent(
                 new AccountRegisteredEvent.AccountId("acc-1"),
                 new AccountRegisteredEvent.Email("new-user@example.com"),
+                "test-verification-token",
                 Instant.now());
         EventEnvelope<AccountRegisteredEvent> envelope =
                 EventEnvelope.of(ACCOUNT_REGISTERED, registered, null);
@@ -118,6 +119,8 @@ class NotificationDispatchServiceTest {
         verify(emailSenderPort).send(to.capture(), anyString(), body.capture());
         assertThat(to.getValue()).isEqualTo("new-user@example.com");
         assertThat(body.getValue()).doesNotContain("Failed to render");
+        assertThat(body.getValue())
+                .contains("http://localhost:8081/api/v1/auth/verify-email?token=test-verification-token");
 
         ArgumentCaptor<Notification> notification = ArgumentCaptor.forClass(Notification.class);
         verify(notificationRepository).save(notification.capture());

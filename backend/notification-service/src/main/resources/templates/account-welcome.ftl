@@ -18,7 +18,11 @@
         <div class="content">
             <p>Hi there,</p>
             <p>Thank you for registering on our platform. Your account (ID: <strong>${accountId}</strong>) is currently pending verification.</p>
-            <p>Please use this email address (<strong>${email}</strong>) to activate and log in to your account.</p>
+            <p>Please confirm <strong>${email}</strong> is your email address by clicking the button below to activate your account:</p>
+            <p style="text-align: center;">
+                <a href="${verificationUrl}" style="display: inline-block; padding: 12px 24px; background-color: #1e3a8a; color: white; text-decoration: none; border-radius: 4px;">Verify my email</a>
+            </p>
+            <p>Or copy and paste this link into your browser: <br/>${verificationUrl}</p>
             <p>If you did not make this request, you can safely ignore this email.</p>
         </div>
         <div class="footer">
