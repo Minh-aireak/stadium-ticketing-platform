@@ -77,6 +77,14 @@
         </dependency>
 
         <!-- Flyway migrations -->
+        <!-- Boot 4.1 split Flyway's autoconfiguration out of the (now much slimmer)
+             spring-boot-autoconfigure jar into its own module, pulled in transitively by this
+             starter — flyway-core/flyway-database-postgresql alone no longer trigger the
+             migration-before-Hibernate-validate wiring. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-flyway</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-core</artifactId>
