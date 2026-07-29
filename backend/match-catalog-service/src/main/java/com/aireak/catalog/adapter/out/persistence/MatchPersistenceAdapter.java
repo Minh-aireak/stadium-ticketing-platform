@@ -9,6 +9,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -26,13 +27,13 @@ public class MatchPersistenceAdapter implements MatchRepository {
 
     @Override
     public Optional<Match> findById(String matchId) {
-        return jpaRepository.findById(matchId).map(this::toDomain);
+        return jpaRepository.findByIdWithShowtimes(matchId).map(this::toDomain);
     }
 
     @Override
     public List<Match> findByStatus(MatchStatus status, int page, int size) {
         return jpaRepository
-                .findByStatus(status, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")))
+                .findByStatusWithShowtimes(status, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")))
                 .map(this::toDomain)
                 .getContent();
     }
@@ -40,6 +41,11 @@ public class MatchPersistenceAdapter implements MatchRepository {
     @Override
     public long countByStatus(MatchStatus status) {
         return jpaRepository.countByStatus(status);
+    }
+
+    @Override
+    public boolean existsShowtimeAtVenueAndTime(String venueId, Instant startTime) {
+        return jpaRepository.existsShowtimeAtVenueAndTime(venueId, startTime);
     }
 
     // ----------------------------------------------------------------

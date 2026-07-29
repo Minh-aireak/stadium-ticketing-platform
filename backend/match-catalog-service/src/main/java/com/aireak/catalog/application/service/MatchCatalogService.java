@@ -8,6 +8,7 @@ import com.aireak.catalog.application.port.in.PublishMatchUseCase;
 import com.aireak.catalog.application.port.out.DomainEventPublisher;
 import com.aireak.catalog.application.port.out.MatchRepository;
 import com.aireak.catalog.application.port.out.MatchSearchPort;
+import com.aireak.catalog.domain.exception.InvalidShowtimeException;
 import com.aireak.catalog.domain.model.Match;
 import com.aireak.catalog.domain.model.MatchStatus;
 import com.aireak.catalog.domain.model.Showtime;
@@ -37,6 +38,7 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
     private final MatchRepository matchRepository;
     private final MatchSearchPort matchSearchPort;
     private final DomainEventPublisher eventPublisher;
+    private final MatchSearchIndexer matchSearchIndexer;
 
     @Override
     @Transactional
@@ -51,6 +53,17 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
     @Transactional
     public void addShowtime(String matchId, Instant startTime, String venueId, int totalSeats,
                              BigDecimal basePrice, String currency) {
+        if (!startTime.isAfter(Instant.now())) {
+            throw new InvalidShowtimeException("startTime must be in the future: " + startTime);
+        }
+        // Exact-match check only (no showtime duration in the domain model to compute a real
+        // overlap window against) — still catches the double-booking case that matters: two
+        // showtimes claiming the same venue at the same instant.
+        if (matchRepository.existsShowtimeAtVenueAndTime(venueId, startTime)) {
+            throw new InvalidShowtimeException(
+                    "Another showtime already exists at venue " + venueId + " at " + startTime);
+        }
+
         Match match = findOrThrow(matchId);
         match.addShowtime(new Showtime(startTime, venueId, totalSeats, basePrice, currency));
         matchRepository.save(match);
@@ -64,8 +77,10 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
         match.publish();
         matchRepository.save(match);
 
-        // Update Elasticsearch read model synchronously (could be async for large catalogs)
-        matchSearchPort.index(match);
+        // Off the request thread and outside this transaction (see MatchSearchIndexer javadoc for
+        // why @Async instead of self-consuming MatchPublishedEvent) — a slow/unavailable ES
+        // cluster must not hold this DB transaction, or the whole publish, open.
+        matchSearchIndexer.indexAsync(match);
 
         // Publish domain events (consumed by other services)
         eventPublisher.publishAll(match.pullDomainEvents());
@@ -107,7 +122,14 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
                     .filter(Objects::nonNull)
                     .filter(m -> m.getStatus() == MatchStatus.PUBLISHED)
                     .toList();
-            return new MatchPage(hydrated, hydrated.size(), 0, hydrated.size());
+            // matchSearchPort.search() has no page/size of its own (see MatchSearchPort) — page/
+            // size used to be silently dropped here, always returning every hydrated hit as one
+            // page. Window it in-memory instead so a caller-requested page/size is actually honored.
+            List<Match> pageItems = hydrated.stream()
+                    .skip((long) page * size)
+                    .limit(size)
+                    .toList();
+            return new MatchPage(pageItems, hydrated.size(), page, size);
         }
 
         List<Match> items = matchRepository.findByStatus(MatchStatus.PUBLISHED, page, size);

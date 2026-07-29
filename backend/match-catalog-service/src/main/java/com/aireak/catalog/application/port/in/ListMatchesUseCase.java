@@ -10,8 +10,8 @@ public interface ListMatchesUseCase {
     /**
      * @param query free-text search (matches home/away team or competition); blank/null lists
      *              all published matches instead of searching
-     * @param page  0-based page index, ignored when {@code query} is non-blank
-     * @param size  page size, ignored when {@code query} is non-blank
+     * @param page  0-based page index
+     * @param size  page size
      */
     MatchPage listMatches(String query, int page, int size);
 

@@ -7,6 +7,7 @@ import com.aireak.catalog.application.port.out.MatchSearchPort;
 import com.aireak.catalog.domain.event.MatchPublishedEvent;
 import com.aireak.catalog.domain.event.ShowtimeAddedEvent;
 import com.aireak.catalog.domain.exception.InvalidMatchStatusException;
+import com.aireak.catalog.domain.exception.InvalidShowtimeException;
 import com.aireak.catalog.domain.model.Match;
 import com.aireak.catalog.domain.model.MatchStatus;
 import com.aireak.catalog.domain.model.Showtime;
@@ -40,12 +41,14 @@ class MatchCatalogServiceTest {
     private MatchSearchPort matchSearchPort;
     @Mock
     private DomainEventPublisher eventPublisher;
+    @Mock
+    private MatchSearchIndexer matchSearchIndexer;
 
     private MatchCatalogService service;
 
     @BeforeEach
     void setUp() {
-        service = new MatchCatalogService(matchRepository, matchSearchPort, eventPublisher);
+        service = new MatchCatalogService(matchRepository, matchSearchPort, eventPublisher, matchSearchIndexer);
     }
 
     private static final BigDecimal BASE_PRICE = new BigDecimal("150000");
@@ -93,8 +96,30 @@ class MatchCatalogServiceTest {
     void addShowtimeThrowsWhenMatchNotFound() {
         when(matchRepository.findById("missing")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.addShowtime("missing", Instant.now(), "venue-1", 50, BASE_PRICE, "VND"))
+        assertThatThrownBy(() -> service.addShowtime(
+                "missing", Instant.now().plusSeconds(3600), "venue-1", 50, BASE_PRICE, "VND"))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void addShowtimeThrowsWhenStartTimeIsNotInTheFuture() {
+        assertThatThrownBy(() -> service.addShowtime(
+                "match-1", Instant.now().minusSeconds(1), "venue-1", 50, BASE_PRICE, "VND"))
+                .isInstanceOf(InvalidShowtimeException.class);
+
+        verify(matchRepository, never()).findById(any());
+    }
+
+    @Test
+    void addShowtimeThrowsWhenVenueAlreadyHasAShowtimeAtThatStartTime() {
+        Instant startTime = Instant.now().plusSeconds(3600);
+        when(matchRepository.existsShowtimeAtVenueAndTime("venue-1", startTime)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.addShowtime(
+                "match-1", startTime, "venue-1", 50, BASE_PRICE, "VND"))
+                .isInstanceOf(InvalidShowtimeException.class);
+
+        verify(matchRepository, never()).save(any());
     }
 
     @Test
@@ -108,7 +133,7 @@ class MatchCatalogServiceTest {
         verify(matchRepository).save(saved.capture());
         assertThat(saved.getValue().getStatus()).isEqualTo(MatchStatus.PUBLISHED);
 
-        verify(matchSearchPort).index(eq(saved.getValue()));
+        verify(matchSearchIndexer).indexAsync(eq(saved.getValue()));
 
         ArgumentCaptor<List<Object>> published = ArgumentCaptor.forClass(List.class);
         verify(eventPublisher).publishAll(published.capture());
@@ -128,7 +153,7 @@ class MatchCatalogServiceTest {
                 .isInstanceOf(InvalidMatchStatusException.class);
 
         verify(matchRepository, never()).save(any());
-        verify(matchSearchPort, never()).index(any());
+        verify(matchSearchIndexer, never()).indexAsync(any());
         verify(eventPublisher, never()).publishAll(any());
     }
 
@@ -197,6 +222,31 @@ class MatchCatalogServiceTest {
         assertThat(page.items()).containsExactly(hydratedPublished);
         assertThat(page.totalElements()).isEqualTo(1L);
         verify(matchRepository, never()).findByStatus(any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void listMatchesWithQueryHonorsThePageAndSizeInsteadOfReturningEveryHitAsOnePage() {
+        // Regression test: page/size used to be silently ignored whenever `query` was non-blank —
+        // every hydrated hit came back as a single page regardless of what the caller asked for.
+        Match match1 = publishedStub("match-1");
+        Match match2 = publishedStub("match-2");
+        Match match3 = publishedStub("match-3");
+        when(matchSearchPort.search("Home")).thenReturn(List.of(match1, match2, match3));
+        when(matchRepository.findById("match-1")).thenReturn(Optional.of(match1));
+        when(matchRepository.findById("match-2")).thenReturn(Optional.of(match2));
+        when(matchRepository.findById("match-3")).thenReturn(Optional.of(match3));
+
+        ListMatchesUseCase.MatchPage page = service.listMatches("Home", 1, 1);
+
+        assertThat(page.items()).containsExactly(match2);
+        assertThat(page.totalElements()).isEqualTo(3L);
+        assertThat(page.page()).isEqualTo(1);
+        assertThat(page.size()).isEqualTo(1);
+    }
+
+    private static Match publishedStub(String matchId) {
+        return Match.reconstitute(matchId, "Home FC", "Away FC", "Premier League",
+                MatchStatus.PUBLISHED, Instant.now(), List.of());
     }
 
     @Test
