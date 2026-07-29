@@ -30,7 +30,7 @@ services:
   # outbox_events table via logical replication (see infra/debezium/).
   postgres-identity:
     image: postgres:16-alpine
-    container_name: postgres-identity
+    container_name: postgres-identity_stadium_booking
     command: ["postgres", "-c", "wal_level=logical"]
     networks: [stadium-net]
     environment:
@@ -52,7 +52,7 @@ services:
   # outbox_events table via logical replication (see infra/debezium/).
   postgres-inventory:
     image: postgres:16-alpine
-    container_name: postgres-inventory
+    container_name: postgres-inventory_stadium_booking
     command: ["postgres", "-c", "wal_level=logical"]
     networks: [stadium-net]
     environment:
@@ -74,7 +74,7 @@ services:
   # outbox_events table via logical replication (see infra/debezium/).
   postgres-booking:
     image: postgres:16-alpine
-    container_name: postgres-booking
+    container_name: postgres-booking_stadium_booking
     command: ["postgres", "-c", "wal_level=logical"]
     networks: [stadium-net]
     environment:
@@ -96,7 +96,7 @@ services:
   # outbox_events table via logical replication (see infra/debezium/).
   postgres-payment:
     image: postgres:16-alpine
-    container_name: postgres-payment
+    container_name: postgres-payment_stadium_booking
     command: ["postgres", "-c", "wal_level=logical"]
     networks: [stadium-net]
     environment:
@@ -118,7 +118,7 @@ services:
   # outbox_events table via logical replication (see infra/debezium/).
   postgres-catalog:
     image: postgres:16-alpine
-    container_name: postgres-catalog
+    container_name: postgres-catalog_stadium_booking
     command: ["postgres", "-c", "wal_level=logical"]
     networks: [stadium-net]
     environment:
@@ -141,7 +141,7 @@ services:
   # consistency with the other 5 Postgres containers, not because it's needed.
   postgres-notification:
     image: postgres:16-alpine
-    container_name: postgres-notification
+    container_name: postgres-notification_stadium_booking
     command: ["postgres", "-c", "wal_level=logical"]
     networks: [stadium-net]
     environment:
@@ -161,7 +161,7 @@ services:
   # ---- Redis (Redisson distributed lock + cache) -----------------------
   redis:
     image: redis:7-alpine
-    container_name: redis
+    container_name: redis_stadium_booking
     networks: [stadium-net]
     ports:
       - "6379:6379"
@@ -177,7 +177,7 @@ services:
   # ---- Zookeeper (Kafka dependency) ------------------------------------
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.0
-    container_name: zookeeper
+    container_name: zookeeper_stadium_booking
     networks: [stadium-net]
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
@@ -193,7 +193,7 @@ services:
   # ---- Kafka -----------------------------------------------------------
   kafka:
     image: confluentinc/cp-kafka:7.6.0
-    container_name: kafka
+    container_name: kafka_stadium_booking
     networks: [stadium-net]
     depends_on:
       zookeeper:
@@ -226,7 +226,7 @@ services:
   #     http://localhost:8083/connectors
   kafka-connect:
     image: debezium/connect:2.7
-    container_name: kafka-connect
+    container_name: kafka-connect_stadium_booking
     networks: [stadium-net]
     depends_on:
       kafka:
@@ -256,7 +256,7 @@ services:
   # success, so re-running `docker compose up -d` is always safe.
   kafka-connect-init:
     image: curlimages/curl:8.11.0
-    container_name: kafka-connect-init
+    container_name: kafka-connect-init_stadium_booking
     networks: [stadium-net]
     depends_on:
       kafka-connect:
@@ -283,7 +283,7 @@ services:
   # ---- Elasticsearch (match catalog read model) ------------------------
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.18.3
-    container_name: elasticsearch
+    container_name: elasticsearch_stadium_booking
     networks: [stadium-net]
     environment:
       - discovery.type=single-node
@@ -302,7 +302,7 @@ services:
   # ---- Kafka UI (optional dev tool) -----------------------------------
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
-    container_name: kafka-ui
+    container_name: kafka-ui_stadium_booking
     networks: [stadium-net]
     depends_on:
       kafka:
