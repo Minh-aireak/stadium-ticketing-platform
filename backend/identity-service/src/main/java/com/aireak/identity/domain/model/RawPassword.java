@@ -1,5 +1,7 @@
 package com.aireak.identity.domain.model;
 
+import com.aireak.identity.domain.exception.InvalidPasswordException;
+
 import java.util.Objects;
 
 /**
@@ -39,16 +41,16 @@ public final class RawPassword {
 
     private void validate(String password) {
         if (password.length() < 8) {
-            throw new IllegalArgumentException("Password must be at least 8 characters");
+            throw new InvalidPasswordException("Password must be at least 8 characters");
         }
         if (!password.chars().anyMatch(Character::isUpperCase)) {
-            throw new IllegalArgumentException("Password must contain at least one uppercase letter");
+            throw new InvalidPasswordException("Password must contain at least one uppercase letter");
         }
         if (!password.chars().anyMatch(Character::isLowerCase)) {
-            throw new IllegalArgumentException("Password must contain at least one lowercase letter");
+            throw new InvalidPasswordException("Password must contain at least one lowercase letter");
         }
         if (!password.chars().anyMatch(Character::isDigit)) {
-            throw new IllegalArgumentException("Password must contain at least one digit");
+            throw new InvalidPasswordException("Password must contain at least one digit");
         }
     }
 

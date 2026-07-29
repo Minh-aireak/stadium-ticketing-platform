@@ -8,6 +8,7 @@ import com.aireak.catalog.domain.event.MatchPublishedEvent;
 import com.aireak.catalog.domain.event.ShowtimeAddedEvent;
 import com.aireak.catalog.domain.exception.InvalidMatchStatusException;
 import com.aireak.catalog.domain.exception.InvalidShowtimeException;
+import com.aireak.catalog.domain.exception.MatchNotFoundException;
 import com.aireak.catalog.domain.model.Match;
 import com.aireak.catalog.domain.model.MatchStatus;
 import com.aireak.catalog.domain.model.Showtime;
@@ -98,7 +99,7 @@ class MatchCatalogServiceTest {
 
         assertThatThrownBy(() -> service.addShowtime(
                 "missing", Instant.now().plusSeconds(3600), "venue-1", 50, BASE_PRICE, "VND"))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(MatchNotFoundException.class);
     }
 
     @Test
@@ -188,7 +189,7 @@ class MatchCatalogServiceTest {
         when(matchRepository.findById("missing")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.completeMatch("missing"))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(MatchNotFoundException.class);
     }
 
     @Test

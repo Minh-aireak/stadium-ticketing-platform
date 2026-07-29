@@ -1,5 +1,6 @@
 package com.aireak.identity.domain.model;
 
+import com.aireak.identity.domain.exception.InvalidEmailException;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -34,17 +35,17 @@ class EmailTest {
 
     @Test
     void rejectsMissingAtSign() {
-        assertThatThrownBy(() -> new Email("not-an-email")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new Email("not-an-email")).isInstanceOf(InvalidEmailException.class);
     }
 
     @Test
     void rejectsMissingDomainDot() {
-        assertThatThrownBy(() -> new Email("user@localhost")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new Email("user@localhost")).isInstanceOf(InvalidEmailException.class);
     }
 
     @Test
     void rejectsWhitespaceInsideTheAddress() {
-        assertThatThrownBy(() -> new Email("us er@example.com")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new Email("us er@example.com")).isInstanceOf(InvalidEmailException.class);
     }
 
     @Test

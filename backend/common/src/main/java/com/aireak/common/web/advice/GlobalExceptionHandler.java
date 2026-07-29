@@ -3,13 +3,17 @@ package com.aireak.common.web.advice;
 import com.aireak.common.exception.DomainException;
 import com.aireak.common.exception.ForbiddenException;
 import com.aireak.common.exception.IdentityMismatchException;
+import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 
 import java.net.URI;
 import java.time.Instant;
@@ -103,6 +107,72 @@ public class GlobalExceptionHandler {
                 HttpStatus.BAD_REQUEST, ex.getMessage());
         problem.setType(URI.create(TYPE_BASE + "validation-error"));
         problem.setTitle("Validation Failed");
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+
+    /**
+     * Handles Bean Validation failures on method parameters (e.g. {@code @RequestParam}/
+     * {@code @PathVariable} constraints validated outside a {@code @Valid} request body) → 400.
+     */
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ProblemDetail handleConstraintViolation(ConstraintViolationException ex) {
+        String violations = ex.getConstraintViolations().stream()
+                .map(v -> v.getPropertyPath() + ": " + v.getMessage())
+                .collect(Collectors.joining("; "));
+        log.debug("Constraint violation: {}", violations);
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST, violations);
+        problem.setType(URI.create(TYPE_BASE + "validation-error"));
+        problem.setTitle("Validation Failed");
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+
+    /**
+     * Handles Bean Validation failures on {@code @Validated} controller method parameters
+     * (Spring's own validation exception, distinct from {@link ConstraintViolationException})
+     * → 400 Bad Request.
+     */
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    public ProblemDetail handleHandlerMethodValidation(HandlerMethodValidationException ex) {
+        log.debug("Handler method validation failed: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setType(URI.create(TYPE_BASE + "validation-error"));
+        problem.setTitle("Validation Failed");
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+
+    /**
+     * Handles a request body that can't be parsed (malformed JSON, wrong type, etc.) → 400.
+     * The client-facing message is a generic constant — {@link HttpMessageNotReadableException}'s
+     * own message can embed internal type/package names, which must not leak to the client.
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ProblemDetail handleMessageNotReadable(HttpMessageNotReadableException ex) {
+        log.debug("Malformed request body: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST, "Malformed JSON request body");
+        problem.setType(URI.create(TYPE_BASE + "validation-error"));
+        problem.setTitle("Validation Failed");
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+
+    /**
+     * Handles a persistence-layer constraint violation (unique/FK/check constraint) → 409
+     * Conflict. The client-facing message is a generic constant — the raw exception can embed
+     * constraint names or SQL fragments, which must not leak to the client.
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ProblemDetail handleDataIntegrityViolation(DataIntegrityViolationException ex) {
+        log.warn("Data integrity violation: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.CONFLICT, "The request conflicts with existing data");
+        problem.setType(URI.create(TYPE_BASE + "data-conflict"));
+        problem.setTitle("Data Conflict");
         problem.setProperty("timestamp", Instant.now());
         return problem;
     }

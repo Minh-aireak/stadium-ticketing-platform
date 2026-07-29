@@ -1,5 +1,7 @@
 package com.aireak.identity.domain.model;
 
+import com.aireak.identity.domain.exception.InvalidEmailException;
+
 import java.util.Objects;
 import java.util.regex.Pattern;
 
@@ -17,7 +19,7 @@ public record Email(String value) {
         Objects.requireNonNull(value, "Email must not be null");
         value = value.trim().toLowerCase();
         if (!EMAIL_PATTERN.matcher(value).matches()) {
-            throw new IllegalArgumentException("Invalid email format: " + value);
+            throw new InvalidEmailException("Invalid email format: " + value);
         }
     }
 

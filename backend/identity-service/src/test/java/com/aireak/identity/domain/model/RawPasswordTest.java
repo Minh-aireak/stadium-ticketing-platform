@@ -1,5 +1,6 @@
 package com.aireak.identity.domain.model;
 
+import com.aireak.identity.domain.exception.InvalidPasswordException;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -17,28 +18,28 @@ class RawPasswordTest {
     @Test
     void rejectsShorterThanEightCharacters() {
         assertThatThrownBy(() -> new RawPassword("Ab1defg"))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(InvalidPasswordException.class)
                 .hasMessageContaining("8 characters");
     }
 
     @Test
     void rejectsMissingUppercase() {
         assertThatThrownBy(() -> new RawPassword("abcdefg1"))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(InvalidPasswordException.class)
                 .hasMessageContaining("uppercase");
     }
 
     @Test
     void rejectsMissingLowercase() {
         assertThatThrownBy(() -> new RawPassword("ABCDEFG1"))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(InvalidPasswordException.class)
                 .hasMessageContaining("lowercase");
     }
 
     @Test
     void rejectsMissingDigit() {
         assertThatThrownBy(() -> new RawPassword("Abcdefgh"))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(InvalidPasswordException.class)
                 .hasMessageContaining("digit");
     }
 

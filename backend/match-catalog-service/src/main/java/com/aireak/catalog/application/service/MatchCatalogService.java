@@ -9,6 +9,7 @@ import com.aireak.catalog.application.port.out.DomainEventPublisher;
 import com.aireak.catalog.application.port.out.MatchRepository;
 import com.aireak.catalog.application.port.out.MatchSearchPort;
 import com.aireak.catalog.domain.exception.InvalidShowtimeException;
+import com.aireak.catalog.domain.exception.MatchNotFoundException;
 import com.aireak.catalog.domain.model.Match;
 import com.aireak.catalog.domain.model.MatchStatus;
 import com.aireak.catalog.domain.model.Showtime;
@@ -103,7 +104,7 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
 
     private Match findOrThrow(String matchId) {
         return matchRepository.findById(matchId)
-                .orElseThrow(() -> new IllegalArgumentException("Match not found: " + matchId));
+                .orElseThrow(() -> new MatchNotFoundException(matchId));
     }
 
     // ----------------------------------------------------------------
