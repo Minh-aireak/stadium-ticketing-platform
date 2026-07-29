@@ -16,8 +16,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -51,6 +56,7 @@ class SeatMapQueryServiceTest {
         Seat sold = new Seat(a1, SeatStatus.SOLD, "booking-1", SeatTier.VIP, PRICE);
         SeatInventory inventory = SeatInventory.reconstitute("showtime-1", List.of(sold));
         when(seatInventoryRepository.findByShowtimeId("showtime-1")).thenReturn(Optional.of(inventory));
+        when(seatHoldPort.findHeld("showtime-1", List.of(a1))).thenReturn(Set.of());
 
         GetSeatMapUseCase.SeatMapResult result = service.getSeatMap("showtime-1").orElseThrow();
 
@@ -65,7 +71,7 @@ class SeatMapQueryServiceTest {
         Seat available = new Seat(a1, SeatTier.VIP, PRICE);
         SeatInventory inventory = SeatInventory.reconstitute("showtime-1", List.of(available));
         when(seatInventoryRepository.findByShowtimeId("showtime-1")).thenReturn(Optional.of(inventory));
-        when(seatHoldPort.isHeld("showtime-1", a1)).thenReturn(true);
+        when(seatHoldPort.findHeld("showtime-1", List.of(a1))).thenReturn(Set.of(a1));
 
         GetSeatMapUseCase.SeatMapResult result = service.getSeatMap("showtime-1").orElseThrow();
 
@@ -79,7 +85,7 @@ class SeatMapQueryServiceTest {
         Seat available = new Seat(a1, SeatTier.STANDARD, PRICE);
         SeatInventory inventory = SeatInventory.reconstitute("showtime-1", List.of(available));
         when(seatInventoryRepository.findByShowtimeId("showtime-1")).thenReturn(Optional.of(inventory));
-        when(seatHoldPort.isHeld("showtime-1", a1)).thenReturn(false);
+        when(seatHoldPort.findHeld("showtime-1", List.of(a1))).thenReturn(Set.of());
 
         GetSeatMapUseCase.SeatMapResult result = service.getSeatMap("showtime-1").orElseThrow();
 
@@ -88,5 +94,24 @@ class SeatMapQueryServiceTest {
         assertThat(seat.tier()).isEqualTo("STANDARD");
         assertThat(seat.price()).isEqualByComparingTo(PRICE);
         assertThat(seat.seatCode()).isEqualTo("A1");
+    }
+
+    @Test
+    void batchesTheRedisHoldLookupIntoASingleCallForTheWholeSeatMap() {
+        newService();
+        SeatCode a1 = new SeatCode("A1");
+        SeatCode a2 = new SeatCode("A2");
+        Seat seat1 = new Seat(a1, SeatTier.STANDARD, PRICE);
+        Seat seat2 = new Seat(a2, SeatTier.STANDARD, PRICE);
+        SeatInventory inventory = SeatInventory.reconstitute("showtime-1", List.of(seat1, seat2));
+        when(seatInventoryRepository.findByShowtimeId("showtime-1")).thenReturn(Optional.of(inventory));
+        when(seatHoldPort.findHeld("showtime-1", List.of(a1, a2))).thenReturn(Set.of(a2));
+
+        GetSeatMapUseCase.SeatMapResult result = service.getSeatMap("showtime-1").orElseThrow();
+
+        assertThat(result.seats()).hasSize(2);
+        assertThat(result.seats().get(0).status()).isEqualTo("AVAILABLE");
+        assertThat(result.seats().get(1).status()).isEqualTo("HELD");
+        verify(seatHoldPort, times(1)).findHeld(eq("showtime-1"), any());
     }
 }

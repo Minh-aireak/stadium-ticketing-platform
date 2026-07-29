@@ -4,12 +4,15 @@ import com.aireak.inventory.application.port.in.GetSeatMapUseCase;
 import com.aireak.inventory.application.port.out.SeatHoldPort;
 import com.aireak.inventory.application.port.out.SeatInventoryRepository;
 import com.aireak.inventory.domain.model.Seat;
+import com.aireak.inventory.domain.model.SeatCode;
 import com.aireak.inventory.domain.model.SeatInventory;
 import com.aireak.inventory.domain.model.SeatStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Application service: reads the seat map for a showtime.
@@ -33,19 +36,26 @@ public class SeatMapQueryService implements GetSeatMapUseCase {
     }
 
     private SeatMapResult toResult(String showtimeId, SeatInventory inventory) {
+        // One batched Redis round trip for the whole seat map instead of one isHeld() call per
+        // seat — only AVAILABLE-in-Postgres seats can possibly be held (SOLD short-circuits
+        // below), but querying just those still means a variable-size key set per showtime, so
+        // this queries every seat's key together rather than trying to pre-filter client-side.
+        List<SeatCode> seatCodes = inventory.getSeats().stream().map(Seat::getSeatCode).toList();
+        Set<SeatCode> heldSeatCodes = seatHoldPort.findHeld(showtimeId, seatCodes);
+
         var seats = inventory.getSeats().stream()
                 .map(seat -> new SeatSummary(
                         seat.getSeatCode().value(),
-                        statusOf(showtimeId, seat),
+                        statusOf(seat, heldSeatCodes),
                         seat.getTier().name(),
                         seat.getPrice()))
                 .toList();
         return new SeatMapResult(showtimeId, seats);
     }
 
-    private String statusOf(String showtimeId, Seat seat) {
+    private String statusOf(Seat seat, Set<SeatCode> heldSeatCodes) {
         if (seat.getStatus() == SeatStatus.SOLD) return "SOLD";
-        if (seatHoldPort.isHeld(showtimeId, seat.getSeatCode())) return "HELD";
+        if (heldSeatCodes.contains(seat.getSeatCode())) return "HELD";
         return "AVAILABLE";
     }
 }

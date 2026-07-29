@@ -11,8 +11,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * Redisson implementation of {@link SeatHoldPort}, backed by a single
@@ -70,8 +74,21 @@ public class RedissonSeatHoldAdapter implements SeatHoldPort {
     }
 
     @Override
-    public boolean isHeld(String showtimeId, SeatCode seatCode) {
-        return redissonClient.<String, String>getMapCache(CACHE_NAME).containsKey(holdKey(showtimeId, seatCode));
+    public Set<SeatCode> findHeld(String showtimeId, List<SeatCode> seatCodes) {
+        if (seatCodes.isEmpty()) {
+            return Set.of();
+        }
+        Map<String, SeatCode> seatCodeByKey = seatCodes.stream()
+                .collect(Collectors.toMap(seatCode -> holdKey(showtimeId, seatCode), seatCode -> seatCode));
+
+        RMapCache<String, String> holds = redissonClient.getMapCache(CACHE_NAME);
+        // Single round trip for the whole seat map instead of one GET per seat (getAll only
+        // returns entries that actually exist, so its key set IS the held subset).
+        Map<String, String> present = holds.getAll(seatCodeByKey.keySet());
+
+        return present.keySet().stream()
+                .map(seatCodeByKey::get)
+                .collect(Collectors.toCollection(HashSet::new));
     }
 
     private String holdKey(String showtimeId, SeatCode seatCode) {

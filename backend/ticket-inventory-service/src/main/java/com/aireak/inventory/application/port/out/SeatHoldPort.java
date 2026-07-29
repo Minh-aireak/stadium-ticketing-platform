@@ -3,6 +3,7 @@ package com.aireak.inventory.application.port.out;
 import com.aireak.inventory.domain.model.SeatCode;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * Outbound port: temporary (TTL-based) seat holds.
@@ -30,6 +31,10 @@ public interface SeatHoldPort {
     /** Releases holds owned by {@code bookingId} for the given seats. No-op for seats not held by it. */
     void releaseHolds(String showtimeId, List<SeatCode> seatCodes, String bookingId);
 
-    /** True if the seat currently has an active (non-expired) hold, regardless of owner. */
-    boolean isHeld(String showtimeId, SeatCode seatCode);
+    /**
+     * Batched hold check for a whole seat map — one round trip instead of one per seat (see
+     * {@code SeatMapQueryService}, the only caller). Returns the subset of {@code seatCodes}
+     * that currently have an active (non-expired) hold, regardless of owner.
+     */
+    Set<SeatCode> findHeld(String showtimeId, List<SeatCode> seatCodes);
 }
