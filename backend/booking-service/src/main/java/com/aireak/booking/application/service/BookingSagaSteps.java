@@ -24,11 +24,11 @@ class BookingSagaSteps {
     private final DomainEventPublisher eventPublisher;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public String createDraftBooking(String idempotencyKey, String customerId, String showtimeId,
-                                      List<String> seatCodes, BigDecimal amount, String currency) {
+    public String createDraftBooking(String idempotencyKey, String customerId, String customerEmail,
+                                      String showtimeId, List<String> seatCodes, BigDecimal amount, String currency) {
         SeatSelection seatSelection = new SeatSelection(seatCodes);
         BookingAmount bookingAmount = BookingAmount.of(amount, currency);
-        Booking booking = Booking.create(customerId, showtimeId, seatSelection, bookingAmount, idempotencyKey);
+        Booking booking = Booking.create(customerId, customerEmail, showtimeId, seatSelection, bookingAmount, idempotencyKey);
         bookingRepository.save(booking);
         return booking.getBookingId();
     }

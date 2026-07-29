@@ -21,7 +21,7 @@ class BookingTest {
 
     @Test
     void createStartsInDraftWithNullVersionAndNoEvents() {
-        Booking booking = Booking.create("customer-1", "showtime-1", SEATS, AMOUNT, "idem-key-1");
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, "idem-key-1");
 
         assertThat(booking.getStatus()).isEqualTo(BookingStatus.DRAFT);
         assertThat(booking.getVersion()).isNull();
@@ -32,7 +32,7 @@ class BookingTest {
 
     @Test
     void createAllowsNullIdempotencyKey() {
-        Booking booking = Booking.create("customer-1", "showtime-1", SEATS, AMOUNT, null);
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
 
         assertThat(booking.getIdempotencyKey()).isNull();
     }
@@ -41,7 +41,7 @@ class BookingTest {
     void createRejectsMoreThanMaxTickets() {
         List<String> elevenSeats = List.of("A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9", "A10", "A11");
 
-        assertThatThrownBy(() -> Booking.create("customer-1", "showtime-1",
+        assertThatThrownBy(() -> Booking.create("customer-1", "customer-1@example.com", "showtime-1",
                 new SeatSelection(elevenSeats), AMOUNT, null))
                 .isInstanceOf(MaxTicketsExceededException.class);
     }
@@ -50,7 +50,7 @@ class BookingTest {
     void createAllowsExactlyMaxTickets() {
         List<String> tenSeats = List.of("A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9", "A10");
 
-        Booking booking = Booking.create("customer-1", "showtime-1",
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1",
                 new SeatSelection(tenSeats), AMOUNT, null);
 
         assertThat(booking.getSeatSelection().count()).isEqualTo(10);
@@ -60,14 +60,14 @@ class BookingTest {
     void createRejectsDuplicateSeatCodes() {
         List<String> duplicated = List.of("A1", "A1", "A2");
 
-        assertThatThrownBy(() -> Booking.create("customer-1", "showtime-1",
+        assertThatThrownBy(() -> Booking.create("customer-1", "customer-1@example.com", "showtime-1",
                 new SeatSelection(duplicated), AMOUNT, null))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void markPendingPaymentTransitionsFromDraft() {
-        Booking booking = Booking.create("customer-1", "showtime-1", SEATS, AMOUNT, null);
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
 
         booking.markPendingPayment();
 
@@ -76,7 +76,7 @@ class BookingTest {
 
     @Test
     void markPendingPaymentRejectsFromNonDraftStatus() {
-        Booking booking = Booking.create("customer-1", "showtime-1", SEATS, AMOUNT, null);
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
         booking.markPendingPayment();
 
         assertThatThrownBy(booking::markPendingPayment)
@@ -85,7 +85,7 @@ class BookingTest {
 
     @Test
     void confirmFromPendingPaymentRaisesBookingConfirmedEvent() {
-        Booking booking = Booking.create("customer-1", "showtime-1", SEATS, AMOUNT, null);
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
         booking.markPendingPayment();
 
         booking.confirm();
@@ -99,7 +99,7 @@ class BookingTest {
 
     @Test
     void confirmRejectsWhenNotPendingPayment() {
-        Booking booking = Booking.create("customer-1", "showtime-1", SEATS, AMOUNT, null);
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
 
         assertThatThrownBy(booking::confirm)
                 .isInstanceOf(InvalidBookingStatusException.class);
@@ -107,7 +107,7 @@ class BookingTest {
 
     @Test
     void confirmRejectsWhenAlreadyConfirmed() {
-        Booking booking = Booking.create("customer-1", "showtime-1", SEATS, AMOUNT, null);
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
         booking.markPendingPayment();
         booking.confirm();
 
@@ -117,7 +117,7 @@ class BookingTest {
 
     @Test
     void cancelFromDraftRaisesBookingCancelledEventWithReason() {
-        Booking booking = Booking.create("customer-1", "showtime-1", SEATS, AMOUNT, null);
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
 
         booking.cancel("no seats available");
 
@@ -130,7 +130,7 @@ class BookingTest {
 
     @Test
     void cancelFromPendingPaymentSucceeds() {
-        Booking booking = Booking.create("customer-1", "showtime-1", SEATS, AMOUNT, null);
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
         booking.markPendingPayment();
 
         booking.cancel("payment failed");
@@ -140,7 +140,7 @@ class BookingTest {
 
     @Test
     void cancelRejectsWhenAlreadyConfirmed() {
-        Booking booking = Booking.create("customer-1", "showtime-1", SEATS, AMOUNT, null);
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
         booking.markPendingPayment();
         booking.confirm();
 
@@ -150,7 +150,7 @@ class BookingTest {
 
     @Test
     void cancelRejectsWhenAlreadyCancelled() {
-        Booking booking = Booking.create("customer-1", "showtime-1", SEATS, AMOUNT, null);
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
         booking.cancel("first cancel");
 
         assertThatThrownBy(() -> booking.cancel("second cancel"))
@@ -159,7 +159,7 @@ class BookingTest {
 
     @Test
     void recordCreationSucceededRaisesEventWhenStillPendingPayment() {
-        Booking booking = Booking.create("customer-1", "showtime-1", SEATS, AMOUNT, null);
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
         booking.markPendingPayment();
 
         booking.recordCreationSucceeded();
@@ -173,7 +173,7 @@ class BookingTest {
     void recordCreationSucceededIsNoOpWhenStatusMovedPastPendingPaymentViaConfirm() {
         // Simulates PaymentResultConsumer's confirm() winning the race against the
         // synchronous recordCreationSucceeded() step in BookingOrchestrationService.
-        Booking booking = Booking.create("customer-1", "showtime-1", SEATS, AMOUNT, null);
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
         booking.markPendingPayment();
         booking.confirm();
         booking.pullDomainEvents(); // drain the BookingConfirmedEvent
@@ -185,7 +185,7 @@ class BookingTest {
 
     @Test
     void recordCreationSucceededIsNoOpWhenStillDraft() {
-        Booking booking = Booking.create("customer-1", "showtime-1", SEATS, AMOUNT, null);
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
 
         booking.recordCreationSucceeded();
 
@@ -194,7 +194,7 @@ class BookingTest {
 
     @Test
     void pullDomainEventsClearsTheList() {
-        Booking booking = Booking.create("customer-1", "showtime-1", SEATS, AMOUNT, null);
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
         booking.cancel("test");
 
         List<Object> firstPull = booking.pullDomainEvents();
@@ -208,7 +208,7 @@ class BookingTest {
     void reconstitutePreservesVersionStatusAndRaisesNoEvents() {
         Instant createdAt = Instant.parse("2024-01-01T00:00:00Z");
 
-        Booking booking = Booking.reconstitute("booking-1", "customer-1", "showtime-1",
+        Booking booking = Booking.reconstitute("booking-1", "customer-1", "customer-1@example.com", "showtime-1",
                 SEATS, AMOUNT, BookingStatus.CONFIRMED, createdAt, "idem-1", 5L, true);
 
         assertThat(booking.getVersion()).isEqualTo(5L);
@@ -223,7 +223,7 @@ class BookingTest {
         // version is only ever null for an in-memory create()-d booking; reconstitute()
         // just carries whatever persistence handed it through unchanged (see the field's
         // javadoc on why that distinction matters for JPA's isNew() check).
-        Booking booking = Booking.reconstitute("booking-1", "customer-1", "showtime-1",
+        Booking booking = Booking.reconstitute("booking-1", "customer-1", "customer-1@example.com", "showtime-1",
                 SEATS, AMOUNT, BookingStatus.DRAFT, Instant.now(), null, 0L, false);
 
         assertThat(booking.getVersion()).isEqualTo(0L);
@@ -231,14 +231,14 @@ class BookingTest {
 
     @Test
     void createStartsWithInventoryNotConfirmed() {
-        Booking booking = Booking.create("customer-1", "showtime-1", SEATS, AMOUNT, null);
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
 
         assertThat(booking.isInventoryConfirmed()).isFalse();
     }
 
     @Test
     void markInventoryConfirmedSetsFlag() {
-        Booking booking = Booking.create("customer-1", "showtime-1", SEATS, AMOUNT, null);
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
 
         booking.markInventoryConfirmed();
 

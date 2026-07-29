@@ -25,6 +25,12 @@ public class BookingJpaEntity extends BaseAuditEntity {
     @Column(name = "customer_id", nullable = false, length = 36)
     private String customerId;
 
+    // Nullable: denormalized onto new bookings from the creator's JWT (see BookingController) so
+    // BookingConfirmedEvent/BookingCancelledEvent can carry a real address; rows created before
+    // this column existed have no value and are never backfilled.
+    @Column(name = "customer_email", length = 255)
+    private String customerEmail;
+
     @Column(name = "showtime_id", nullable = false, length = 36)
     private String showtimeId;
 

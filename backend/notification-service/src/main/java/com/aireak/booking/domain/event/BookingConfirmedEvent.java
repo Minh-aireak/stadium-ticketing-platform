@@ -5,7 +5,7 @@ import java.time.Instant;
 import java.util.List;
 
 public record BookingConfirmedEvent(
-        String bookingId, String customerId, String showtimeId,
+        String bookingId, String customerId, String customerEmail, String showtimeId,
         List<String> seatCodes, BookingAmount amount, Instant occurredAt
 ) {
     public record BookingAmount(BigDecimal amount, String currency) {}

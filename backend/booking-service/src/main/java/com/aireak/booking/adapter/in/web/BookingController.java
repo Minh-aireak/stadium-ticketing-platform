@@ -42,9 +42,14 @@ public class BookingController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody CreateBookingRequest request) {
         requireMatchingIdentity(request.customerId());
+        // currentUser().email() is safe to denormalize onto the booking here: requireMatchingIdentity
+        // above already proved this request is the account's own, and the email comes straight off
+        // the JWT identity-service issued for it (see JwtTokenGeneratorAdapter) — not client input,
+        // and no extra call to identity-service needed (see CreateBookingUseCase javadoc).
         BookingCreationResult result = createBookingUseCase.createBooking(
                 idempotencyKey,
                 request.customerId(),
+                currentUser().email(),
                 request.showtimeId(),
                 request.seatCodes(),
                 request.amount(),

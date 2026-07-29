@@ -64,7 +64,7 @@ class NotificationDispatchServiceTest {
     @Test
     void send_confirmedBookingAsProducedInProduction_rendersRealTemplateWithAmountAndCurrency() {
         BookingConfirmedEvent bookingConfirmed = new BookingConfirmedEvent(
-                "booking-1", "customer-1", "showtime-1",
+                "booking-1", "customer-1", "customer-1@example.com", "showtime-1",
                 List.of("A1", "A2"),
                 new BookingConfirmedEvent.BookingAmount(new BigDecimal("100.00"), "VND"),
                 Instant.now());
@@ -73,8 +73,10 @@ class NotificationDispatchServiceTest {
 
         service.send(envelope.getEventId(), envelope.getEventType(), envelope.getPayload());
 
+        ArgumentCaptor<String> to = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
-        verify(emailSenderPort).send(anyString(), anyString(), body.capture());
+        verify(emailSenderPort).send(to.capture(), anyString(), body.capture());
+        assertThat(to.getValue()).isEqualTo("customer-1@example.com");
         assertThat(body.getValue())
                 .doesNotContain("Failed to render")
                 .contains("100")
@@ -89,14 +91,17 @@ class NotificationDispatchServiceTest {
     @Test
     void send_cancelledBookingAsProducedInProduction_rendersRealTemplate() {
         BookingCancelledEvent cancelled = new BookingCancelledEvent(
-                "booking-1", "customer-1", "showtime-1", "customer requested refund", Instant.now());
+                "booking-1", "customer-1", "customer-1@example.com", "showtime-1",
+                "customer requested refund", Instant.now());
         EventEnvelope<BookingCancelledEvent> envelope =
                 EventEnvelope.of(BOOKING_CANCELLED, cancelled, null);
 
         service.send(envelope.getEventId(), envelope.getEventType(), envelope.getPayload());
 
+        ArgumentCaptor<String> to = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
-        verify(emailSenderPort).send(anyString(), anyString(), body.capture());
+        verify(emailSenderPort).send(to.capture(), anyString(), body.capture());
+        assertThat(to.getValue()).isEqualTo("customer-1@example.com");
         assertThat(body.getValue())
                 .doesNotContain("Failed to render")
                 .contains("customer requested refund");

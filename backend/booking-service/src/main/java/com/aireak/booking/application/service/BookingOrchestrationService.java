@@ -38,8 +38,8 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
     // seat's tier before markPendingPayment/initiatePayment or any event that carries the amount
     // ever runs. Never trust `amount` for the actual charge; see Step 2b and Booking#applyReservedPrice.
     @Override
-    public BookingCreationResult createBooking(String idempotencyKey, String customerId, String showtimeId,
-                                List<String> seatCodes, BigDecimal amount, String currency) {
+    public BookingCreationResult createBooking(String idempotencyKey, String customerId, String customerEmail,
+                                String showtimeId, List<String> seatCodes, BigDecimal amount, String currency) {
         if (idempotencyKey != null) {
             IdempotencyClaim claim = idempotencyStore.claim(idempotencyKey);
             if (claim instanceof IdempotencyClaim.Completed completed) {
@@ -64,7 +64,8 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
         // Step 1: create draft booking — commits immediately
         DraftBookingOutcome draftOutcome;
         try {
-            draftOutcome = createDraftBooking(idempotencyKey, customerId, showtimeId, seatCodes, amount, currency);
+            draftOutcome = createDraftBooking(
+                    idempotencyKey, customerId, customerEmail, showtimeId, seatCodes, amount, currency);
         } catch (Exception e) {
             // Anything other than the unique-key race handled inside createDraftBooking()
             // (e.g. MaxTicketsExceededException, a transient DB error) must release the
@@ -217,11 +218,11 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
 
     // Creates a draft booking. On a unique-key race ({@link DataIntegrityViolationException}
     // with an idempotency key present), resolves to the other request's booking ID instead of failing.
-    private DraftBookingOutcome createDraftBooking(String idempotencyKey, String customerId, String showtimeId,
-            List<String> seatCodes, BigDecimal amount, String currency) {
+    private DraftBookingOutcome createDraftBooking(String idempotencyKey, String customerId, String customerEmail,
+            String showtimeId, List<String> seatCodes, BigDecimal amount, String currency) {
         try {
             String bookingId = sagaSteps.createDraftBooking(
-                    idempotencyKey, customerId, showtimeId, seatCodes, amount, currency);
+                    idempotencyKey, customerId, customerEmail, showtimeId, seatCodes, amount, currency);
             return new DraftBookingOutcome.Created(bookingId);
         } catch (DataIntegrityViolationException e) {
             if (idempotencyKey == null) {

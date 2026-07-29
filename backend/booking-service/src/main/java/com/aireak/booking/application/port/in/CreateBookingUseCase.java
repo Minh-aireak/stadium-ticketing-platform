@@ -14,6 +14,10 @@ public interface CreateBookingUseCase {
     // `amount` is client-supplied and used only as a display/log placeholder for the draft
     // row — the saga overwrites it with the server-computed price from ticket-inventory-service
     // before any charge-relevant step. Never trust it for the actual charge.
-    BookingCreationResult createBooking(String idempotencyKey, String customerId, String showtimeId,
-            List<String> seatCodes, BigDecimal amount, String currency);
+    //
+    // `customerEmail` comes from the authenticated caller's own JWT (see BookingController), not
+    // client input — it is denormalized onto Booking so BookingConfirmedEvent/BookingCancelledEvent
+    // can carry a real address without notification-service calling back into identity-service.
+    BookingCreationResult createBooking(String idempotencyKey, String customerId, String customerEmail,
+            String showtimeId, List<String> seatCodes, BigDecimal amount, String currency);
 }

@@ -100,7 +100,7 @@ class OutboxEventPublisherIntegrationTest {
     @Test
     void updatingAnAlreadyPersistedBookingUpdatesInPlace() {
         Booking booking = Booking.create(
-                "customer-1", "showtime-1",
+                "customer-1", "customer-1@example.com", "showtime-1",
                 new SeatSelection(List.of("A1", "A2")),
                 BookingAmount.of(new BigDecimal("150.00"), "USD"), null);
         String bookingId = booking.getBookingId();
@@ -128,7 +128,7 @@ class OutboxEventPublisherIntegrationTest {
     @Test
     void cancellingBookingWritesOutboxRowInSameTransaction() {
         Booking booking = Booking.create(
-                "customer-1", "showtime-1",
+                "customer-1", "customer-1@example.com", "showtime-1",
                 new SeatSelection(List.of("A1", "A2")),
                 BookingAmount.of(new BigDecimal("150.00"), "USD"), null);
         booking.cancel("Seat reservation failed: inventory unavailable");

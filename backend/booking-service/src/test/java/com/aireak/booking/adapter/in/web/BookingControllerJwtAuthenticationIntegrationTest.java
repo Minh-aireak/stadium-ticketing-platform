@@ -123,7 +123,7 @@ class BookingControllerJwtAuthenticationIntegrationTest {
         String accountId = UUID.randomUUID().toString();
         String body = objectMapper.writeValueAsString(new BookingController.CreateBookingRequest(
                 accountId, "showtime-1", List.of("A1"), new BigDecimal("50.00"), "USD"));
-        when(createBookingUseCase.createBooking(any(), anyString(), anyString(), any(), any(), anyString()))
+        when(createBookingUseCase.createBooking(any(), anyString(), any(), anyString(), any(), any(), anyString()))
                 .thenReturn(new BookingCreationResult(
                         "booking-1", BookingStatus.PENDING_PAYMENT));
 

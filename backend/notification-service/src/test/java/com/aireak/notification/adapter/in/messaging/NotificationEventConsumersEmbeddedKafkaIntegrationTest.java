@@ -113,7 +113,7 @@ class NotificationEventConsumersEmbeddedKafkaIntegrationTest {
     @Test
     void consumesRealBookingConfirmedRecord_andDispatchesWithTheDeserializedPayload() {
         BookingConfirmedEvent confirmed = new BookingConfirmedEvent(
-                "booking-1", "customer-1", "showtime-1",
+                "booking-1", "customer-1", "customer-1@example.com", "showtime-1",
                 java.util.List.of("A1", "A2"),
                 new BookingConfirmedEvent.BookingAmount(new java.math.BigDecimal("100.00"), "VND"),
                 Instant.now());
@@ -129,7 +129,8 @@ class NotificationEventConsumersEmbeddedKafkaIntegrationTest {
     @Test
     void consumesRealBookingCancelledRecord_andDispatchesWithTheDeserializedPayload() {
         BookingCancelledEvent cancelled = new BookingCancelledEvent(
-                "booking-2", "customer-2", "showtime-2", "customer requested refund", Instant.now());
+                "booking-2", "customer-2", "customer-2@example.com", "showtime-2",
+                "customer requested refund", Instant.now());
         String eventId = publishAsDebeziumWouldForwardTheOutboxRow(BOOKING_CANCELLED, cancelled);
 
         verify(sendNotificationUseCase, timeout(10_000))
@@ -154,7 +155,7 @@ class NotificationEventConsumersEmbeddedKafkaIntegrationTest {
         doThrow(new RuntimeException("mail server down"))
                 .when(sendNotificationUseCase).send(anyString(), anyString(), any());
         BookingConfirmedEvent confirmed = new BookingConfirmedEvent(
-                "booking-3", "customer-3", "showtime-3",
+                "booking-3", "customer-3", "customer-3@example.com", "showtime-3",
                 java.util.List.of("B1"),
                 new BookingConfirmedEvent.BookingAmount(new java.math.BigDecimal("50.00"), "VND"),
                 Instant.now());

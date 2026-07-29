@@ -19,6 +19,7 @@ public class Booking {
 
     private final String bookingId;
     private final String customerId;
+    private final String customerEmail;
     private final String showtimeId;
     private final SeatSelection seatSelection;
     private BookingAmount amount;
@@ -35,12 +36,13 @@ public class Booking {
     private boolean inventoryConfirmed;
     private final List<Object> domainEvents = new ArrayList<>();
 
-    private Booking(String bookingId, String customerId, String showtimeId,
+    private Booking(String bookingId, String customerId, String customerEmail, String showtimeId,
                     SeatSelection seatSelection, BookingAmount amount,
                     BookingStatus status, Instant createdAt, String idempotencyKey, Long version,
                     boolean inventoryConfirmed) {
         this.bookingId    = bookingId;
         this.customerId   = customerId;
+        this.customerEmail = customerEmail;
         this.showtimeId   = showtimeId;
         this.seatSelection = seatSelection;
         this.amount        = amount;
@@ -52,7 +54,7 @@ public class Booking {
     }
 
     // Creates a new Booking in DRAFT state with invariant checks.
-    public static Booking create(String customerId, String showtimeId,
+    public static Booking create(String customerId, String customerEmail, String showtimeId,
                                   SeatSelection seatSelection, BookingAmount amount,
                                   String idempotencyKey) {
         if (seatSelection.count() > MAX_TICKETS) {
@@ -62,16 +64,16 @@ public class Booking {
             throw new IllegalArgumentException("SeatSelection must not contain duplicate seat codes");
         }
         String bookingId = UUID.randomUUID().toString();
-        return new Booking(bookingId, customerId, showtimeId,
+        return new Booking(bookingId, customerId, customerEmail, showtimeId,
                 seatSelection, amount, BookingStatus.DRAFT, Instant.now(), idempotencyKey, null, false);
     }
 
     // Reconstitute from persistence — no events raised.
-    public static Booking reconstitute(String bookingId, String customerId, String showtimeId,
+    public static Booking reconstitute(String bookingId, String customerId, String customerEmail, String showtimeId,
                                         SeatSelection seatSelection, BookingAmount amount,
                                         BookingStatus status, Instant createdAt,
                                         String idempotencyKey, Long version, boolean inventoryConfirmed) {
-        return new Booking(bookingId, customerId, showtimeId, seatSelection, amount, status, createdAt,
+        return new Booking(bookingId, customerId, customerEmail, showtimeId, seatSelection, amount, status, createdAt,
                 idempotencyKey, version, inventoryConfirmed);
     }
 
@@ -95,7 +97,7 @@ public class Booking {
     public void confirm() {
         require(BookingStatus.PENDING_PAYMENT, "confirm");
         this.status = BookingStatus.CONFIRMED;
-        domainEvents.add(new BookingConfirmedEvent(bookingId, customerId, showtimeId,
+        domainEvents.add(new BookingConfirmedEvent(bookingId, customerId, customerEmail, showtimeId,
                 seatSelection.seatCodes(), amount));
     }
 
@@ -115,7 +117,7 @@ public class Booking {
                     "Cannot cancel booking in status: " + status);
         }
         this.status = BookingStatus.CANCELLED;
-        domainEvents.add(new BookingCancelledEvent(bookingId, customerId, showtimeId, reason));
+        domainEvents.add(new BookingCancelledEvent(bookingId, customerId, customerEmail, showtimeId, reason));
     }
 
     // Records that ticketInventoryPort.confirmReservation() actually succeeded. Idempotent —
@@ -127,6 +129,7 @@ public class Booking {
     // Accessors
     public String getBookingId()            { return bookingId; }
     public String getCustomerId()           { return customerId; }
+    public String getCustomerEmail()        { return customerEmail; }
     public String getShowtimeId()           { return showtimeId; }
     public SeatSelection getSeatSelection() { return seatSelection; }
     public BookingAmount getAmount()        { return amount; }

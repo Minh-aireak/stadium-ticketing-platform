@@ -47,6 +47,7 @@ import static org.mockito.Mockito.when;
 class BookingOrchestrationServiceTest {
 
     private static final String CUSTOMER_ID = "customer-1";
+    private static final String CUSTOMER_EMAIL = "customer-1@example.com";
     private static final String SHOWTIME_ID = "showtime-1";
     private static final List<String> SEAT_CODES = List.of("A1", "A2");
     private static final BigDecimal AMOUNT = new BigDecimal("150.00");
@@ -77,7 +78,7 @@ class BookingOrchestrationServiceTest {
     }
 
     private void stubCreateDraftBooking() {
-        when(sagaSteps.createDraftBooking(any(), anyString(), anyString(), any(), any(), anyString()))
+        when(sagaSteps.createDraftBooking(any(), anyString(), anyString(), anyString(), any(), any(), anyString()))
                 .thenReturn(BOOKING_ID);
     }
 
@@ -94,7 +95,7 @@ class BookingOrchestrationServiceTest {
             stubReserveSeats();
 
             BookingCreationResult result =
-                    service.createBooking(null, CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
+                    service.createBooking(null, CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
 
             assertThat(result.bookingId()).isEqualTo(BOOKING_ID);
             assertThat(result.status()).isEqualTo(BookingStatus.PENDING_PAYMENT);
@@ -113,7 +114,7 @@ class BookingOrchestrationServiceTest {
             stubCreateDraftBooking();
             stubReserveSeats();
 
-            service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
+            service.createBooking("idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
 
             verify(idempotencyStore).complete("idem-1", BOOKING_ID);
             verify(idempotencyStore, never()).release(anyString());
@@ -131,7 +132,7 @@ class BookingOrchestrationServiceTest {
                     .thenReturn(Optional.of(confirmedBooking("existing-booking")));
 
             BookingCreationResult result =
-                    service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
+                    service.createBooking("idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
 
             assertThat(result.bookingId()).isEqualTo("existing-booking");
             assertThat(result.status()).isEqualTo(BookingStatus.CONFIRMED);
@@ -143,7 +144,7 @@ class BookingOrchestrationServiceTest {
             when(idempotencyStore.claim("idem-1")).thenReturn(new IdempotencyClaim.InProgress());
 
             assertThatThrownBy(() ->
-                    service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
+                    service.createBooking("idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
                     .isInstanceOf(DuplicateRequestInProgressException.class);
 
             verifyNoInteractions(sagaSteps, ticketInventoryPort, paymentPort);
@@ -156,7 +157,7 @@ class BookingOrchestrationServiceTest {
             when(bookingRepository.findByIdempotencyKey("idem-1")).thenReturn(Optional.of(existing));
 
             BookingCreationResult result =
-                    service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
+                    service.createBooking("idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
 
             assertThat(result.bookingId()).isEqualTo("existing-booking");
             verify(idempotencyStore).complete("idem-1", "existing-booking");
@@ -167,7 +168,7 @@ class BookingOrchestrationServiceTest {
         void uniqueKeyRaceOnCreateDraftBookingShortCircuitsAndReturnsTheWinningRequestsBooking() {
             when(idempotencyStore.claim("idem-1")).thenReturn(new IdempotencyClaim.Claimed());
             DataIntegrityViolationException raceException = new DataIntegrityViolationException("duplicate key");
-            when(sagaSteps.createDraftBooking(eq("idem-1"), anyString(), anyString(), any(), any(), anyString()))
+            when(sagaSteps.createDraftBooking(eq("idem-1"), anyString(), anyString(), anyString(), any(), any(), anyString()))
                     .thenThrow(raceException);
             Booking winner = pendingPaymentBooking("other-request-booking");
             when(bookingRepository.findByIdempotencyKey("idem-1"))
@@ -175,7 +176,7 @@ class BookingOrchestrationServiceTest {
                     .thenReturn(Optional.of(winner));
 
             BookingCreationResult result =
-                    service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
+                    service.createBooking("idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
 
             assertThat(result.bookingId()).isEqualTo("other-request-booking");
             assertThat(result.status()).isEqualTo(BookingStatus.PENDING_PAYMENT);
@@ -201,7 +202,7 @@ class BookingOrchestrationServiceTest {
                     .reserveSeats(SHOWTIME_ID, BOOKING_ID, SEAT_CODES);
 
             assertThatThrownBy(() ->
-                    service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
+                    service.createBooking("idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
                     .isSameAs(reservationFailure);
 
             verify(sagaSteps).cancelBooking(eq(BOOKING_ID), anyString());
@@ -219,7 +220,7 @@ class BookingOrchestrationServiceTest {
             doThrow(persistFailure).when(sagaSteps).applyReservedPrice(BOOKING_ID, SERVER_AMOUNT, CURRENCY);
 
             assertThatThrownBy(() ->
-                    service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
+                    service.createBooking("idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
                     .isSameAs(persistFailure);
 
             // Seats were already held by the (successful) reserveSeats call above, so this
@@ -240,7 +241,7 @@ class BookingOrchestrationServiceTest {
             doThrow(transitionFailure).when(sagaSteps).markPendingPayment(BOOKING_ID);
 
             assertThatThrownBy(() ->
-                    service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
+                    service.createBooking("idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
                     .isSameAs(transitionFailure);
 
             verify(ticketInventoryPort).releaseSeats(SHOWTIME_ID, BOOKING_ID, SEAT_CODES);
@@ -259,7 +260,7 @@ class BookingOrchestrationServiceTest {
             doThrow(rejected).when(paymentPort).initiatePayment(BOOKING_ID, SERVER_AMOUNT, CURRENCY);
 
             assertThatThrownBy(() ->
-                    service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
+                    service.createBooking("idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
                     .isSameAs(rejected);
 
             verify(ticketInventoryPort).releaseSeats(SHOWTIME_ID, BOOKING_ID, SEAT_CODES);
@@ -288,7 +289,7 @@ class BookingOrchestrationServiceTest {
                     .thenReturn(Optional.of(confirmedBooking(BOOKING_ID)));
 
             BookingCreationResult result =
-                    service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
+                    service.createBooking("idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
 
             assertThat(result.bookingId()).isEqualTo(BOOKING_ID);
             assertThat(result.status()).isEqualTo(BookingStatus.CONFIRMED);
@@ -316,7 +317,7 @@ class BookingOrchestrationServiceTest {
                     .thenThrow(new IllegalArgumentException("Booking not found"));
 
             assertThatThrownBy(() ->
-                    service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
+                    service.createBooking("idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
                     .isSameAs(ambiguous);
 
             // Must still release the claim and surface the ORIGINAL ambiguous exception,
@@ -337,7 +338,7 @@ class BookingOrchestrationServiceTest {
                     .thenReturn(Optional.of(PaymentPort.PaymentOutcome.FAILED));
 
             assertThatThrownBy(() ->
-                    service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
+                    service.createBooking("idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
                     .isSameAs(ambiguous);
 
             verify(ticketInventoryPort).releaseSeats(SHOWTIME_ID, BOOKING_ID, SEAT_CODES);
@@ -356,7 +357,7 @@ class BookingOrchestrationServiceTest {
             when(paymentPort.checkOutcome(BOOKING_ID)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() ->
-                    service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
+                    service.createBooking("idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
                     .isSameAs(ambiguous);
 
             // Genuinely unknown outcome: must NOT cancel/release seats — the async
@@ -385,11 +386,11 @@ class BookingOrchestrationServiceTest {
             when(idempotencyStore.claim("idem-1")).thenReturn(new IdempotencyClaim.Claimed());
             when(bookingRepository.findByIdempotencyKey("idem-1")).thenReturn(Optional.empty());
             RuntimeException failure = new RuntimeException("transient failure creating draft booking");
-            when(sagaSteps.createDraftBooking(eq("idem-1"), anyString(), anyString(), any(), any(), anyString()))
+            when(sagaSteps.createDraftBooking(eq("idem-1"), anyString(), anyString(), anyString(), any(), any(), anyString()))
                     .thenThrow(failure);
 
             assertThatThrownBy(() ->
-                    service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
+                    service.createBooking("idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
                     .isSameAs(failure);
 
             verify(idempotencyStore).release("idem-1");
@@ -549,7 +550,7 @@ class BookingOrchestrationServiceTest {
     }
 
     private static Booking reconstituted(String bookingId, BookingStatus status) {
-        return Booking.reconstitute(bookingId, CUSTOMER_ID, SHOWTIME_ID,
+        return Booking.reconstitute(bookingId, CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID,
                 new SeatSelection(SEAT_CODES), BookingAmount.of(AMOUNT, CURRENCY),
                 status, java.time.Instant.now(), null, 0L, false);
     }

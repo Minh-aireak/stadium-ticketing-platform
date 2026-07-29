@@ -48,7 +48,7 @@ class BookingReconciliationJobTest {
     }
 
     private Booking pendingPaymentBooking(String bookingId) {
-        return Booking.reconstitute(bookingId, "customer-1", "showtime-1",
+        return Booking.reconstitute(bookingId, "customer-1", "customer-1@example.com", "showtime-1",
                 new SeatSelection(List.of("A1")), BookingAmount.of(new BigDecimal("100.00"), "USD"),
                 BookingStatus.PENDING_PAYMENT, Instant.now(), null, 0L, false);
     }

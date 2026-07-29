@@ -73,6 +73,7 @@ public class BookingPersistenceAdapter implements BookingRepository {
         return BookingJpaEntity.builder()
                 .bookingId(booking.getBookingId())
                 .customerId(booking.getCustomerId())
+                .customerEmail(booking.getCustomerEmail())
                 .showtimeId(booking.getShowtimeId())
                 .seatCodes(String.join(",", booking.getSeatSelection().seatCodes()))
                 .amount(booking.getAmount().amount())
@@ -89,6 +90,7 @@ public class BookingPersistenceAdapter implements BookingRepository {
         return Booking.reconstitute(
                 entity.getBookingId(),
                 entity.getCustomerId(),
+                entity.getCustomerEmail(),
                 entity.getShowtimeId(),
                 new SeatSelection(seatCodes),
                 BookingAmount.of(entity.getAmount(), entity.getCurrency()),

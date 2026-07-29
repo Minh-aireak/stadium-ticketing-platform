@@ -175,9 +175,9 @@ public class NotificationDispatchService implements SendNotificationUseCase {
         if (payload instanceof AccountRegisteredEvent event) {
             return event.email().value();
         } else if (payload instanceof BookingConfirmedEvent event) {
-            return "customer-" + event.customerId() + "@example.com";
+            return event.customerEmail();
         } else if (payload instanceof BookingCancelledEvent event) {
-            return "customer-" + event.customerId() + "@example.com";
+            return event.customerEmail();
         }
         return "user@example.com";
     }

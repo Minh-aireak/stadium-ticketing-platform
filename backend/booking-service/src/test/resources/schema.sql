@@ -7,6 +7,7 @@
 CREATE TABLE bookings (
     booking_id VARCHAR(36) NOT NULL PRIMARY KEY,
     customer_id VARCHAR(36) NOT NULL,
+    customer_email VARCHAR(255),
     showtime_id VARCHAR(36) NOT NULL,
     seat_codes VARCHAR(1000) NOT NULL,
     amount DECIMAL(15, 2) NOT NULL,
