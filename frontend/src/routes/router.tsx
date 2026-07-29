@@ -21,10 +21,10 @@ export const router = createBrowserRouter([
       { path: 'login', element: <LoginPage /> },
       { path: 'register', element: <RegisterPage /> },
       { path: 'matches/:matchId', element: <MatchDetailPage /> },
-      { path: 'matches/:matchId/seats', element: <SeatSelectionPage /> },
       {
         element: <ProtectedRoute />,
         children: [
+          { path: 'matches/:matchId/seats', element: <SeatSelectionPage /> },
           { path: 'checkout', element: <CheckoutPage /> },
           { path: 'checkout/:bookingId/status', element: <PaymentStatusPage /> },
           { path: 'account', element: <AccountPage /> },
