@@ -75,6 +75,16 @@ public class Booking {
                 idempotencyKey, version, inventoryConfirmed);
     }
 
+    // Overwrites the placeholder amount recorded at draft-creation time with the authoritative
+    // price ticket-inventory-service computed from each seat's tier (see
+    // BookingOrchestrationService#createBooking, Step 2b) — must run before markPendingPayment,
+    // initiatePayment, or any domain event that carries `amount`, since a client-supplied amount
+    // is never trusted for the actual charge.
+    public void applyReservedPrice(BookingAmount amount) {
+        require(BookingStatus.DRAFT, "applyReservedPrice");
+        this.amount = amount;
+    }
+
     // mark PENDING_PAYMENT if DRAFT
     public void markPendingPayment() {
         require(BookingStatus.DRAFT, "markPendingPayment");

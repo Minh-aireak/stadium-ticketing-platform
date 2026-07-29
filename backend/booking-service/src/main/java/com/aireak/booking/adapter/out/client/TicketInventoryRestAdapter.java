@@ -14,6 +14,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 // Outbound REST adapter: calls ticket-inventory-service. Resilience4j @CircuitBreaker/@Retry
@@ -37,17 +38,18 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
     @Bulkhead(name = "ticket-inventory", type = Bulkhead.Type.SEMAPHORE)
     @CircuitBreaker(name = "ticket-inventory", fallbackMethod = "reserveSeatsFallback")
     @Retry(name = "ticket-inventory")
-    public void reserveSeats(String showtimeId, String bookingId, List<String> seatCodes) {
+    public BigDecimal reserveSeats(String showtimeId, String bookingId, List<String> seatCodes) {
         log.debug("Reserving seats: showtime={}, booking={}", showtimeId, bookingId);
         // bookingId doubles as the Idempotency-Key so @Retry re-sends dedupe instead of
         // reserving the seats twice.
-        restClient.post()
+        ReserveResponse response = restClient.post()
                 .uri(baseUrl + "/api/v1/inventory/{showtimeId}/reserve", showtimeId)
                 .header("Idempotency-Key", bookingId)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + authorizationToken())
                 .body(new ReservationRequest(bookingId, seatCodes))
                 .retrieve()
-                .toBodilessEntity();
+                .body(ReserveResponse.class);
+        return response.totalPrice();
     }
 
     @Override
@@ -91,7 +93,7 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
     }
 
     // Fallback: propagate as RuntimeException so saga compensates
-    private void reserveSeatsFallback(String showtimeId, String bookingId,
+    private BigDecimal reserveSeatsFallback(String showtimeId, String bookingId,
                                        List<String> seatCodes, Throwable t) {
         log.error("Circuit open / retry exhausted for reserveSeats: {}", t.getMessage());
         throw new RuntimeException("Ticket inventory service unavailable", t);
@@ -117,4 +119,5 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
     }
 
     record ReservationRequest(String bookingId, List<String> seatCodes) {}
+    record ReserveResponse(BigDecimal totalPrice) {}
 }

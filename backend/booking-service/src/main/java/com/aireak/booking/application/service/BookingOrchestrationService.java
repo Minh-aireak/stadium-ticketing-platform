@@ -33,6 +33,10 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
     private final PaymentPort paymentPort;
     private final IdempotencyStore idempotencyStore;
 
+    // `amount` is only ever used as a placeholder for the draft row created in Step 1, below —
+    // it is overwritten in Step 2b with the price ticket-inventory-service computes from each
+    // seat's tier before markPendingPayment/initiatePayment or any event that carries the amount
+    // ever runs. Never trust `amount` for the actual charge; see Step 2b and Booking#applyReservedPrice.
     @Override
     public BookingCreationResult createBooking(String idempotencyKey, String customerId, String showtimeId,
                                 List<String> seatCodes, BigDecimal amount, String currency) {
@@ -82,12 +86,28 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
         String bookingId = ((DraftBookingOutcome.Created) draftOutcome).bookingId();
         log.info("Booking created: id={}, customerId={}", bookingId, customerId);
 
-        // Step 2: reserve seats (REST call, no local transaction)
+        // Step 2: reserve seats (REST call, no local transaction). ticket-inventory-service
+        // computes and returns the authoritative total price from each seat's tier — the
+        // client-supplied `amount` above was only ever a placeholder for the draft row.
+        BigDecimal serverComputedAmount;
         try {
-            ticketInventoryPort.reserveSeats(showtimeId, bookingId, seatCodes);
+            serverComputedAmount = ticketInventoryPort.reserveSeats(showtimeId, bookingId, seatCodes);
         } catch (Exception e) {
             log.error("Seat reservation failed for booking {}: {}", bookingId, e.getMessage());
             sagaSteps.cancelBooking(bookingId, "Seat reservation failed: " + e.getMessage());
+            releaseIdempotencyClaim(idempotencyKey);
+            throw e;
+        }
+
+        // Step 2b: persist that server-computed price, overwriting the client-supplied
+        // placeholder, before any charge-relevant step. Seats are already held at this point,
+        // so a failure here must release them like any other post-reservation failure.
+        try {
+            sagaSteps.applyReservedPrice(bookingId, serverComputedAmount, currency);
+        } catch (Exception e) {
+            log.error("Persisting server-computed price failed for booking {}: {}", bookingId, e.getMessage());
+            ticketInventoryPort.releaseSeats(showtimeId, bookingId, seatCodes);
+            sagaSteps.cancelBooking(bookingId, "State transition failed: " + e.getMessage());
             releaseIdempotencyClaim(idempotencyKey);
             throw e;
         }
@@ -103,9 +123,9 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
             throw e;
         }
 
-        // Step 4: initiate payment (REST call, no local transaction)
+        // Step 4: initiate payment (REST call, no local transaction) — server-computed amount only.
         try {
-            paymentPort.initiatePayment(bookingId, amount, currency);
+            paymentPort.initiatePayment(bookingId, serverComputedAmount, currency);
         } catch (Exception e) {
             // PaymentRestAdapter rethrows HttpStatusCodeException as-is, so it's checked directly.
             if (e instanceof HttpStatusCodeException httpEx) {

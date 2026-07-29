@@ -79,4 +79,22 @@ class RedissonIdempotencyStoreTest {
 
         assertThat(claim).isInstanceOf(IdempotencyClaim.Claimed.class);
     }
+
+    /**
+     * {@code CLIENT PAUSE} makes the server delay responding to every subsequent command for the
+     * given duration without closing the connection — a realistic stand-in for a slow/overloaded
+     * Redis. Paused well beyond {@code RedissonIdempotencyStore}'s own 300ms claim timeout, so a
+     * claim issued during the pause must time out and fail open rather than block on it.
+     */
+    @Test
+    void redisTimeoutFailsOpenToAFreshClaimInsteadOfBlockingOrThrowing() throws Exception {
+        REDIS.execInContainer("redis-cli", "CLIENT", "PAUSE", "2000");
+        long start = System.currentTimeMillis();
+
+        IdempotencyClaim claim = store.claim("slow-redis-key");
+
+        long elapsedMillis = System.currentTimeMillis() - start;
+        assertThat(claim).isInstanceOf(IdempotencyClaim.Claimed.class);
+        assertThat(elapsedMillis).isLessThan(2000);
+    }
 }

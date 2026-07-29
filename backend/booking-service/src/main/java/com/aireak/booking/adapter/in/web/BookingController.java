@@ -109,6 +109,10 @@ public class BookingController {
         }
     }
 
+    // amount: display/log placeholder only — the saga overwrites it with the price
+    // ticket-inventory-service computes server-side from each seat's tier before any
+    // charge-relevant step runs (see BookingOrchestrationService#createBooking, Step 2b).
+    // NEVER used to compute the actual charge.
     public record CreateBookingRequest(
             @NotBlank String customerId,
             @NotBlank String showtimeId,

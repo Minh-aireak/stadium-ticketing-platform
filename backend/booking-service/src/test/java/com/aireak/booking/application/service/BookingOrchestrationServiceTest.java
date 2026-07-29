@@ -50,6 +50,10 @@ class BookingOrchestrationServiceTest {
     private static final String SHOWTIME_ID = "showtime-1";
     private static final List<String> SEAT_CODES = List.of("A1", "A2");
     private static final BigDecimal AMOUNT = new BigDecimal("150.00");
+    // Distinct from AMOUNT (the client-supplied placeholder) so tests can verify the saga
+    // charges the server-computed price returned by ticketInventoryPort.reserveSeats(), never
+    // the client's amount.
+    private static final BigDecimal SERVER_AMOUNT = new BigDecimal("175.00");
     private static final String CURRENCY = "USD";
     private static final String BOOKING_ID = "booking-123";
 
@@ -77,12 +81,17 @@ class BookingOrchestrationServiceTest {
                 .thenReturn(BOOKING_ID);
     }
 
+    private void stubReserveSeats() {
+        when(ticketInventoryPort.reserveSeats(SHOWTIME_ID, BOOKING_ID, SEAT_CODES)).thenReturn(SERVER_AMOUNT);
+    }
+
     @Nested
     class HappyPath {
 
         @Test
         void createBookingWithoutIdempotencyKeyReturnsPendingPaymentAndNeverTouchesIdempotencyStore() {
             stubCreateDraftBooking();
+            stubReserveSeats();
 
             BookingCreationResult result =
                     service.createBooking(null, CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
@@ -90,8 +99,10 @@ class BookingOrchestrationServiceTest {
             assertThat(result.bookingId()).isEqualTo(BOOKING_ID);
             assertThat(result.status()).isEqualTo(BookingStatus.PENDING_PAYMENT);
             verify(ticketInventoryPort).reserveSeats(SHOWTIME_ID, BOOKING_ID, SEAT_CODES);
+            verify(sagaSteps).applyReservedPrice(BOOKING_ID, SERVER_AMOUNT, CURRENCY);
             verify(sagaSteps).markPendingPayment(BOOKING_ID);
-            verify(paymentPort).initiatePayment(BOOKING_ID, AMOUNT, CURRENCY);
+            // Charges the server-computed price, never the client-supplied AMOUNT.
+            verify(paymentPort).initiatePayment(BOOKING_ID, SERVER_AMOUNT, CURRENCY);
             verify(sagaSteps).recordCreationSucceeded(BOOKING_ID);
             verifyNoInteractions(idempotencyStore);
         }
@@ -100,6 +111,7 @@ class BookingOrchestrationServiceTest {
         void createBookingWithFreshIdempotencyKeyClaimsAndCompletesIt() {
             when(idempotencyStore.claim("idem-1")).thenReturn(new IdempotencyClaim.Claimed());
             stubCreateDraftBooking();
+            stubReserveSeats();
 
             service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
 
@@ -199,9 +211,31 @@ class BookingOrchestrationServiceTest {
         }
 
         @Test
+        void applyReservedPriceFailureReleasesSeatsCancelsBookingAndReleasesClaim() {
+            when(idempotencyStore.claim("idem-1")).thenReturn(new IdempotencyClaim.Claimed());
+            stubCreateDraftBooking();
+            stubReserveSeats();
+            RuntimeException persistFailure = new RuntimeException("db error");
+            doThrow(persistFailure).when(sagaSteps).applyReservedPrice(BOOKING_ID, SERVER_AMOUNT, CURRENCY);
+
+            assertThatThrownBy(() ->
+                    service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
+                    .isSameAs(persistFailure);
+
+            // Seats were already held by the (successful) reserveSeats call above, so this
+            // failure must release them like any other post-reservation failure.
+            verify(ticketInventoryPort).releaseSeats(SHOWTIME_ID, BOOKING_ID, SEAT_CODES);
+            verify(sagaSteps).cancelBooking(eq(BOOKING_ID), anyString());
+            verify(idempotencyStore).release("idem-1");
+            verify(sagaSteps, never()).markPendingPayment(anyString());
+            verify(paymentPort, never()).initiatePayment(anyString(), any(), anyString());
+        }
+
+        @Test
         void markPendingPaymentFailureReleasesSeatsCancelsBookingAndReleasesClaim() {
             when(idempotencyStore.claim("idem-1")).thenReturn(new IdempotencyClaim.Claimed());
             stubCreateDraftBooking();
+            stubReserveSeats();
             RuntimeException transitionFailure = new RuntimeException("db error");
             doThrow(transitionFailure).when(sagaSteps).markPendingPayment(BOOKING_ID);
 
@@ -219,9 +253,10 @@ class BookingOrchestrationServiceTest {
         void definiteHttpErrorOnPaymentInitiationCompensatesImmediatelyWithoutReconciliation() {
             when(idempotencyStore.claim("idem-1")).thenReturn(new IdempotencyClaim.Claimed());
             stubCreateDraftBooking();
+            stubReserveSeats();
             HttpClientErrorException rejected = HttpClientErrorException.create(
                     HttpStatus.BAD_REQUEST, "Bad Request", HttpHeaders.EMPTY, new byte[0], null);
-            doThrow(rejected).when(paymentPort).initiatePayment(BOOKING_ID, AMOUNT, CURRENCY);
+            doThrow(rejected).when(paymentPort).initiatePayment(BOOKING_ID, SERVER_AMOUNT, CURRENCY);
 
             assertThatThrownBy(() ->
                     service.createBooking("idem-1", CUSTOMER_ID, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
@@ -242,9 +277,10 @@ class BookingOrchestrationServiceTest {
         void ambiguousFailureReconciledAsSucceededConfirmsBookingSynchronouslyWithoutReleasingClaim() {
             when(idempotencyStore.claim("idem-1")).thenReturn(new IdempotencyClaim.Claimed());
             stubCreateDraftBooking();
+            stubReserveSeats();
             OutboundServiceUnavailableException ambiguous = new OutboundServiceUnavailableException(
                     "Payment service unavailable", new RuntimeException("timeout"));
-            doThrow(ambiguous).when(paymentPort).initiatePayment(BOOKING_ID, AMOUNT, CURRENCY);
+            doThrow(ambiguous).when(paymentPort).initiatePayment(BOOKING_ID, SERVER_AMOUNT, CURRENCY);
             when(paymentPort.checkOutcome(BOOKING_ID))
                     .thenReturn(Optional.of(PaymentPort.PaymentOutcome.SUCCEEDED));
             when(sagaSteps.findOrThrow(BOOKING_ID)).thenReturn(pendingPaymentBooking(BOOKING_ID));
@@ -268,9 +304,10 @@ class BookingOrchestrationServiceTest {
         void ambiguousFailureReconciledAsSucceededButLostRaceToConsumerFallsBackSafely() {
             when(idempotencyStore.claim("idem-1")).thenReturn(new IdempotencyClaim.Claimed());
             stubCreateDraftBooking();
+            stubReserveSeats();
             OutboundServiceUnavailableException ambiguous = new OutboundServiceUnavailableException(
                     "Payment service unavailable", new RuntimeException("timeout"));
-            doThrow(ambiguous).when(paymentPort).initiatePayment(BOOKING_ID, AMOUNT, CURRENCY);
+            doThrow(ambiguous).when(paymentPort).initiatePayment(BOOKING_ID, SERVER_AMOUNT, CURRENCY);
             when(paymentPort.checkOutcome(BOOKING_ID))
                     .thenReturn(Optional.of(PaymentPort.PaymentOutcome.SUCCEEDED));
             // PaymentResultConsumer already resolved this booking on another thread —
@@ -292,9 +329,10 @@ class BookingOrchestrationServiceTest {
         void ambiguousFailureReconciledAsFailedCancelsBookingAndReleasesClaim() {
             when(idempotencyStore.claim("idem-1")).thenReturn(new IdempotencyClaim.Claimed());
             stubCreateDraftBooking();
+            stubReserveSeats();
             OutboundServiceUnavailableException ambiguous = new OutboundServiceUnavailableException(
                     "Payment service unavailable", new RuntimeException("timeout"));
-            doThrow(ambiguous).when(paymentPort).initiatePayment(BOOKING_ID, AMOUNT, CURRENCY);
+            doThrow(ambiguous).when(paymentPort).initiatePayment(BOOKING_ID, SERVER_AMOUNT, CURRENCY);
             when(paymentPort.checkOutcome(BOOKING_ID))
                     .thenReturn(Optional.of(PaymentPort.PaymentOutcome.FAILED));
 
@@ -311,9 +349,10 @@ class BookingOrchestrationServiceTest {
         void stillAmbiguousOutcomeLeavesBookingUntouchedAndReleasesClaimForRetry() {
             when(idempotencyStore.claim("idem-1")).thenReturn(new IdempotencyClaim.Claimed());
             stubCreateDraftBooking();
+            stubReserveSeats();
             OutboundServiceUnavailableException ambiguous = new OutboundServiceUnavailableException(
                     "Payment service unavailable", new RuntimeException("timeout"));
-            doThrow(ambiguous).when(paymentPort).initiatePayment(BOOKING_ID, AMOUNT, CURRENCY);
+            doThrow(ambiguous).when(paymentPort).initiatePayment(BOOKING_ID, SERVER_AMOUNT, CURRENCY);
             when(paymentPort.checkOutcome(BOOKING_ID)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() ->

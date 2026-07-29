@@ -16,6 +16,9 @@ interface BookingJpaRepository extends JpaRepository<BookingJpaEntity, String> {
     List<BookingJpaEntity> findByStatusAndInventoryConfirmedFalseAndUpdatedAtBefore(
             BookingStatus status, Instant updatedBefore, Limit limit);
 
+    List<BookingJpaEntity> findByStatusAndUpdatedAtBefore(
+            BookingStatus status, Instant updatedBefore, Limit limit);
+
     Page<BookingJpaEntity> findByCustomerId(String customerId, Pageable pageable);
     long countByCustomerId(String customerId);
 }

@@ -48,6 +48,15 @@ public class BookingPersistenceAdapter implements BookingRepository {
     }
 
     @Override
+    public List<Booking> findPendingPaymentOlderThan(Instant updatedBefore, int limit) {
+        return jpaRepository
+                .findByStatusAndUpdatedAtBefore(BookingStatus.PENDING_PAYMENT, updatedBefore, Limit.of(limit))
+                .stream()
+                .map(this::toDomain)
+                .toList();
+    }
+
+    @Override
     public List<Booking> findByCustomerId(String customerId, int page, int size) {
         return jpaRepository
                 .findByCustomerId(customerId, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")))

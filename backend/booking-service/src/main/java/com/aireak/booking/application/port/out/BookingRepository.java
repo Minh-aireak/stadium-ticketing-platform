@@ -24,6 +24,17 @@ public interface BookingRepository {
      */
     List<Booking> findConfirmedAwaitingInventoryConfirmation(Instant updatedBefore, int limit);
 
+    /**
+     * PENDING_PAYMENT bookings last updated before {@code updatedBefore} — a payment result
+     * ({@code PaymentSucceededEvent}/{@code PaymentFailedEvent}) was never received for them, or
+     * the resulting Kafka consumption failed silently. Used by {@code BookingReconciliationJob}
+     * to query payment-service directly for the true outcome instead of waiting forever.
+     *
+     * @param limit caps how many bookings a single run reconciles — same rationale as
+     *              {@link #findConfirmedAwaitingInventoryConfirmation}.
+     */
+    List<Booking> findPendingPaymentOlderThan(Instant updatedBefore, int limit);
+
     /** Page of a customer's bookings, newest first. */
     List<Booking> findByCustomerId(String customerId, int page, int size);
     long countByCustomerId(String customerId);

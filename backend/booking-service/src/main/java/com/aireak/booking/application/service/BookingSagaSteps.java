@@ -33,6 +33,15 @@ class BookingSagaSteps {
         return booking.getBookingId();
     }
 
+    // Persists the server-computed price returned by ticketInventoryPort.reserveSeats(), replacing
+    // the client-supplied placeholder passed to createDraftBooking. See Booking#applyReservedPrice.
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void applyReservedPrice(String bookingId, BigDecimal amount, String currency) {
+        Booking booking = findOrThrow(bookingId);
+        booking.applyReservedPrice(BookingAmount.of(amount, currency));
+        bookingRepository.save(booking);
+    }
+
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markPendingPayment(String bookingId) {
         Booking booking = findOrThrow(bookingId);

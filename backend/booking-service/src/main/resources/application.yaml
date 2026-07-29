@@ -69,6 +69,13 @@ booking:
     fixed-delay-ms: ${INVENTORY_RECONCILER_FIXED_DELAY_MS:300000}
     # Caps how many bookings a single run retries — a real backlog drains over several cycles.
     batch-size: ${INVENTORY_RECONCILER_BATCH_SIZE:200}
+  payment-reconciliation-job:
+    # Only reconcile PENDING_PAYMENT bookings still unresolved after this long, so the job never
+    # races the normal in-flight case (payment-service simply hasn't responded to Kafka yet).
+    grace-minutes: ${PAYMENT_RECONCILER_GRACE_MINUTES:5}
+    fixed-delay-ms: ${PAYMENT_RECONCILER_FIXED_DELAY_MS:300000}
+    # Caps how many bookings a single run retries — a real backlog drains over several cycles.
+    batch-size: ${PAYMENT_RECONCILER_BATCH_SIZE:200}
 
 outbox:
   cleanup:
