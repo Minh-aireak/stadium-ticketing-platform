@@ -4,7 +4,6 @@ import com.aireak.inventory.application.port.out.SeatInventoryRepository;
 import com.aireak.inventory.domain.model.Seat;
 import com.aireak.inventory.domain.model.SeatCode;
 import com.aireak.inventory.domain.model.SeatInventory;
-import com.aireak.inventory.domain.model.SeatStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -71,11 +70,16 @@ public class SeatInventoryPersistenceAdapter implements SeatInventoryRepository 
     }
 
     @Override
-    public List<SeatCode> findSoldSeatCodes(String showtimeId, List<SeatCode> seatCodes) {
+    public List<Seat> findSeatsByCodes(String showtimeId, List<SeatCode> seatCodes) {
         List<String> codes = seatCodes.stream().map(SeatCode::value).toList();
-        return seatJpaRepository.findByShowtimeIdAndSeatCodeInAndStatus(showtimeId, codes, SeatStatus.SOLD)
+        return seatJpaRepository.findByShowtimeIdAndSeatCodeIn(showtimeId, codes)
                 .stream()
-                .map(s -> new SeatCode(s.getSeatCode()))
+                .map(s -> new Seat(
+                        new SeatCode(s.getSeatCode()),
+                        s.getStatus(),
+                        s.getReservedByBookingId(),
+                        s.getTier(),
+                        s.getPrice()))
                 .toList();
     }
 

@@ -34,13 +34,17 @@ public class SeatInventoryController {
     private final ConfirmSeatsUseCase confirmSeatsUseCase;
     private final GetSeatMapUseCase getSeatMapUseCase;
 
-    /** POST /api/v1/inventory/{showtimeId}/reserve — places a TTL hold (see SeatHoldPort), no DB write. */
+    /**
+     * POST /api/v1/inventory/{showtimeId}/reserve — places a TTL hold (see SeatHoldPort), no DB write.
+     * Returns the authoritative total price computed from each seat's tier — booking-service uses
+     * this to charge, never a client-supplied amount.
+     */
     @PostMapping("/{showtimeId}/reserve")
-    public ResponseEntity<Void> reserve(@PathVariable("showtimeId") String showtimeId,
+    public ResponseEntity<ReserveSeatsResponse> reserve(@PathVariable("showtimeId") String showtimeId,
                                         @Valid @RequestBody ReserveSeatsRequest request) {
-        reserveSeatsUseCase.execute(
+        BigDecimal totalPrice = reserveSeatsUseCase.execute(
                 new ReserveSeatsCommand(showtimeId, request.bookingId(), request.seatCodes()));
-        return ResponseEntity.ok().build();
+        return ResponseEntity.ok(new ReserveSeatsResponse(totalPrice));
     }
 
     /** DELETE /api/v1/inventory/{showtimeId}/reserve/{bookingId} */
@@ -85,4 +89,5 @@ public class SeatInventoryController {
 
     record SeatResponse(String code, String row, int number, String status, String tier, BigDecimal price) {}
     record SeatMapResponse(String showtimeId, List<SeatResponse> seats) {}
+    record ReserveSeatsResponse(BigDecimal totalPrice) {}
 }

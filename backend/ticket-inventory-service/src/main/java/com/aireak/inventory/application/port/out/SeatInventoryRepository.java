@@ -1,5 +1,6 @@
 package com.aireak.inventory.application.port.out;
 
+import com.aireak.inventory.domain.model.Seat;
 import com.aireak.inventory.domain.model.SeatCode;
 import com.aireak.inventory.domain.model.SeatInventory;
 
@@ -13,10 +14,12 @@ public interface SeatInventoryRepository {
     boolean existsByShowtimeId(String showtimeId);
 
     /**
-     * Targeted lookup for the reserve hot path: which of {@code seatCodes} are currently SOLD.
-     * Queries the {@code seats} table directly instead of loading the full (EAGER-fetched)
+     * Targeted lookup for the reserve hot path: fetches only the requested {@code seatCodes}
+     * (with their status/tier/price) instead of loading the full (EAGER-fetched)
      * {@link SeatInventory} aggregate, so it stays cheap under a per-showtime lock even when
-     * the showtime has thousands of seats.
+     * the showtime has thousands of seats. Used both to reject already-SOLD seats and to
+     * compute the authoritative total price from each seat's tier — never trust a
+     * client-supplied amount for that.
      */
-    List<SeatCode> findSoldSeatCodes(String showtimeId, List<SeatCode> seatCodes);
+    List<Seat> findSeatsByCodes(String showtimeId, List<SeatCode> seatCodes);
 }

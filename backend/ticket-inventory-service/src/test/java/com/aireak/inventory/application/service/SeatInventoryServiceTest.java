@@ -11,7 +11,10 @@ import com.aireak.inventory.domain.event.SeatsReleasedEvent;
 import com.aireak.inventory.domain.event.SeatsReservedEvent;
 import com.aireak.inventory.domain.exception.SeatInventoryNotFoundException;
 import com.aireak.inventory.domain.exception.SeatsNotAvailableException;
+import com.aireak.inventory.domain.model.Seat;
 import com.aireak.inventory.domain.model.SeatCode;
+import com.aireak.inventory.domain.model.SeatStatus;
+import com.aireak.inventory.domain.model.SeatTier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,6 +22,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.function.Supplier;
 
@@ -45,6 +49,8 @@ class SeatInventoryServiceTest {
     private static final String BOOKING_ID = "booking-1";
     private static final List<String> SEAT_CODE_STRINGS = List.of("A1", "A2");
     private static final List<SeatCode> SEAT_CODES = List.of(new SeatCode("A1"), new SeatCode("A2"));
+    private static final BigDecimal A1_PRICE = new BigDecimal("100.00");
+    private static final BigDecimal A2_PRICE = new BigDecimal("50.00");
 
     @Mock
     private SeatInventoryRepository seatInventoryRepository;
@@ -74,12 +80,14 @@ class SeatInventoryServiceTest {
     }
 
     @Test
-    void reserveHoldsSeatsAndPublishesEventWhenNoneAreSold() {
+    void reserveHoldsSeatsAndPublishesEventAndReturnsTotalPriceWhenNoneAreSold() {
         when(seatInventoryRepository.existsByShowtimeId(SHOWTIME_ID)).thenReturn(true);
-        when(seatInventoryRepository.findSoldSeatCodes(eq(SHOWTIME_ID), any())).thenReturn(List.of());
+        when(seatInventoryRepository.findSeatsByCodes(eq(SHOWTIME_ID), any())).thenReturn(List.of(
+                availableSeat("A1", A1_PRICE), availableSeat("A2", A2_PRICE)));
 
-        service.execute(new ReserveSeatsCommand(SHOWTIME_ID, BOOKING_ID, SEAT_CODE_STRINGS));
+        BigDecimal totalPrice = service.execute(new ReserveSeatsCommand(SHOWTIME_ID, BOOKING_ID, SEAT_CODE_STRINGS));
 
+        assertThat(totalPrice).isEqualByComparingTo(A1_PRICE.add(A2_PRICE));
         verify(seatHoldPort).holdSeats(SHOWTIME_ID, SEAT_CODES, BOOKING_ID);
         ArgumentCaptor<List<Object>> published = ArgumentCaptor.forClass(List.class);
         verify(eventPublisher).publishAll(published.capture());
@@ -101,13 +109,50 @@ class SeatInventoryServiceTest {
     @Test
     void reserveThrowsWhenAnyRequestedSeatIsAlreadySoldAndNeverHolds() {
         when(seatInventoryRepository.existsByShowtimeId(SHOWTIME_ID)).thenReturn(true);
-        when(seatInventoryRepository.findSoldSeatCodes(eq(SHOWTIME_ID), any()))
-                .thenReturn(List.of(new SeatCode("A1")));
+        when(seatInventoryRepository.findSeatsByCodes(eq(SHOWTIME_ID), any())).thenReturn(List.of(
+                soldSeat("A1", A1_PRICE), availableSeat("A2", A2_PRICE)));
 
         assertThatThrownBy(() -> service.execute(new ReserveSeatsCommand(SHOWTIME_ID, BOOKING_ID, SEAT_CODE_STRINGS)))
                 .isInstanceOf(SeatsNotAvailableException.class);
 
         verify(seatHoldPort, never()).holdSeats(any(), any(), any());
+    }
+
+    @Test
+    void reserveThrowsWhenARequestedSeatCodeDoesNotExistInTheInventoryAndNeverHolds() {
+        when(seatInventoryRepository.existsByShowtimeId(SHOWTIME_ID)).thenReturn(true);
+        // Only A1 comes back — A2 doesn't exist in this showtime's inventory. Must not silently
+        // undercharge by pricing just the seats it could find.
+        when(seatInventoryRepository.findSeatsByCodes(eq(SHOWTIME_ID), any()))
+                .thenReturn(List.of(availableSeat("A1", A1_PRICE)));
+
+        assertThatThrownBy(() -> service.execute(new ReserveSeatsCommand(SHOWTIME_ID, BOOKING_ID, SEAT_CODE_STRINGS)))
+                .isInstanceOf(SeatsNotAvailableException.class);
+
+        verify(seatHoldPort, never()).holdSeats(any(), any(), any());
+    }
+
+    @Test
+    void reserveReleasesTheHoldAndPropagatesWhenPublishingTheEventFails() {
+        when(seatInventoryRepository.existsByShowtimeId(SHOWTIME_ID)).thenReturn(true);
+        when(seatInventoryRepository.findSeatsByCodes(eq(SHOWTIME_ID), any())).thenReturn(List.of(
+                availableSeat("A1", A1_PRICE), availableSeat("A2", A2_PRICE)));
+        RuntimeException outboxFailure = new RuntimeException("outbox write failed");
+        doThrow(outboxFailure).when(eventPublisher).publishAll(any());
+
+        assertThatThrownBy(() -> service.execute(new ReserveSeatsCommand(SHOWTIME_ID, BOOKING_ID, SEAT_CODE_STRINGS)))
+                .isSameAs(outboxFailure);
+
+        verify(seatHoldPort).holdSeats(SHOWTIME_ID, SEAT_CODES, BOOKING_ID);
+        verify(seatHoldPort).releaseHolds(SHOWTIME_ID, SEAT_CODES, BOOKING_ID);
+    }
+
+    private static Seat availableSeat(String code, BigDecimal price) {
+        return new Seat(new SeatCode(code), SeatStatus.AVAILABLE, null, SeatTier.STANDARD, price);
+    }
+
+    private static Seat soldSeat(String code, BigDecimal price) {
+        return new Seat(new SeatCode(code), SeatStatus.SOLD, BOOKING_ID, SeatTier.STANDARD, price);
     }
 
     @Test

@@ -14,15 +14,21 @@ import com.aireak.inventory.domain.event.SeatsReleasedEvent;
 import com.aireak.inventory.domain.event.SeatsReservedEvent;
 import com.aireak.inventory.domain.exception.SeatInventoryNotFoundException;
 import com.aireak.inventory.domain.exception.SeatsNotAvailableException;
+import com.aireak.inventory.domain.model.Seat;
 import com.aireak.inventory.domain.model.SeatCode;
+import com.aireak.inventory.domain.model.SeatStatus;
 import io.github.resilience4j.bulkhead.annotation.Bulkhead;
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Application service: orchestrates seat reservation, release and sale confirmation.
@@ -65,25 +71,59 @@ public class SeatInventoryService implements ReserveSeatsUseCase, ReleaseSeatsUs
     // semaphore/rate budget is exhausted, calls are rejected immediately (BulkheadFullException /
     // RequestNotPermitted, mapped to 503 by InventoryOverloadExceptionHandler) instead of piling
     // up Tomcat threads behind tryLock().
+    // Only the seat-occupation decision (price validation + Redis hold) needs to be serialized
+    // per-showtime, so only that part runs inside the lock — see #publishReservedEventOrCompensate
+    // for why the outbox write happens after the lock is released.
     @Override
     @Bulkhead(name = "seat-inventory", type = Bulkhead.Type.SEMAPHORE)
     @RateLimiter(name = "seat-inventory")
-    public void execute(ReserveSeatsCommand command) {
+    public BigDecimal execute(ReserveSeatsCommand command) {
         String lockKey = LOCK_PREFIX + command.showtimeId();
         List<SeatCode> seatCodes = command.seatCodes().stream().map(SeatCode::new).toList();
 
-        distributedLockPort.executeWithLock(lockKey, LOCK_WAIT_SECONDS, LOCK_LEASE_SECONDS,
+        BigDecimal totalPrice = distributedLockPort.executeWithLock(lockKey, LOCK_WAIT_SECONDS, LOCK_LEASE_SECONDS,
                 TimeUnit.SECONDS, () -> {
-                    rejectIfAnySold(command.showtimeId(), seatCodes);
-
+                    BigDecimal price = validateAndPriceSeats(command.showtimeId(), seatCodes);
                     seatHoldPort.holdSeats(command.showtimeId(), seatCodes, command.bookingId());
-                    eventPublisher.publishAll(List.of(
-                            new SeatsReservedEvent(command.showtimeId(), command.bookingId(), seatCodes)));
-
-                    log.info("Seats held: showtime={}, booking={}, seats={}",
-                            command.showtimeId(), command.bookingId(), command.seatCodes());
-                    return null;
+                    return price;
                 });
+
+        publishReservedEventOrCompensate(command, seatCodes);
+
+        log.info("Seats held: showtime={}, booking={}, seats={}",
+                command.showtimeId(), command.bookingId(), command.seatCodes());
+        return totalPrice;
+    }
+
+    /**
+     * If the outbox write fails, the Redis hold placed just above would otherwise become a
+     * phantom hold: nothing downstream ever sees {@link SeatsReservedEvent} (no booking saga is
+     * driving it), yet the seats stay locked out from every other buyer until the hold's own TTL
+     * expires. Releasing the hold here turns that failure into an immediate "reservation failed,
+     * try again" instead of a silent 10-minute seat lockout.
+     *
+     * <p>Runs after the distributed lock is released — releasing a hold is a per-key, per-owner
+     * removal ({@link SeatHoldPort#releaseHolds}) that doesn't need the per-showtime lock for
+     * correctness, and this keeps the lock's critical section limited to the actual occupation
+     * decision.
+     *
+     * <p><strong>Accepted risk, not handled here</strong>: a hard crash between the Redis hold
+     * above and this try block (process killed, box loses power) leaves the hold in place with no
+     * outbox row and no way to compensate — out of scope by design. It self-cleans via the hold's
+     * own TTL (10 minutes, see {@code RedissonSeatHoldAdapter}); nothing acts on a hold with no
+     * corresponding booking in progress, so an expired phantom hold is harmless.
+     */
+    private void publishReservedEventOrCompensate(ReserveSeatsCommand command, List<SeatCode> seatCodes) {
+        try {
+            eventPublisher.publishAll(List.of(
+                    new SeatsReservedEvent(command.showtimeId(), command.bookingId(), seatCodes)));
+        } catch (RuntimeException e) {
+            log.error("Failed to publish SeatsReservedEvent, releasing seat holds to avoid a phantom hold: " +
+                            "showtime={}, booking={}, seats={}",
+                    command.showtimeId(), command.bookingId(), command.seatCodes(), e);
+            seatHoldPort.releaseHolds(command.showtimeId(), seatCodes, command.bookingId());
+            throw e;
+        }
     }
 
     // Bulkhead only (no RateLimiter): release is a compensating action, not the contended
@@ -130,20 +170,39 @@ public class SeatInventoryService implements ReserveSeatsUseCase, ReleaseSeatsUs
     }
 
     /**
-     * Only SOLD is checked against Postgres — RESERVED no longer lives there (see {@link SeatHoldPort}).
-     * Uses a targeted query ({@link SeatInventoryRepository#findSoldSeatCodes}) instead of loading
-     * the full (EAGER-fetched) aggregate, since this runs on every reserve call while holding the
-     * per-showtime lock — a showtime with thousands of seats would otherwise pay for hydrating all
-     * of them just to check a handful of requested codes.
+     * Validates the requested seats against Postgres — only SOLD is checked; RESERVED no longer
+     * lives there (see {@link SeatHoldPort}) — and returns their total price. Uses a targeted
+     * query ({@link SeatInventoryRepository#findSeatsByCodes}) instead of loading the full
+     * (EAGER-fetched) aggregate, since this runs on every reserve call while holding the
+     * per-showtime lock — a showtime with thousands of seats would otherwise pay for hydrating
+     * all of them just to price/check a handful of requested codes.
+     *
+     * <p>The returned total is the sole source of truth for what a booking is charged — see
+     * {@code SeatInventoryController#reserve} and booking-service's {@code TicketInventoryPort};
+     * a client-supplied amount is never used.
      */
-    private void rejectIfAnySold(String showtimeId, List<SeatCode> seatCodes) {
+    private BigDecimal validateAndPriceSeats(String showtimeId, List<SeatCode> seatCodes) {
         if (!seatInventoryRepository.existsByShowtimeId(showtimeId)) {
             throw new SeatInventoryNotFoundException(showtimeId);
         }
 
-        List<SeatCode> sold = seatInventoryRepository.findSoldSeatCodes(showtimeId, seatCodes);
+        Map<SeatCode, Seat> bySeatCode = seatInventoryRepository.findSeatsByCodes(showtimeId, seatCodes)
+                .stream().collect(Collectors.toMap(Seat::getSeatCode, Function.identity()));
+
+        List<SeatCode> missing = seatCodes.stream().filter(code -> !bySeatCode.containsKey(code)).toList();
+        if (!missing.isEmpty()) {
+            throw new SeatsNotAvailableException(showtimeId, missing);
+        }
+
+        List<SeatCode> sold = seatCodes.stream()
+                .filter(code -> bySeatCode.get(code).getStatus() == SeatStatus.SOLD)
+                .toList();
         if (!sold.isEmpty()) {
             throw new SeatsNotAvailableException(showtimeId, sold);
         }
+
+        return seatCodes.stream()
+                .map(code -> bySeatCode.get(code).getPrice())
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 }
