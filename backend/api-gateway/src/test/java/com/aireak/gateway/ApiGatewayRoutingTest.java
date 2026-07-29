@@ -122,6 +122,36 @@ class ApiGatewayRoutingTest {
     }
 
     @Test
+    void rejectsMetricsEndpointForNonAdminRole() {
+        String bearer = bearerFor(UUID.randomUUID().toString(), "USER");
+
+        client().get().uri("/actuator/metrics")
+                .header(HttpHeaders.AUTHORIZATION, bearer)
+                .exchange()
+                .expectStatus().isForbidden();
+    }
+
+    @Test
+    void allowsMetricsEndpointForAdminRole() {
+        String bearer = bearerFor(UUID.randomUUID().toString(), "ADMIN");
+
+        client().get().uri("/actuator/metrics")
+                .header(HttpHeaders.AUTHORIZATION, bearer)
+                .exchange()
+                .expectStatus().isOk();
+    }
+
+    @Test
+    void rejectsGatewayEndpointForNonAdminRole() {
+        String bearer = bearerFor(UUID.randomUUID().toString(), "USER");
+
+        client().get().uri("/actuator/gateway/routes")
+                .header(HttpHeaders.AUTHORIZATION, bearer)
+                .exchange()
+                .expectStatus().isForbidden();
+    }
+
+    @Test
     void rejectsOversizedPaymentBodyWith413() {
         String bearer = bearerFor(UUID.randomUUID().toString());
         String oversizedBody = "{\"padding\":\"" + "x".repeat(150_000) + "\"}";
@@ -157,16 +187,22 @@ class ApiGatewayRoutingTest {
     }
 
     private String bearerFor(String accountId) {
+        return bearerFor(accountId, null);
+    }
+
+    private String bearerFor(String accountId, String role) {
         SecretKey key = Keys.hmacShaKeyFor(jwtProperties.secret().getBytes(StandardCharsets.UTF_8));
-        String token = Jwts.builder()
+        var builder = Jwts.builder()
                 .subject(accountId)
                 .issuer(jwtProperties.issuer())
                 .audience().add(jwtProperties.audience()).and()
                 .claim("email", accountId + "@example.com")
                 .issuedAt(Date.from(Instant.now()))
-                .expiration(Date.from(Instant.now().plusSeconds(300)))
-                .signWith(key)
-                .compact();
+                .expiration(Date.from(Instant.now().plusSeconds(300)));
+        if (role != null) {
+            builder.claim("role", role);
+        }
+        String token = builder.signWith(key).compact();
         return "Bearer " + token;
     }
 }

@@ -44,6 +44,15 @@ public class JwtAuthenticationWebFilter implements WebFilter, Ordered {
     private static final Logger log = LoggerFactory.getLogger(JwtAuthenticationWebFilter.class);
     private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();
 
+    /**
+     * Exchange attribute (gateway-internal only, never forwarded as a header) carrying the
+     * validated token's {@code role} claim — read by {@link ActuatorAccessWebFilter} to gate
+     * admin-only actuator endpoints. There is no Spring Security filter chain running in this
+     * (WebFlux) service, so {@code management.endpoint.*.roles} alone cannot enforce anything
+     * here; this attribute is the actual enforcement path.
+     */
+    public static final String USER_ROLE_ATTRIBUTE = JwtAuthenticationWebFilter.class.getName() + ".USER_ROLE";
+
     private final SecretKey secretKey;
     private final JwtValidationProperties properties;
 
@@ -98,6 +107,7 @@ public class JwtAuthenticationWebFilter implements WebFilter, Ordered {
         }
 
         Object email = claims.get("email");
+        Object role = claims.get("role");
         ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
                 .headers(headers -> {
                     headers.remove("X-User-Id");
@@ -109,7 +119,11 @@ public class JwtAuthenticationWebFilter implements WebFilter, Ordered {
                 })
                 .build();
 
-        return chain.filter(exchange.mutate().request(mutatedRequest).build());
+        ServerWebExchange mutatedExchange = exchange.mutate().request(mutatedRequest).build();
+        if (role != null) {
+            mutatedExchange.getAttributes().put(USER_ROLE_ATTRIBUTE, String.valueOf(role));
+        }
+        return chain.filter(mutatedExchange);
     }
 
     private boolean isPublic(String path) {

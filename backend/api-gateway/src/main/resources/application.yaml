@@ -83,7 +83,15 @@ management:
         include: health,info,metrics,gateway
   endpoint:
     health:
-      show-details: always
+      # "always" leaked DB/broker connection details to any anonymous caller. This service has no
+      # Spring Security filter chain, so "when-authorized" fails closed (no request is ever
+      # recognized as authorized) rather than actually showing details to ADMIN callers — safe,
+      # but not the same guarantee this property gives on services that do run Spring Security
+      # (see identity-service). /actuator/metrics and /actuator/gateway are separately enforced
+      # in code by ActuatorAccessWebFilter, since Boot has no equivalent "roles" property for
+      # non-health endpoints.
+      show-details: when-authorized
+      roles: ADMIN
 
 logging:
   pattern:

@@ -225,6 +225,51 @@ class JwtAuthenticationWebFilterTest {
     }
 
     @Test
+    void exposesRoleClaimAsExchangeAttributeForDownstreamFilters() {
+        String accountId = UUID.randomUUID().toString();
+        String token = Jwts.builder()
+                .subject(accountId)
+                .issuer(ISSUER)
+                .audience().add(AUDIENCE).and()
+                .claim("role", "ADMIN")
+                .issuedAt(Date.from(Instant.now()))
+                .expiration(Date.from(Instant.now().plusSeconds(300)))
+                .signWith(secretKey)
+                .compact();
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/actuator/metrics")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .build());
+
+        AtomicReference<ServerWebExchange> forwarded = new AtomicReference<>();
+        filter.filter(exchange, ex -> {
+            forwarded.set(ex);
+            return Mono.empty();
+        }).block(Duration.ofSeconds(5));
+
+        assertThat(forwarded.get().<String>getAttribute(JwtAuthenticationWebFilter.USER_ROLE_ATTRIBUTE))
+                .isEqualTo("ADMIN");
+    }
+
+    @Test
+    void leavesRoleAttributeAbsentWhenRoleClaimIsMissing() {
+        String accountId = UUID.randomUUID().toString();
+        String token = validToken(accountId, "user@example.com");
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/bookings/123")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .build());
+
+        AtomicReference<ServerWebExchange> forwarded = new AtomicReference<>();
+        filter.filter(exchange, ex -> {
+            forwarded.set(ex);
+            return Mono.empty();
+        }).block(Duration.ofSeconds(5));
+
+        assertThat(forwarded.get().<String>getAttribute(JwtAuthenticationWebFilter.USER_ROLE_ATTRIBUTE)).isNull();
+    }
+
+    @Test
     void stripsClientForgedIdentityHeadersOnPublicPaths() {
         // /api/v1/auth/logout is public — never validated — but a client could still attach
         // these headers itself. They must never reach downstream services or gateway-side
