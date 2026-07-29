@@ -2,8 +2,10 @@ package com.aireak.inventory.adapter.in.web;
 
 import com.aireak.inventory.application.port.in.ConfirmSeatsUseCase;
 import com.aireak.inventory.application.port.in.GetSeatMapUseCase;
+import com.aireak.inventory.application.port.in.HoldSeatsUseCase;
 import com.aireak.inventory.application.port.in.ReleaseSeatsUseCase;
 import com.aireak.inventory.application.port.in.ReserveSeatsUseCase;
+import com.aireak.inventory.application.port.in.UnholdSeatsUseCase;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.Test;
@@ -23,6 +25,7 @@ import java.util.UUID;
 
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -62,6 +65,12 @@ class SeatInventoryControllerJwtAuthenticationIntegrationTest {
     @MockitoBean
     private GetSeatMapUseCase getSeatMapUseCase;
 
+    @MockitoBean
+    private HoldSeatsUseCase holdSeatsUseCase;
+
+    @MockitoBean
+    private UnholdSeatsUseCase unholdSeatsUseCase;
+
     @Test
     void rejectsRequestWithoutBearerToken() throws Exception {
         mockMvc.perform(post("/api/v1/inventory/{showtimeId}/reserve", "showtime-1")
@@ -70,6 +79,24 @@ class SeatInventoryControllerJwtAuthenticationIntegrationTest {
                 .andExpect(status().isUnauthorized());
 
         verifyNoInteractions(reserveSeatsUseCase);
+    }
+
+    @Test
+    void holdRejectsRequestWithoutBearerToken() throws Exception {
+        mockMvc.perform(post("/api/v1/inventory/{showtimeId}/hold", "showtime-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(holdSeatsUseCase);
+    }
+
+    @Test
+    void unholdRejectsRequestWithoutBearerToken() throws Exception {
+        mockMvc.perform(delete("/api/v1/inventory/{showtimeId}/hold?seatCodes=A1", "showtime-1"))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(unholdSeatsUseCase);
     }
 
     @Test

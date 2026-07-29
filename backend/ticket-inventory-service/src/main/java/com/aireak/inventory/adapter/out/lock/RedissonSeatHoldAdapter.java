@@ -74,6 +74,40 @@ public class RedissonSeatHoldAdapter implements SeatHoldPort {
     }
 
     @Override
+    public void confirmHold(String showtimeId, List<SeatCode> seatCodes, String previousOwnerId, String newOwnerId) {
+        RMapCache<String, String> holds = redissonClient.getMapCache(CACHE_NAME);
+        List<SeatCode> placed = new ArrayList<>();
+        List<SeatCode> unavailable = new ArrayList<>();
+
+        for (SeatCode seatCode : seatCodes) {
+            String key = holdKey(showtimeId, seatCode);
+            // Caller already holds the per-showtime DistributedLockPort lock (same precondition
+            // as holdSeats), so this remove-then-put pair is race-free without needing a single
+            // atomic swap: handing over an existing pre-booking hold, or — if it already expired
+            // or was never placed — falling back to a plain new hold.
+            if (holds.remove(key, previousOwnerId)) {
+                holds.put(key, newOwnerId, holdTtlMinutes, TimeUnit.MINUTES);
+                placed.add(seatCode);
+                continue;
+            }
+            String previous = holds.putIfAbsent(key, newOwnerId, holdTtlMinutes, TimeUnit.MINUTES);
+            if (previous == null) {
+                placed.add(seatCode);
+            } else {
+                unavailable.add(seatCode);
+            }
+        }
+
+        if (!unavailable.isEmpty()) {
+            placed.forEach(seatCode -> holds.remove(holdKey(showtimeId, seatCode), newOwnerId));
+            throw new SeatsNotAvailableException(showtimeId, unavailable);
+        }
+
+        log.debug("Seat hold confirmed: showtime={}, previousOwner={}, newOwner={}, seats={}",
+                showtimeId, previousOwnerId, newOwnerId, seatCodes);
+    }
+
+    @Override
     public Set<SeatCode> findHeld(String showtimeId, List<SeatCode> seatCodes) {
         if (seatCodes.isEmpty()) {
             return Set.of();

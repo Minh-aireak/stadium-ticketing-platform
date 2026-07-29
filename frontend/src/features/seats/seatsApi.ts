@@ -13,3 +13,25 @@ export async function getSeatMap(showtimeId: string): Promise<SeatMapResponse> {
   const { data } = await api.get<SeatMapResponse>(`/inventory/${showtimeId}/seats`)
   return data
 }
+
+export interface HoldSeatsResponse {
+  totalPrice: number
+}
+
+// POST /api/v1/inventory/{showtimeId}/hold — places a short TTL hold on the given seats for the
+// authenticated caller, as soon as they're selected (well before a booking exists). Booking
+// creation later confirms this same hold over instead of re-acquiring it — see
+// ticket-inventory-service's SeatHoldPort#confirmHold.
+export async function holdSeats(showtimeId: string, seatCodes: string[]): Promise<HoldSeatsResponse> {
+  const { data } = await api.post<HoldSeatsResponse>(`/inventory/${showtimeId}/hold`, { seatCodes })
+  return data
+}
+
+// DELETE /api/v1/inventory/{showtimeId}/hold — releases the caller's own hold (deselect, or
+// leaving seat selection without checking out). Best-effort: an unreleased hold self-expires via
+// Redis TTL anyway, so callers should swallow failures here rather than surface them.
+export async function unholdSeats(showtimeId: string, seatCodes: string[]): Promise<void> {
+  // Comma-joined single query value, same convention as booking-service's release call to this
+  // same seatCodes param — Spring splits a single delimited value into the bound List<String>.
+  await api.delete(`/inventory/${showtimeId}/hold`, { params: { seatCodes: seatCodes.join(',') } })
+}

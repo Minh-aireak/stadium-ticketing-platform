@@ -32,6 +32,19 @@ public interface SeatHoldPort {
     void releaseHolds(String showtimeId, List<SeatCode> seatCodes, String bookingId);
 
     /**
+     * Confirms a pre-booking hold (see {@link #holdSeats}, owner = customerId, placed via the
+     * standalone hold endpoint at seat-selection time) into a booking-owned hold, all-or-nothing.
+     * For each seat: if it's currently held by {@code previousOwnerId}, hands it over to
+     * {@code newOwnerId} (fresh TTL); otherwise (never pre-held, or the pre-hold already expired)
+     * falls back to placing a brand-new hold, same as {@link #holdSeats}. Any seat held by a
+     * different owner fails the whole call — same rollback semantics as {@link #holdSeats}.
+     *
+     * @throws com.aireak.inventory.domain.exception.SeatsNotAvailableException
+     *         if any seat is currently held by an owner other than {@code previousOwnerId}
+     */
+    void confirmHold(String showtimeId, List<SeatCode> seatCodes, String previousOwnerId, String newOwnerId);
+
+    /**
      * Batched hold check for a whole seat map — one round trip instead of one per seat (see
      * {@code SeatMapQueryService}, the only caller). Returns the subset of {@code seatCodes}
      * that currently have an active (non-expired) hold, regardless of owner.

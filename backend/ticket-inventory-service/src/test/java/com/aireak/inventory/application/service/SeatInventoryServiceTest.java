@@ -1,8 +1,10 @@
 package com.aireak.inventory.application.service;
 
 import com.aireak.inventory.application.port.in.command.ConfirmSeatsCommand;
+import com.aireak.inventory.application.port.in.command.HoldSeatsCommand;
 import com.aireak.inventory.application.port.in.command.ReleaseSeatsCommand;
 import com.aireak.inventory.application.port.in.command.ReserveSeatsCommand;
+import com.aireak.inventory.application.port.in.command.UnholdSeatsCommand;
 import com.aireak.inventory.application.port.out.DistributedLockPort;
 import com.aireak.inventory.application.port.out.DomainEventPublisher;
 import com.aireak.inventory.application.port.out.SeatHoldPort;
@@ -47,6 +49,7 @@ class SeatInventoryServiceTest {
 
     private static final String SHOWTIME_ID = "showtime-1";
     private static final String BOOKING_ID = "booking-1";
+    private static final String CUSTOMER_ID = "customer-1";
     private static final List<String> SEAT_CODE_STRINGS = List.of("A1", "A2");
     private static final List<SeatCode> SEAT_CODES = List.of(new SeatCode("A1"), new SeatCode("A2"));
     private static final BigDecimal A1_PRICE = new BigDecimal("100.00");
@@ -85,10 +88,11 @@ class SeatInventoryServiceTest {
         when(seatInventoryRepository.findSeatsByCodes(eq(SHOWTIME_ID), any())).thenReturn(List.of(
                 availableSeat("A1", A1_PRICE), availableSeat("A2", A2_PRICE)));
 
-        BigDecimal totalPrice = service.execute(new ReserveSeatsCommand(SHOWTIME_ID, BOOKING_ID, SEAT_CODE_STRINGS));
+        BigDecimal totalPrice = service.execute(
+                new ReserveSeatsCommand(SHOWTIME_ID, BOOKING_ID, CUSTOMER_ID, SEAT_CODE_STRINGS));
 
         assertThat(totalPrice).isEqualByComparingTo(A1_PRICE.add(A2_PRICE));
-        verify(seatHoldPort).holdSeats(SHOWTIME_ID, SEAT_CODES, BOOKING_ID);
+        verify(seatHoldPort).confirmHold(SHOWTIME_ID, SEAT_CODES, CUSTOMER_ID, BOOKING_ID);
         ArgumentCaptor<List<Object>> published = ArgumentCaptor.forClass(List.class);
         verify(eventPublisher).publishAll(published.capture());
         assertThat(published.getValue()).hasSize(1);
@@ -99,10 +103,11 @@ class SeatInventoryServiceTest {
     void reserveThrowsWhenInventoryDoesNotExistAndNeverHolds() {
         when(seatInventoryRepository.existsByShowtimeId(SHOWTIME_ID)).thenReturn(false);
 
-        assertThatThrownBy(() -> service.execute(new ReserveSeatsCommand(SHOWTIME_ID, BOOKING_ID, SEAT_CODE_STRINGS)))
+        assertThatThrownBy(() -> service.execute(
+                new ReserveSeatsCommand(SHOWTIME_ID, BOOKING_ID, CUSTOMER_ID, SEAT_CODE_STRINGS)))
                 .isInstanceOf(SeatInventoryNotFoundException.class);
 
-        verify(seatHoldPort, never()).holdSeats(any(), any(), any());
+        verify(seatHoldPort, never()).confirmHold(any(), any(), any(), any());
         verify(eventPublisher, never()).publishAll(any());
     }
 
@@ -112,10 +117,11 @@ class SeatInventoryServiceTest {
         when(seatInventoryRepository.findSeatsByCodes(eq(SHOWTIME_ID), any())).thenReturn(List.of(
                 soldSeat("A1", A1_PRICE), availableSeat("A2", A2_PRICE)));
 
-        assertThatThrownBy(() -> service.execute(new ReserveSeatsCommand(SHOWTIME_ID, BOOKING_ID, SEAT_CODE_STRINGS)))
+        assertThatThrownBy(() -> service.execute(
+                new ReserveSeatsCommand(SHOWTIME_ID, BOOKING_ID, CUSTOMER_ID, SEAT_CODE_STRINGS)))
                 .isInstanceOf(SeatsNotAvailableException.class);
 
-        verify(seatHoldPort, never()).holdSeats(any(), any(), any());
+        verify(seatHoldPort, never()).confirmHold(any(), any(), any(), any());
     }
 
     @Test
@@ -126,10 +132,11 @@ class SeatInventoryServiceTest {
         when(seatInventoryRepository.findSeatsByCodes(eq(SHOWTIME_ID), any()))
                 .thenReturn(List.of(availableSeat("A1", A1_PRICE)));
 
-        assertThatThrownBy(() -> service.execute(new ReserveSeatsCommand(SHOWTIME_ID, BOOKING_ID, SEAT_CODE_STRINGS)))
+        assertThatThrownBy(() -> service.execute(
+                new ReserveSeatsCommand(SHOWTIME_ID, BOOKING_ID, CUSTOMER_ID, SEAT_CODE_STRINGS)))
                 .isInstanceOf(SeatsNotAvailableException.class);
 
-        verify(seatHoldPort, never()).holdSeats(any(), any(), any());
+        verify(seatHoldPort, never()).confirmHold(any(), any(), any(), any());
     }
 
     @Test
@@ -140,11 +147,45 @@ class SeatInventoryServiceTest {
         RuntimeException outboxFailure = new RuntimeException("outbox write failed");
         doThrow(outboxFailure).when(eventPublisher).publishAll(any());
 
-        assertThatThrownBy(() -> service.execute(new ReserveSeatsCommand(SHOWTIME_ID, BOOKING_ID, SEAT_CODE_STRINGS)))
+        assertThatThrownBy(() -> service.execute(
+                new ReserveSeatsCommand(SHOWTIME_ID, BOOKING_ID, CUSTOMER_ID, SEAT_CODE_STRINGS)))
                 .isSameAs(outboxFailure);
 
-        verify(seatHoldPort).holdSeats(SHOWTIME_ID, SEAT_CODES, BOOKING_ID);
+        verify(seatHoldPort).confirmHold(SHOWTIME_ID, SEAT_CODES, CUSTOMER_ID, BOOKING_ID);
         verify(seatHoldPort).releaseHolds(SHOWTIME_ID, SEAT_CODES, BOOKING_ID);
+    }
+
+    @Test
+    void holdPlacesACustomerOwnedHoldAndReturnsTotalPriceWithoutPublishingAnyEvent() {
+        when(seatInventoryRepository.existsByShowtimeId(SHOWTIME_ID)).thenReturn(true);
+        when(seatInventoryRepository.findSeatsByCodes(eq(SHOWTIME_ID), any())).thenReturn(List.of(
+                availableSeat("A1", A1_PRICE), availableSeat("A2", A2_PRICE)));
+
+        BigDecimal totalPrice = service.execute(new HoldSeatsCommand(SHOWTIME_ID, CUSTOMER_ID, SEAT_CODE_STRINGS));
+
+        assertThat(totalPrice).isEqualByComparingTo(A1_PRICE.add(A2_PRICE));
+        verify(seatHoldPort).holdSeats(SHOWTIME_ID, SEAT_CODES, CUSTOMER_ID);
+        verify(eventPublisher, never()).publishAll(any());
+    }
+
+    @Test
+    void holdThrowsWhenAnyRequestedSeatIsAlreadySoldAndNeverHolds() {
+        when(seatInventoryRepository.existsByShowtimeId(SHOWTIME_ID)).thenReturn(true);
+        when(seatInventoryRepository.findSeatsByCodes(eq(SHOWTIME_ID), any())).thenReturn(List.of(
+                soldSeat("A1", A1_PRICE), availableSeat("A2", A2_PRICE)));
+
+        assertThatThrownBy(() -> service.execute(new HoldSeatsCommand(SHOWTIME_ID, CUSTOMER_ID, SEAT_CODE_STRINGS)))
+                .isInstanceOf(SeatsNotAvailableException.class);
+
+        verify(seatHoldPort, never()).holdSeats(any(), any(), any());
+    }
+
+    @Test
+    void unholdReleasesTheCustomerOwnedHold() {
+        service.execute(new UnholdSeatsCommand(SHOWTIME_ID, CUSTOMER_ID, SEAT_CODE_STRINGS));
+
+        verify(seatHoldPort).releaseHolds(SHOWTIME_ID, SEAT_CODES, CUSTOMER_ID);
+        verify(eventPublisher, never()).publishAll(any());
     }
 
     private static Seat availableSeat(String code, BigDecimal price) {

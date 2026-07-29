@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useAuth } from '@/features/auth/AuthContext'
 import { createBooking } from '@/features/booking/bookingApi'
 import { initiatePayment } from '@/features/payment/paymentApi'
+import { unholdSeats } from '@/features/seats/seatsApi'
 import { formatCurrency } from '@/lib/format'
 import { getErrorMessage } from '@/lib/errors'
 
@@ -35,7 +36,7 @@ export function CheckoutPage() {
     return <Navigate to="/" replace />
   }
 
-  const { matchLabel, seatCodes, amount, currency, showtimeId } = state
+  const { matchId, matchLabel, seatCodes, amount, currency, showtimeId } = state
 
   async function handleConfirm() {
     if (!user) return
@@ -57,6 +58,15 @@ export function CheckoutPage() {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  // Escape hatch for a failed checkout (most commonly a seat conflict: someone else booked one
+  // of these seats first) — without this, the only option used to be retrying the same seats
+  // forever. Releases this attempt's hold defensively (the backend has usually already released
+  // it as part of compensating the failure) before sending the user back to pick again.
+  function handleBackToSeatSelection() {
+    unholdSeats(showtimeId, seatCodes).catch(() => {})
+    navigate(`/matches/${matchId}/seats`, { state: { matchLabel, showtimeId } })
   }
 
   return (
@@ -95,6 +105,12 @@ export function CheckoutPage() {
             >
               {submitting ? 'Đang xử lý…' : 'Xác nhận & Thanh toán'}
             </Button>
+
+            {error && (
+              <Button variant="outline" size="lg" onClick={handleBackToSeatSelection}>
+                Quay lại chọn ghế khác
+              </Button>
+            )}
 
             <p className="text-center text-xs text-muted">
               Bằng việc xác nhận, đơn đặt vé sẽ được tạo và chuyển sang bước thanh

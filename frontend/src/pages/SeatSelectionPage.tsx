@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Loader2 } from 'lucide-react'
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { getSeatMap } from '@/features/seats/seatsApi'
+import { getSeatMap, holdSeats, unholdSeats } from '@/features/seats/seatsApi'
 import { SeatMap } from '@/features/seats/SeatMap'
 import type { Seat } from '@/features/seats/types'
 import { useToast } from '@/hooks/useToast'
@@ -31,6 +31,28 @@ export function SeatSelectionPage() {
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
   const [selected, setSelected] = useState<string[]>([])
+
+  // Read by the unmount-cleanup effect below, which can't depend on `selected` directly without
+  // re-running (and re-registering its cleanup) on every toggle.
+  const selectedRef = useRef<string[]>([])
+  selectedRef.current = selected
+  // Set right before navigating to checkout, so the cleanup below knows to leave the hold in
+  // place — the booking flow confirms it over rather than the user abandoning the selection.
+  const continuingToCheckoutRef = useRef(false)
+
+  // Release any still-held seats when the user leaves this page without continuing to checkout
+  // (back button, closing the tab mid-selection, navigating elsewhere). Runs once per mount —
+  // per-seat hold/unhold already happens immediately in toggleSeat below.
+  useEffect(() => {
+    return () => {
+      if (continuingToCheckoutRef.current) return
+      if (!state?.showtimeId || selectedRef.current.length === 0) return
+      unholdSeats(state.showtimeId, selectedRef.current).catch(() => {
+        // Best-effort — an unreleased hold self-expires via Redis TTL anyway.
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (!state?.showtimeId) return
@@ -74,15 +96,36 @@ export function SeatSelectionPage() {
   const total = selectedSeats.reduce((sum, s) => sum + s.price, 0)
 
   function toggleSeat(code: string) {
-    setSelected((prev) => {
-      if (prev.includes(code)) return prev.filter((c) => c !== code)
-      if (prev.length >= MAX_SEATS) return prev
-      return [...prev, code]
+    if (!state?.showtimeId) return
+    const showtimeId = state.showtimeId
+
+    if (selected.includes(code)) {
+      setSelected((prev) => prev.filter((c) => c !== code))
+      unholdSeats(showtimeId, [code]).catch(() => {
+        // Best-effort — an unreleased hold self-expires via Redis TTL anyway.
+      })
+      return
+    }
+    if (selected.length >= MAX_SEATS) return
+
+    // Optimistic select — reverted below if the hold call fails (another buyer got there first).
+    setSelected((prev) => [...prev, code])
+    holdSeats(showtimeId, [code]).catch((err: unknown) => {
+      setSelected((prev) => prev.filter((c) => c !== code))
+      toast({
+        title: 'Không thể giữ ghế',
+        description: getErrorMessage(err, 'Ghế này vừa được người khác chọn. Vui lòng chọn ghế khác.'),
+        variant: 'error',
+      })
+      // Refresh so the seat's real status (held/sold by someone else) shows instead of the
+      // stale "available" from the last full load.
+      getSeatMap(showtimeId).then((data) => setSeats(data.seats)).catch(() => {})
     })
   }
 
   function handleContinue() {
     if (!state?.showtimeId) return
+    continuingToCheckoutRef.current = true
     const checkoutState: CheckoutState = {
       matchId: matchId!,
       matchLabel: state.matchLabel,
