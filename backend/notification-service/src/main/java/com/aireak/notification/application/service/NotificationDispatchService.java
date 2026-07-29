@@ -85,6 +85,13 @@ public class NotificationDispatchService implements SendNotificationUseCase {
             return;
         }
 
+        // Dispatch-then-mark is intentional (kept as-is — see review 2026-07-29): if the process
+        // crashes between dispatch() returning and markProcessed() committing, Kafka redelivers
+        // the event and it goes out a second time. That is a known, accepted risk — Priority: Low —
+        // because for a ticketing platform a duplicate confirmation email/SMS is far cheaper than a
+        // silently dropped one (mark-then-dispatch would trade this for exactly that risk instead).
+        // A fully correct fix (PENDING/SENT state on the notification row + a retry job reconciling
+        // the two) is left for the backlog if duplicate sends ever become an actual problem.
         dispatch(template, payload);
 
         // Mark processed only after successful dispatch (transactional boundary)
