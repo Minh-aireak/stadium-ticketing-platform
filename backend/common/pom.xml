@@ -22,15 +22,11 @@
             <optional>true</optional>
         </dependency>
 
-        <!-- Jackson (core for EventEnvelope serialization) — managed by SB BOM -->
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.datatype</groupId>
-            <artifactId>jackson-datatype-jsr310</artifactId>
-        </dependency>
+
+        <!-- Jackson 3.x is provided transitively by spring-boot-starter-web (via spring-boot-jackson
+             autoconfiguration module). JavaTimeModule is built-in to Jackson 3 — no separate
+             registration needed. Explicit com.fasterxml.jackson deps removed: Spring Boot 4.1
+             manages tools.jackson.* through its BOM. -->
 
         <!-- Web concern: CorrelationIdFilter, GlobalExceptionHandler (optional — only web services pull this) -->
         <dependency>
@@ -67,24 +63,14 @@
         <!-- Kafka constants only (no kafka runtime here — services pull spring-kafka themselves) -->
         <!-- KafkaTopics.java is just a class with String constants, no runtime dep needed -->
 
-        <!-- JWT — JwtAuthenticationFilter validates the Authorization bearer token locally in
-             every downstream service (defense in depth: services must not trust api-gateway's
-             edge check alone). Version managed by root pom.xml's dependencyManagement. Transitive
-             to every service that depends on common, same as identity-service/api-gateway's own
-             direct jjwt-impl/jjwt-jackson runtime deps. -->
+        <!-- Nimbus JOSE+JWT — replaces jjwt for JWT generation and validation.
+             jjwt 0.12.x uses com.fasterxml.jackson (Jackson 2) and has no Jackson 3 support.
+             Nimbus is already the JWT library used by Spring Security internally
+             (spring-security-oauth2-jose depends on it); no extra version to manage. -->
         <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt-impl</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-        <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt-jackson</artifactId>
-            <scope>runtime</scope>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-oauth2-jose</artifactId>
+            <optional>true</optional>
         </dependency>
 
         <!-- Test -->

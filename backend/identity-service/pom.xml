@@ -49,20 +49,13 @@
             <artifactId>redisson-spring-boot-starter</artifactId>
         </dependency>
 
-        <!-- JWT -->
+        <!-- Nimbus JOSE+JWT (via spring-security-oauth2-jose) — replaces jjwt.
+             jjwt 0.12.x depends on com.fasterxml.jackson (Jackson 2) which conflicts with
+             Spring Boot 4.1's Jackson 3 autoconfiguration. spring-security-oauth2-jose is
+             already in the Spring Boot BOM and brings Nimbus JOSE+JWT transitively. -->
         <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt-impl</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-        <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt-jackson</artifactId>
-            <scope>runtime</scope>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-oauth2-jose</artifactId>
         </dependency>
 
         <!-- Common -->

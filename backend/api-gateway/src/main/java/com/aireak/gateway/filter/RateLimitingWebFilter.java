@@ -2,11 +2,11 @@ package com.aireak.gateway.filter;
 
 import com.aireak.gateway.config.JwtValidationProperties;
 import com.aireak.gateway.ratelimit.RateLimitPolicy;
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.ExpiredJwtException;
-import io.jsonwebtoken.JwtException;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.JWSVerifier;
+import com.nimbusds.jose.crypto.MACVerifier;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,9 +25,10 @@ import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
 
-import javax.crypto.SecretKey;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.text.ParseException;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,6 +54,10 @@ import java.util.Map;
  * has no reverse proxy / trusted-proxy configuration anywhere, so {@code X-Forwarded-For} is
  * deliberately never read) or {@code user:{userId}} sourced from the gateway-verified JWT
  * {@code sub} claim (never the client-supplied {@code X-User-Id} header) are used as keys.
+ *
+ * <p>Migrated from JJWT 0.12.x to Nimbus JOSE+JWT. jjwt-jackson depended on
+ * com.fasterxml.jackson (Jackson 2) which conflicts with Spring Boot 4.1's Jackson 3
+ * auto-configuration. Nimbus has no Jackson dependency.
  */
 @Component
 @Order(-40)
@@ -83,7 +88,7 @@ public class RateLimitingWebFilter implements WebFilter, Ordered {
     private final Map<RateLimitPolicy, RedisRateLimiter> limiters;
     private final JwtValidationProperties jwtProperties;
     private final MeterRegistry meterRegistry;
-    private final SecretKey secretKey;
+    private final JWSVerifier verifier;
 
     public RateLimitingWebFilter(Map<RateLimitPolicy, RedisRateLimiter> limiters,
                                   JwtValidationProperties jwtProperties,
@@ -91,7 +96,13 @@ public class RateLimitingWebFilter implements WebFilter, Ordered {
         this.limiters = limiters;
         this.jwtProperties = jwtProperties;
         this.meterRegistry = meterRegistry;
-        this.secretKey = Keys.hmacShaKeyFor(jwtProperties.secret().getBytes(StandardCharsets.UTF_8));
+        try {
+            this.verifier = new MACVerifier(
+                    jwtProperties.secret().getBytes(StandardCharsets.UTF_8));
+        } catch (JOSEException e) {
+            throw new IllegalStateException(
+                    "Failed to initialise JWT verifier in RateLimitingWebFilter (secret too short?)", e);
+        }
     }
 
     @Override
@@ -180,17 +191,22 @@ public class RateLimitingWebFilter implements WebFilter, Ordered {
         }
         String token = authorization.substring("Bearer ".length()).trim();
         try {
-            Claims claims = Jwts.parser()
-                    .verifyWith(secretKey)
-                    .requireIssuer(jwtProperties.issuer())
-                    .requireAudience(jwtProperties.audience())
-                    .build()
-                    .parseSignedClaims(token)
-                    .getPayload();
+            SignedJWT signedJWT = SignedJWT.parse(token);
+            // Verify signature — intentionally allow expired tokens (for the refresh-path
+            // fallback) by NOT checking expiration here. The expiry check is JwtAuthenticationWebFilter's
+            // responsibility for protected paths; for public paths (logout/refresh) we only need the sub.
+            if (!signedJWT.verify(verifier)) {
+                return null;
+            }
+            JWTClaimsSet claims = signedJWT.getJWTClaimsSet();
+            if (!jwtProperties.issuer().equals(claims.getIssuer())) {
+                return null;
+            }
+            if (!claims.getAudience().contains(jwtProperties.audience())) {
+                return null;
+            }
             return claims.getSubject();
-        } catch (ExpiredJwtException ex) {
-            return ex.getClaims().getSubject();
-        } catch (JwtException | IllegalArgumentException ex) {
+        } catch (ParseException | JOSEException ex) {
             return null;
         }
     }

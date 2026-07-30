@@ -4,7 +4,7 @@ import com.aireak.catalog.domain.event.ShowtimeAddedEvent;
 import com.aireak.common.event.EventEnvelope;
 import com.aireak.inventory.application.port.in.GenerateSeatMapUseCase;
 import com.aireak.inventory.config.KafkaConfig;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -66,7 +66,9 @@ import static org.mockito.Mockito.verify;
 )
 class ShowtimeAddedEventConsumerEmbeddedKafkaIntegrationTest {
 
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
+    private static final JsonMapper OBJECT_MAPPER = JsonMapper.builder()
+            .findAndAddModules(ShowtimeAddedEventConsumerEmbeddedKafkaIntegrationTest.class.getClassLoader())
+            .build();
 
     @Autowired
     private EmbeddedKafkaBroker embeddedKafkaBroker;
@@ -131,11 +133,7 @@ class ShowtimeAddedEventConsumerEmbeddedKafkaIntegrationTest {
     }
 
     private String writeValueAsString(EventEnvelope<Object> envelope) {
-        try {
-            return OBJECT_MAPPER.writeValueAsString(envelope);
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
+        return OBJECT_MAPPER.writeValueAsString(envelope);
     }
 
     @Configuration

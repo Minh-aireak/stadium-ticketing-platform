@@ -2,8 +2,12 @@ package com.aireak.gateway.filter;
 
 import com.aireak.gateway.config.JwtValidationProperties;
 import com.aireak.gateway.ratelimit.RateLimitPolicy;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.JWSHeader;
+import com.nimbusds.jose.crypto.MACSigner;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,7 +21,6 @@ import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import reactor.core.publisher.Mono;
 
-import javax.crypto.SecretKey;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -53,7 +56,6 @@ class RateLimitingWebFilterTest {
             List.of("/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh",
                     "/api/v1/auth/logout", "/actuator/health", "/actuator/info"));
 
-    private final SecretKey secretKey = Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
 
     private Map<RateLimitPolicy, RedisRateLimiter> limiters;
     private MeterRegistry meterRegistry;
@@ -184,14 +186,21 @@ class RateLimitingWebFilterTest {
     void refreshTokenPathWithAValidBearerTokenIsKeyedByVerifiedUserIdNotIp() {
         allow(RateLimitPolicy.REFRESH_TOKEN);
         String accountId = UUID.randomUUID().toString();
-        String token = Jwts.builder()
-                .subject(accountId)
-                .issuer(ISSUER)
-                .audience().add(AUDIENCE).and()
-                .issuedAt(Date.from(Instant.now()))
-                .expiration(Date.from(Instant.now().plusSeconds(300)))
-                .signWith(secretKey)
-                .compact();
+        String token;
+        try {
+            JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                    .subject(accountId)
+                    .issuer(ISSUER)
+                    .audience(List.of(AUDIENCE))
+                    .issueTime(Date.from(Instant.now()))
+                    .expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                    .build();
+            SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), claims);
+            jwt.sign(new MACSigner(SECRET.getBytes(StandardCharsets.UTF_8)));
+            token = jwt.serialize();
+        } catch (JOSEException e) {
+            throw new IllegalStateException("Failed to sign test JWT", e);
+        }
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.post("/api/v1/auth/refresh")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
@@ -225,14 +234,21 @@ class RateLimitingWebFilterTest {
         // to fall back to a coarser IP-keyed bucket for a caller we can still identify.
         allow(RateLimitPolicy.REFRESH_TOKEN);
         String accountId = UUID.randomUUID().toString();
-        String expiredToken = Jwts.builder()
-                .subject(accountId)
-                .issuer(ISSUER)
-                .audience().add(AUDIENCE).and()
-                .issuedAt(Date.from(Instant.now().minusSeconds(600)))
-                .expiration(Date.from(Instant.now().minusSeconds(300)))
-                .signWith(secretKey)
-                .compact();
+        String expiredToken;
+        try {
+            JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                    .subject(accountId)
+                    .issuer(ISSUER)
+                    .audience(List.of(AUDIENCE))
+                    .issueTime(Date.from(Instant.now().minusSeconds(600)))
+                    .expirationTime(Date.from(Instant.now().minusSeconds(300)))
+                    .build();
+            SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), claims);
+            jwt.sign(new MACSigner(SECRET.getBytes(StandardCharsets.UTF_8)));
+            expiredToken = jwt.serialize();
+        } catch (JOSEException e) {
+            throw new IllegalStateException("Failed to sign test JWT", e);
+        }
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.post("/api/v1/auth/refresh")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + expiredToken)

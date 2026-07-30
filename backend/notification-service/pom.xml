@@ -62,6 +62,14 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- Nimbus JOSE+JWT — used by test code to sign tokens in integration tests.
+             Replaces JJWT (jjwt-jackson conflicted with Spring Boot 4.1's Jackson 3). -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-oauth2-jose</artifactId>
+            <scope>test</scope>
+        </dependency>
+
         <!-- Common shared infrastructure -->
         <dependency>
             <groupId>com.aireak</groupId>

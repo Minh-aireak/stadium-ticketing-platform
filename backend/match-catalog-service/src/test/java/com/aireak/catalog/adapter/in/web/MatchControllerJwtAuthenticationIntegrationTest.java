@@ -5,8 +5,12 @@ import com.aireak.catalog.application.port.in.CreateMatchUseCase;
 import com.aireak.catalog.application.port.in.GetMatchUseCase;
 import com.aireak.catalog.application.port.in.ListMatchesUseCase;
 import com.aireak.catalog.application.port.in.PublishMatchUseCase;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.JWSHeader;
+import com.nimbusds.jose.crypto.MACSigner;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -15,10 +19,10 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Date;
+import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -112,14 +116,19 @@ class MatchControllerJwtAuthenticationIntegrationTest {
     }
 
     private String validToken() {
-        SecretKey secretKey = Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
-        return Jwts.builder()
-                .subject(UUID.randomUUID().toString())
-                .issuer(ISSUER)
-                .audience().add(AUDIENCE).and()
-                .issuedAt(Date.from(Instant.now()))
-                .expiration(Date.from(Instant.now().plusSeconds(300)))
-                .signWith(secretKey)
-                .compact();
+        try {
+            JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                    .subject(UUID.randomUUID().toString())
+                    .issuer(ISSUER)
+                    .audience(List.of(AUDIENCE))
+                    .issueTime(Date.from(Instant.now()))
+                    .expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                    .build();
+            SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), claims);
+            jwt.sign(new MACSigner(SECRET.getBytes(StandardCharsets.UTF_8)));
+            return jwt.serialize();
+        } catch (JOSEException e) {
+            throw new IllegalStateException("Failed to sign test JWT", e);
+        }
     }
 }

@@ -47,21 +47,13 @@
             <artifactId>redisson-spring-boot-starter</artifactId>
         </dependency>
 
-        <!-- JWT — local (in-process) validation of access tokens issued by identity-service.
-             No network call to identity-service per request. -->
+        <!-- Nimbus JOSE+JWT (via spring-security-oauth2-jose) — replaces jjwt for local JWT
+             validation. jjwt 0.12.x depends on com.fasterxml.jackson (Jackson 2) which conflicts
+             with Spring Boot 4.1's Jackson 3 autoconfiguration. Nimbus is already the JWT library
+             used by Spring Security internally and has no Jackson dependency. -->
         <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt-impl</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-        <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt-jackson</artifactId>
-            <scope>runtime</scope>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-oauth2-jose</artifactId>
         </dependency>
 
         <!-- Lombok -->

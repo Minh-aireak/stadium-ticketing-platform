@@ -5,7 +5,7 @@ import com.aireak.catalog.application.port.out.MatchSearchPort;
 import com.aireak.catalog.application.service.MatchCatalogService;
 import com.aireak.catalog.config.InfraConfig;
 import com.aireak.catalog.domain.model.Match;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -118,8 +118,9 @@ class OutboxEventPublisherIntegrationTest {
     static class TestSupportConfig {
 
         @Bean
-        ObjectMapper objectMapper() {
-            return new ObjectMapper().findAndRegisterModules();
+        JsonMapper objectMapper() {
+            return JsonMapper.builder().findAndAddModules(
+                    OutboxEventPublisherIntegrationTest.class.getClassLoader()).build();
         }
 
         @Bean

@@ -1,12 +1,11 @@
 package com.aireak.gateway.filter;
 
 import com.aireak.gateway.config.JwtValidationProperties;
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.ExpiredJwtException;
-import io.jsonwebtoken.JwtException;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
-import io.jsonwebtoken.security.SignatureException;
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.JWSVerifier;
+import com.nimbusds.jose.crypto.MACVerifier;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
@@ -21,17 +20,22 @@ import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
 
-import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
+import java.text.ParseException;
+import java.util.Date;
 
 /**
  * Validates the access token JWT locally (signature, issuer, audience, expiration, algorithm) —
  * the gateway never calls identity-service to check a token. Trades a network hop for a
  * self-contained, cryptographically verifiable claim, which is the point of using JWTs here.
  *
- * <p>{@link Jwts#parser()} bound to an HMAC {@link SecretKey} only ever accepts HMAC signatures
- * of a matching strength and never accepts an unsigned ("none") or otherwise-algorithm token —
- * JJWT does not have an implicit trust path for {@code alg=none}.
+ * <p>Uses Nimbus JOSE+JWT ({@link MACVerifier}) bound to an HMAC secret — only ever accepts
+ * HMAC HS256 signatures, never an unsigned ("none") or otherwise-algorithm token.
+ *
+ * <p>Replaces the previous JJWT 0.12.x implementation. jjwt-jackson depended on
+ * com.fasterxml.jackson (Jackson 2) which conflicts with Spring Boot 4.1's Jackson 3
+ * auto-configuration. Nimbus is Spring Security's own JWT library (spring-security-oauth2-jose)
+ * and has no Jackson dependency.
  *
  * <p>On success, downstream services receive {@code X-User-Id} / {@code X-User-Email} set by
  * the gateway; any such headers on the inbound request are stripped first so a client can't
@@ -53,12 +57,18 @@ public class JwtAuthenticationWebFilter implements WebFilter, Ordered {
      */
     public static final String USER_ROLE_ATTRIBUTE = JwtAuthenticationWebFilter.class.getName() + ".USER_ROLE";
 
-    private final SecretKey secretKey;
+    private final JWSVerifier verifier;
     private final JwtValidationProperties properties;
 
     public JwtAuthenticationWebFilter(JwtValidationProperties properties) {
         this.properties = properties;
-        this.secretKey = Keys.hmacShaKeyFor(properties.secret().getBytes(StandardCharsets.UTF_8));
+        try {
+            this.verifier = new MACVerifier(
+                    properties.secret().getBytes(StandardCharsets.UTF_8));
+        } catch (JOSEException e) {
+            throw new IllegalStateException(
+                    "Failed to initialise JWT verifier (secret too short?)", e);
+        }
     }
 
     @Override
@@ -89,25 +99,35 @@ public class JwtAuthenticationWebFilter implements WebFilter, Ordered {
         }
         String token = authorization.substring("Bearer ".length()).trim();
 
-        Claims claims;
+        JWTClaimsSet claims;
         try {
-            claims = Jwts.parser()
-                    .verifyWith(secretKey)
-                    .requireIssuer(properties.issuer())
-                    .requireAudience(properties.audience())
-                    .build()
-                    .parseSignedClaims(token)
-                    .getPayload();
-        } catch (ExpiredJwtException ex) {
-            return unauthorized(exchange, "Access token expired");
-        } catch (SignatureException ex) {
-            return unauthorized(exchange, "Invalid token signature");
-        } catch (JwtException | IllegalArgumentException ex) {
+            SignedJWT signedJWT = SignedJWT.parse(token);
+            if (!signedJWT.verify(verifier)) {
+                return unauthorized(exchange, "Invalid token signature");
+            }
+            claims = signedJWT.getJWTClaimsSet();
+
+            // Validate issuer
+            if (!properties.issuer().equals(claims.getIssuer())) {
+                return unauthorized(exchange, "Invalid access token");
+            }
+            // Validate audience
+            if (!claims.getAudience().contains(properties.audience())) {
+                return unauthorized(exchange, "Invalid access token");
+            }
+            // Validate expiry
+            Date expiration = claims.getExpirationTime();
+            if (expiration == null || expiration.before(new Date())) {
+                return unauthorized(exchange, "Access token expired");
+            }
+        } catch (ParseException ex) {
             return unauthorized(exchange, "Invalid access token");
+        } catch (JOSEException ex) {
+            return unauthorized(exchange, "Invalid token signature");
         }
 
-        Object email = claims.get("email");
-        Object role = claims.get("role");
+        Object email = claims.getClaim("email");
+        Object role = claims.getClaim("role");
         ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
                 .headers(headers -> {
                     headers.remove("X-User-Id");

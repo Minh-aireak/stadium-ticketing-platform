@@ -1,14 +1,20 @@
 package com.aireak.booking.adapter.out.client;
 
+import com.aireak.common.security.AuthenticatedUser;
 import com.aireak.common.security.JwtAuthProperties;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.JWSHeader;
+import com.nimbusds.jose.JWSSigner;
+import com.nimbusds.jose.crypto.MACSigner;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
 import org.springframework.stereotype.Component;
 
-import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Date;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -20,6 +26,10 @@ import java.util.UUID;
  * {@code jwt.secret}/{@code issuer}/{@code audience} those services already validate against
  * (see {@link JwtAuthProperties}), so they see a genuinely authenticated caller rather than
  * needing an unauthenticated carve-out for these paths.
+ *
+ * <p>Migrated from JJWT 0.12.x to Nimbus JOSE+JWT. jjwt-jackson depended on
+ * com.fasterxml.jackson (Jackson 2) which conflicts with Spring Boot 4.1's Jackson 3
+ * auto-configuration. Nimbus has no Jackson dependency.
  */
 @Component
 public class InternalServiceTokenProvider {
@@ -27,24 +37,38 @@ public class InternalServiceTokenProvider {
     private static final String SERVICE_SUBJECT = "booking-service";
     private static final long TTL_SECONDS = 60;
 
-    private final SecretKey secretKey;
+    private final JWSSigner signer;
     private final JwtAuthProperties properties;
 
     public InternalServiceTokenProvider(JwtAuthProperties properties) {
         this.properties = properties;
-        this.secretKey = Keys.hmacShaKeyFor(properties.secret().getBytes(StandardCharsets.UTF_8));
+        try {
+            this.signer = new MACSigner(
+                    properties.secret().getBytes(StandardCharsets.UTF_8));
+        } catch (JOSEException e) {
+            throw new IllegalStateException(
+                    "Failed to initialise JWT signer in InternalServiceTokenProvider (secret too short?)", e);
+        }
     }
 
     public String mintServiceToken() {
         Instant now = Instant.now();
-        return Jwts.builder()
-                .id(UUID.randomUUID().toString())
+        JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                .jwtID(UUID.randomUUID().toString())
                 .subject(SERVICE_SUBJECT)
                 .issuer(properties.issuer())
-                .audience().add(properties.audience()).and()
-                .issuedAt(Date.from(now))
-                .expiration(Date.from(now.plusSeconds(TTL_SECONDS)))
-                .signWith(secretKey)
-                .compact();
+                .audience(List.of(properties.audience()))
+                .issueTime(Date.from(now))
+                .expirationTime(Date.from(now.plusSeconds(TTL_SECONDS)))
+                .claim("tokenType", AuthenticatedUser.TOKEN_TYPE_INTERNAL_SERVICE)
+                .build();
+
+        SignedJWT signedJWT = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), claims);
+        try {
+            signedJWT.sign(signer);
+        } catch (JOSEException e) {
+            throw new IllegalStateException("Failed to sign internal service JWT", e);
+        }
+        return signedJWT.serialize();
     }
 }

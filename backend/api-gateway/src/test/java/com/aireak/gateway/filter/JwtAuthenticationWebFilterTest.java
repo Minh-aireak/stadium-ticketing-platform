@@ -1,8 +1,12 @@
 package com.aireak.gateway.filter;
 
 import com.aireak.gateway.config.JwtValidationProperties;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.JWSHeader;
+import com.nimbusds.jose.crypto.MACSigner;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -11,7 +15,6 @@ import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
-import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -34,7 +37,6 @@ class JwtAuthenticationWebFilterTest {
                     "/api/v1/auth/logout", "/actuator/health", "/actuator/info"));
 
     private final JwtAuthenticationWebFilter filter = new JwtAuthenticationWebFilter(properties);
-    private final SecretKey secretKey = Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
 
     @Test
     void rejectsProtectedPathWithoutBearerToken() {
@@ -51,9 +53,7 @@ class JwtAuthenticationWebFilterTest {
     // runs for a rejected request. That's fine now: CorrelationIdWebFilter (order -100) and
     // PreAuthRateLimitingWebFilter (order -60) both run BEFORE this filter, not after, so every
     // request — including one this filter rejects with 401 — already has its correlation id set
-    // and has already passed the coarse per-IP flood guard by the time it gets here. See
-    // PreAuthRateLimitingWebFilterTest for proof that repeated 401-bound traffic actually gets
-    // capped.
+    // and has already passed the coarse per-IP flood guard by the time it gets here.
     @Test
     void rejectionNeverInvokesTheRestOfTheChain() {
         MockServerWebExchange exchange = MockServerWebExchange.from(
@@ -83,16 +83,14 @@ class JwtAuthenticationWebFilterTest {
 
     @Test
     void rejectsTokenSignedWithAWrongSecret() {
-        SecretKey wrongKey = Keys.hmacShaKeyFor(
-                "a-completely-different-secret-key-that-is-long-enough".getBytes(StandardCharsets.UTF_8));
-        String token = Jwts.builder()
+        String wrongSecret = "a-completely-different-secret-key-that-is-long-enough";
+        String token = buildToken(new JWTClaimsSet.Builder()
                 .subject(UUID.randomUUID().toString())
                 .issuer(ISSUER)
-                .audience().add(AUDIENCE).and()
-                .issuedAt(Date.from(Instant.now()))
-                .expiration(Date.from(Instant.now().plusSeconds(300)))
-                .signWith(wrongKey)
-                .compact();
+                .audience(List.of(AUDIENCE))
+                .issueTime(Date.from(Instant.now()))
+                .expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                .build(), wrongSecret);
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/api/v1/bookings/123")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
@@ -105,14 +103,13 @@ class JwtAuthenticationWebFilterTest {
 
     @Test
     void rejectsTokenWithWrongIssuer() {
-        String token = Jwts.builder()
+        String token = buildToken(new JWTClaimsSet.Builder()
                 .subject(UUID.randomUUID().toString())
                 .issuer("some-other-issuer")
-                .audience().add(AUDIENCE).and()
-                .issuedAt(Date.from(Instant.now()))
-                .expiration(Date.from(Instant.now().plusSeconds(300)))
-                .signWith(secretKey)
-                .compact();
+                .audience(List.of(AUDIENCE))
+                .issueTime(Date.from(Instant.now()))
+                .expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                .build(), SECRET);
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/api/v1/bookings/123")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
@@ -125,14 +122,13 @@ class JwtAuthenticationWebFilterTest {
 
     @Test
     void rejectsTokenWithWrongAudience() {
-        String token = Jwts.builder()
+        String token = buildToken(new JWTClaimsSet.Builder()
                 .subject(UUID.randomUUID().toString())
                 .issuer(ISSUER)
-                .audience().add("some-other-audience").and()
-                .issuedAt(Date.from(Instant.now()))
-                .expiration(Date.from(Instant.now().plusSeconds(300)))
-                .signWith(secretKey)
-                .compact();
+                .audience(List.of("some-other-audience"))
+                .issueTime(Date.from(Instant.now()))
+                .expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                .build(), SECRET);
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/api/v1/bookings/123")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
@@ -162,14 +158,13 @@ class JwtAuthenticationWebFilterTest {
     @Test
     void leavesXUserEmailAbsentWhenEmailClaimIsMissing() {
         String accountId = UUID.randomUUID().toString();
-        String tokenWithoutEmail = Jwts.builder()
+        String tokenWithoutEmail = buildToken(new JWTClaimsSet.Builder()
                 .subject(accountId)
                 .issuer(ISSUER)
-                .audience().add(AUDIENCE).and()
-                .issuedAt(Date.from(Instant.now()))
-                .expiration(Date.from(Instant.now().plusSeconds(300)))
-                .signWith(secretKey)
-                .compact();
+                .audience(List.of(AUDIENCE))
+                .issueTime(Date.from(Instant.now()))
+                .expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                .build(), SECRET);
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/api/v1/bookings/123")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenWithoutEmail)
@@ -186,14 +181,13 @@ class JwtAuthenticationWebFilterTest {
 
     @Test
     void rejectsExpiredToken() {
-        String expired = Jwts.builder()
+        String expired = buildToken(new JWTClaimsSet.Builder()
                 .subject(UUID.randomUUID().toString())
                 .issuer(ISSUER)
-                .audience().add(AUDIENCE).and()
-                .issuedAt(Date.from(Instant.now().minusSeconds(120)))
-                .expiration(Date.from(Instant.now().minusSeconds(60)))
-                .signWith(secretKey)
-                .compact();
+                .audience(List.of(AUDIENCE))
+                .issueTime(Date.from(Instant.now().minusSeconds(120)))
+                .expirationTime(Date.from(Instant.now().minusSeconds(60)))
+                .build(), SECRET);
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/api/v1/bookings/123")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + expired)
@@ -227,15 +221,14 @@ class JwtAuthenticationWebFilterTest {
     @Test
     void exposesRoleClaimAsExchangeAttributeForDownstreamFilters() {
         String accountId = UUID.randomUUID().toString();
-        String token = Jwts.builder()
+        String token = buildToken(new JWTClaimsSet.Builder()
                 .subject(accountId)
                 .issuer(ISSUER)
-                .audience().add(AUDIENCE).and()
+                .audience(List.of(AUDIENCE))
                 .claim("role", "ADMIN")
-                .issuedAt(Date.from(Instant.now()))
-                .expiration(Date.from(Instant.now().plusSeconds(300)))
-                .signWith(secretKey)
-                .compact();
+                .issueTime(Date.from(Instant.now()))
+                .expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                .build(), SECRET);
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/actuator/metrics")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
@@ -291,15 +284,26 @@ class JwtAuthenticationWebFilterTest {
         assertThat(forwardedHeaders.getFirst("X-User-Email")).isNull();
     }
 
+    // ── helpers ─────────────────────────────────────────────────────────────
+
     private String validToken(String subject, String email) {
-        return Jwts.builder()
+        return buildToken(new JWTClaimsSet.Builder()
                 .subject(subject)
                 .issuer(ISSUER)
-                .audience().add(AUDIENCE).and()
+                .audience(List.of(AUDIENCE))
                 .claim("email", email)
-                .issuedAt(Date.from(Instant.now()))
-                .expiration(Date.from(Instant.now().plusSeconds(300)))
-                .signWith(secretKey)
-                .compact();
+                .issueTime(Date.from(Instant.now()))
+                .expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                .build(), SECRET);
+    }
+
+    private static String buildToken(JWTClaimsSet claims, String secret) {
+        try {
+            SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), claims);
+            jwt.sign(new MACSigner(secret.getBytes(StandardCharsets.UTF_8)));
+            return jwt.serialize();
+        } catch (JOSEException e) {
+            throw new IllegalStateException("Failed to sign test JWT", e);
+        }
     }
 }

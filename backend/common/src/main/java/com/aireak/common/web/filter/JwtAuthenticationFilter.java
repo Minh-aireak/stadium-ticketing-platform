@@ -3,13 +3,11 @@ package com.aireak.common.web.filter;
 import com.aireak.common.security.AuthenticatedUser;
 import com.aireak.common.security.AuthenticatedUserContext;
 import com.aireak.common.security.JwtAuthProperties;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.ExpiredJwtException;
-import io.jsonwebtoken.JwtException;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
-import io.jsonwebtoken.security.SignatureException;
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.JWSVerifier;
+import com.nimbusds.jose.crypto.MACVerifier;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -26,12 +24,14 @@ import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Component;
 import org.springframework.util.AntPathMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
+import tools.jackson.databind.json.JsonMapper;
 
-import javax.crypto.SecretKey;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.text.ParseException;
 import java.time.Instant;
+import java.util.Date;
 
 /**
  * Validates every inbound request's {@code Authorization} bearer JWT independently of
@@ -43,6 +43,11 @@ import java.time.Instant;
  * (see {@link JwtAuthProperties}). On success, the authenticated identity is exposed via
  * {@link AuthenticatedUserContext} for the controller/application layer to read (e.g. to
  * compare against a customerId in the request body).
+ *
+ * <p>Uses Nimbus JOSE+JWT (com.nimbusds:nimbus-jose-jwt) instead of jjwt, because jjwt 0.12.x
+ * depends on com.fasterxml.jackson (Jackson 2) which conflicts with Spring Boot 4.1's Jackson 3
+ * auto-configuration. Nimbus is already a first-class Spring Security dependency — it powers
+ * spring-security-oauth2-jose internally.
  */
 @Component
 @Order(2)
@@ -55,16 +60,24 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final java.util.Set<String> HTTP_METHODS = java.util.Set.of(
             "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS");
 
-    private final SecretKey secretKey;
+    private final JWSVerifier verifier;
     private final JwtAuthProperties properties;
     // Deliberately not injected: this filter must serialize a 401 body even in a slice test (or
     // any context) that doesn't happen to expose the app's own ObjectMapper bean — the fixed,
     // tiny ProblemDetail shape here needs none of that bean's app-wide customization anyway.
-    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    // Jackson 3: ObjectMapper is immutable; build once via builder.
+    private final JsonMapper jsonMapper = JsonMapper.builder().findAndAddModules(
+            JwtAuthenticationFilter.class.getClassLoader()).build();
 
     public JwtAuthenticationFilter(JwtAuthProperties properties) {
         this.properties = properties;
-        this.secretKey = Keys.hmacShaKeyFor(properties.secret().getBytes(StandardCharsets.UTF_8));
+        try {
+            this.verifier = new MACVerifier(
+                    properties.secret().getBytes(StandardCharsets.UTF_8));
+        } catch (JOSEException e) {
+            throw new IllegalStateException(
+                    "Failed to initialise JWT verifier (secret too short?)", e);
+        }
     }
 
     @Override
@@ -103,31 +116,46 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
         String token = authorization.substring("Bearer ".length()).trim();
 
-        Claims claims;
+        JWTClaimsSet claims;
         try {
-            claims = Jwts.parser()
-                    .verifyWith(secretKey)
-                    .requireIssuer(properties.issuer())
-                    .requireAudience(properties.audience())
-                    .build()
-                    .parseSignedClaims(token)
-                    .getPayload();
-        } catch (ExpiredJwtException ex) {
-            reject(response, "Access token expired");
-            return;
-        } catch (SignatureException ex) {
-            reject(response, "Invalid token signature");
-            return;
-        } catch (JwtException | IllegalArgumentException ex) {
+            SignedJWT signedJWT = SignedJWT.parse(token);
+            if (!signedJWT.verify(verifier)) {
+                reject(response, "Invalid token signature");
+                return;
+            }
+            claims = signedJWT.getJWTClaimsSet();
+
+            // Validate issuer
+            if (!properties.issuer().equals(claims.getIssuer())) {
+                reject(response, "Invalid access token");
+                return;
+            }
+            // Validate audience
+            if (!claims.getAudience().contains(properties.audience())) {
+                reject(response, "Invalid access token");
+                return;
+            }
+            // Validate expiry
+            Date expiration = claims.getExpirationTime();
+            if (expiration == null || expiration.before(new Date())) {
+                reject(response, "Access token expired");
+                return;
+            }
+        } catch (ParseException ex) {
             reject(response, "Invalid access token");
+            return;
+        } catch (JOSEException ex) {
+            reject(response, "Invalid token signature");
             return;
         }
 
-        Object email = claims.get("email");
-        Object role = claims.get("role");
+        Object email = claims.getClaim("email");
+        Object role = claims.getClaim("role");
+        Object tokenType = claims.getClaim("tokenType");
         AuthenticatedUserContext.set(new AuthenticatedUser(
                 claims.getSubject(), email != null ? String.valueOf(email) : null,
-                role != null ? String.valueOf(role) : null, token));
+                role != null ? String.valueOf(role) : null, token,
+                tokenType != null ? String.valueOf(tokenType) : null));
         try {
             filterChain.doFilter(request, response);
         } finally {
@@ -143,6 +171,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         problem.setProperty("timestamp", Instant.now());
         response.setStatus(HttpStatus.UNAUTHORIZED.value());
         response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
-        objectMapper.writeValue(response.getWriter(), problem);
+        jsonMapper.writeValue(response.getWriter(), problem);
     }
 }

@@ -7,8 +7,8 @@ import com.aireak.inventory.application.port.out.DomainEventPublisher;
 import com.aireak.inventory.domain.event.SeatsReleasedEvent;
 import com.aireak.inventory.domain.event.SeatsReservedEvent;
 import com.aireak.inventory.domain.event.SeatsSoldEvent;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
@@ -91,7 +91,7 @@ public class OutboxEventPublisher implements DomainEventPublisher {
     private String serialize(EventEnvelope<?> envelope) {
         try {
             return objectMapper.writeValueAsString(envelope);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new IllegalStateException("Failed to serialize domain event envelope", e);
         }
     }

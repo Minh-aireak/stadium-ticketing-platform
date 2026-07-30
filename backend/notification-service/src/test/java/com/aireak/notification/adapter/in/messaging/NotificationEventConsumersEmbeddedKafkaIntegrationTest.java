@@ -6,7 +6,7 @@ import com.aireak.common.event.EventEnvelope;
 import com.aireak.identity.domain.event.AccountRegisteredEvent;
 import com.aireak.notification.application.port.in.SendNotificationUseCase;
 import com.aireak.notification.config.KafkaConfig;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -82,7 +82,9 @@ import static org.mockito.Mockito.verify;
 )
 class NotificationEventConsumersEmbeddedKafkaIntegrationTest {
 
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
+    private static final JsonMapper OBJECT_MAPPER = JsonMapper.builder()
+            .findAndAddModules(NotificationEventConsumersEmbeddedKafkaIntegrationTest.class.getClassLoader())
+            .build();
 
     @Autowired
     private EmbeddedKafkaBroker embeddedKafkaBroker;
@@ -188,11 +190,7 @@ class NotificationEventConsumersEmbeddedKafkaIntegrationTest {
     }
 
     private String writeValueAsString(EventEnvelope<Object> envelope) {
-        try {
-            return OBJECT_MAPPER.writeValueAsString(envelope);
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
+        return OBJECT_MAPPER.writeValueAsString(envelope);
     }
 
     @Configuration

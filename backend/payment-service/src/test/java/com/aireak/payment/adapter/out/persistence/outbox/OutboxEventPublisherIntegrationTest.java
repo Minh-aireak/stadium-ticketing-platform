@@ -6,7 +6,7 @@ import com.aireak.payment.application.port.out.PaymentRepository;
 import com.aireak.payment.config.JpaConfig;
 import com.aireak.payment.domain.model.Payment;
 import com.aireak.payment.domain.model.PaymentStatus;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import jakarta.persistence.EntityManager;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
@@ -136,8 +136,9 @@ class OutboxEventPublisherIntegrationTest {
     static class TestSupportConfig {
 
         @Bean
-        ObjectMapper objectMapper() {
-            return new ObjectMapper().findAndRegisterModules();
+        JsonMapper objectMapper() {
+            return JsonMapper.builder().findAndAddModules(
+                    OutboxEventPublisherIntegrationTest.class.getClassLoader()).build();
         }
     }
 }

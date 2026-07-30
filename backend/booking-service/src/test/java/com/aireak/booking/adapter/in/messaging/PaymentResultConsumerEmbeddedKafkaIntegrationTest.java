@@ -5,7 +5,7 @@ import com.aireak.booking.config.KafkaConfig;
 import com.aireak.common.event.EventEnvelope;
 import com.aireak.payment.domain.event.PaymentFailedEvent;
 import com.aireak.payment.domain.event.PaymentSucceededEvent;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -75,7 +75,9 @@ import static org.mockito.Mockito.verify;
 )
 class PaymentResultConsumerEmbeddedKafkaIntegrationTest {
 
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
+    private static final JsonMapper OBJECT_MAPPER = JsonMapper.builder()
+            .findAndAddModules(PaymentResultConsumerEmbeddedKafkaIntegrationTest.class.getClassLoader())
+            .build();
 
     @Autowired
     private EmbeddedKafkaBroker embeddedKafkaBroker;
@@ -158,11 +160,7 @@ class PaymentResultConsumerEmbeddedKafkaIntegrationTest {
     }
 
     private String writeValueAsString(EventEnvelope<Object> envelope) {
-        try {
-            return OBJECT_MAPPER.writeValueAsString(envelope);
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
+        return OBJECT_MAPPER.writeValueAsString(envelope);
     }
 
     @Configuration

@@ -1,8 +1,12 @@
 package com.aireak.gateway;
 
 import com.aireak.gateway.config.JwtValidationProperties;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.JWSHeader;
+import com.nimbusds.jose.crypto.MACSigner;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,11 +26,11 @@ import reactor.core.publisher.Mono;
 import reactor.netty.DisposableServer;
 import reactor.netty.http.server.HttpServer;
 
-import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -191,18 +195,22 @@ class ApiGatewayRoutingTest {
     }
 
     private String bearerFor(String accountId, String role) {
-        SecretKey key = Keys.hmacShaKeyFor(jwtProperties.secret().getBytes(StandardCharsets.UTF_8));
-        var builder = Jwts.builder()
-                .subject(accountId)
-                .issuer(jwtProperties.issuer())
-                .audience().add(jwtProperties.audience()).and()
-                .claim("email", accountId + "@example.com")
-                .issuedAt(Date.from(Instant.now()))
-                .expiration(Date.from(Instant.now().plusSeconds(300)));
-        if (role != null) {
-            builder.claim("role", role);
+        try {
+            JWTClaimsSet.Builder builder = new JWTClaimsSet.Builder()
+                    .subject(accountId)
+                    .issuer(jwtProperties.issuer())
+                    .audience(List.of(jwtProperties.audience()))
+                    .claim("email", accountId + "@example.com")
+                    .issueTime(Date.from(Instant.now()))
+                    .expirationTime(Date.from(Instant.now().plusSeconds(300)));
+            if (role != null) {
+                builder.claim("role", role);
+            }
+            SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), builder.build());
+            jwt.sign(new MACSigner(jwtProperties.secret().getBytes(StandardCharsets.UTF_8)));
+            return "Bearer " + jwt.serialize();
+        } catch (JOSEException e) {
+            throw new IllegalStateException("Failed to sign test JWT", e);
         }
-        String token = builder.signWith(key).compact();
-        return "Bearer " + token;
     }
 }

@@ -8,9 +8,12 @@ import com.aireak.booking.domain.model.Booking;
 import com.aireak.booking.domain.model.BookingAmount;
 import com.aireak.booking.domain.model.BookingStatus;
 import com.aireak.booking.domain.model.SeatSelection;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.JWSHeader;
+import com.nimbusds.jose.crypto.MACSigner;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -19,7 +22,6 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import javax.crypto.SecretKey;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -27,6 +29,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -54,7 +57,8 @@ class BookingControllerJwtAuthenticationIntegrationTest {
 
     // Not @Autowired: the @WebMvcTest slice doesn't reliably expose the app's own ObjectMapper
     // bean, and this only needs plain, uncustomized JSON serialization of the request DTO anyway.
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    // Jackson 3: use JsonMapper.builder() — ObjectMapper is immutable and constructed via builder.
+    private final JsonMapper jsonMapper = JsonMapper.builder().build();
 
     @Autowired
     private MockMvc mockMvc;
@@ -138,7 +142,7 @@ class BookingControllerJwtAuthenticationIntegrationTest {
     void rejectsCreateBookingWhenBodyCustomerIdDoesNotMatchTheAuthenticatedCaller() throws Exception {
         String authenticatedAccountId = UUID.randomUUID().toString();
         String someoneElsesAccountId = UUID.randomUUID().toString();
-        String body = objectMapper.writeValueAsString(new BookingController.CreateBookingRequest(
+        String body = jsonMapper.writeValueAsString(new BookingController.CreateBookingRequest(
                 someoneElsesAccountId, "showtime-1", List.of("A1"), new BigDecimal("50.00"), "USD"));
 
         mockMvc.perform(post("/api/v1/bookings")
@@ -151,7 +155,7 @@ class BookingControllerJwtAuthenticationIntegrationTest {
     @Test
     void allowsCreateBookingWhenBodyCustomerIdMatchesTheAuthenticatedCaller() throws Exception {
         String accountId = UUID.randomUUID().toString();
-        String body = objectMapper.writeValueAsString(new BookingController.CreateBookingRequest(
+        String body = jsonMapper.writeValueAsString(new BookingController.CreateBookingRequest(
                 accountId, "showtime-1", List.of("A1"), new BigDecimal("50.00"), "USD"));
         when(createBookingUseCase.createBooking(any(), anyString(), any(), anyString(), any(), any(), anyString()))
                 .thenReturn(new BookingCreationResult(
@@ -165,14 +169,19 @@ class BookingControllerJwtAuthenticationIntegrationTest {
     }
 
     private String validToken(String subject) {
-        SecretKey secretKey = Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
-        return Jwts.builder()
-                .subject(subject)
-                .issuer(ISSUER)
-                .audience().add(AUDIENCE).and()
-                .issuedAt(Date.from(Instant.now()))
-                .expiration(Date.from(Instant.now().plusSeconds(300)))
-                .signWith(secretKey)
-                .compact();
+        try {
+            JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                    .subject(subject)
+                    .issuer(ISSUER)
+                    .audience(List.of(AUDIENCE))
+                    .issueTime(Date.from(Instant.now()))
+                    .expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                    .build();
+            SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), claims);
+            jwt.sign(new MACSigner(SECRET.getBytes(StandardCharsets.UTF_8)));
+            return jwt.serialize();
+        } catch (JOSEException e) {
+            throw new IllegalStateException("Failed to sign test JWT", e);
+        }
     }
 }

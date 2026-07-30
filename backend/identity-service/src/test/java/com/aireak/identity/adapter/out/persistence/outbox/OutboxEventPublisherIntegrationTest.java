@@ -9,7 +9,7 @@ import com.aireak.identity.config.JpaConfig;
 import com.aireak.identity.domain.model.AccountId;
 import com.aireak.identity.domain.model.HashedPassword;
 import com.aireak.identity.domain.model.RawPassword;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -99,8 +99,9 @@ class OutboxEventPublisherIntegrationTest {
     static class TestSupportConfig {
 
         @Bean
-        ObjectMapper objectMapper() {
-            return new ObjectMapper().findAndRegisterModules();
+        JsonMapper objectMapper() {
+            return JsonMapper.builder().findAndAddModules(
+                    OutboxEventPublisherIntegrationTest.class.getClassLoader()).build();
         }
 
         @Bean

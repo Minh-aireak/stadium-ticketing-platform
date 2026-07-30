@@ -3,15 +3,18 @@ package com.aireak.common.web.filter;
 import com.aireak.common.security.AuthenticatedUser;
 import com.aireak.common.security.AuthenticatedUserContext;
 import com.aireak.common.security.JwtAuthProperties;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.JWSHeader;
+import com.nimbusds.jose.crypto.MACSigner;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
 import jakarta.servlet.FilterChain;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
-import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Date;
@@ -32,8 +35,6 @@ class JwtAuthenticationFilterTest {
             SECRET, ISSUER, AUDIENCE, List.of("/actuator/**"));
 
     private final JwtAuthenticationFilter filter = new JwtAuthenticationFilter(properties);
-
-    private final SecretKey secretKey = Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
 
     @AfterEach
     void clearContext() {
@@ -75,16 +76,14 @@ class JwtAuthenticationFilterTest {
 
     @Test
     void rejectsTokenSignedWithAWrongSecret() throws Exception {
-        SecretKey wrongKey = Keys.hmacShaKeyFor(
-                "a-completely-different-secret-key-that-is-long-enough".getBytes(StandardCharsets.UTF_8));
-        String token = Jwts.builder()
+        String wrongSecret = "a-completely-different-secret-key-that-is-long-enough";
+        String token = buildToken(new JWTClaimsSet.Builder()
                 .subject(UUID.randomUUID().toString())
                 .issuer(ISSUER)
-                .audience().add(AUDIENCE).and()
-                .issuedAt(Date.from(Instant.now()))
-                .expiration(Date.from(Instant.now().plusSeconds(300)))
-                .signWith(wrongKey)
-                .compact();
+                .audience(List.of(AUDIENCE))
+                .issueTime(Date.from(Instant.now()))
+                .expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                .build(), wrongSecret);
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/bookings/123");
         request.addHeader("Authorization", "Bearer " + token);
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -96,14 +95,13 @@ class JwtAuthenticationFilterTest {
 
     @Test
     void rejectsTokenWithWrongIssuer() throws Exception {
-        String token = Jwts.builder()
+        String token = buildToken(new JWTClaimsSet.Builder()
                 .subject(UUID.randomUUID().toString())
                 .issuer("some-other-issuer")
-                .audience().add(AUDIENCE).and()
-                .issuedAt(Date.from(Instant.now()))
-                .expiration(Date.from(Instant.now().plusSeconds(300)))
-                .signWith(secretKey)
-                .compact();
+                .audience(List.of(AUDIENCE))
+                .issueTime(Date.from(Instant.now()))
+                .expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                .build(), SECRET);
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/bookings/123");
         request.addHeader("Authorization", "Bearer " + token);
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -115,14 +113,13 @@ class JwtAuthenticationFilterTest {
 
     @Test
     void rejectsTokenWithWrongAudience() throws Exception {
-        String token = Jwts.builder()
+        String token = buildToken(new JWTClaimsSet.Builder()
                 .subject(UUID.randomUUID().toString())
                 .issuer(ISSUER)
-                .audience().add("some-other-audience").and()
-                .issuedAt(Date.from(Instant.now()))
-                .expiration(Date.from(Instant.now().plusSeconds(300)))
-                .signWith(secretKey)
-                .compact();
+                .audience(List.of("some-other-audience"))
+                .issueTime(Date.from(Instant.now()))
+                .expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                .build(), SECRET);
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/bookings/123");
         request.addHeader("Authorization", "Bearer " + token);
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -134,14 +131,13 @@ class JwtAuthenticationFilterTest {
 
     @Test
     void rejectsExpiredToken() throws Exception {
-        String expired = Jwts.builder()
+        String expired = buildToken(new JWTClaimsSet.Builder()
                 .subject(UUID.randomUUID().toString())
                 .issuer(ISSUER)
-                .audience().add(AUDIENCE).and()
-                .issuedAt(Date.from(Instant.now().minusSeconds(120)))
-                .expiration(Date.from(Instant.now().minusSeconds(60)))
-                .signWith(secretKey)
-                .compact();
+                .audience(List.of(AUDIENCE))
+                .issueTime(Date.from(Instant.now().minusSeconds(120)))
+                .expirationTime(Date.from(Instant.now().minusSeconds(60)))
+                .build(), SECRET);
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/bookings/123");
         request.addHeader("Authorization", "Bearer " + expired);
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -176,16 +172,15 @@ class JwtAuthenticationFilterTest {
     @Test
     void validTokenWithRoleClaimPopulatesRole() throws Exception {
         String accountId = UUID.randomUUID().toString();
-        String token = Jwts.builder()
+        String token = buildToken(new JWTClaimsSet.Builder()
                 .subject(accountId)
                 .issuer(ISSUER)
-                .audience().add(AUDIENCE).and()
+                .audience(List.of(AUDIENCE))
                 .claim("email", "admin@example.com")
                 .claim("role", "ADMIN")
-                .issuedAt(Date.from(Instant.now()))
-                .expiration(Date.from(Instant.now().plusSeconds(300)))
-                .signWith(secretKey)
-                .compact();
+                .issueTime(Date.from(Instant.now()))
+                .expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                .build(), SECRET);
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/bookings/123");
         request.addHeader("Authorization", "Bearer " + token);
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -200,14 +195,13 @@ class JwtAuthenticationFilterTest {
     @Test
     void validTokenWithoutEmailClaimLeavesEmailNull() throws Exception {
         String accountId = UUID.randomUUID().toString();
-        String tokenWithoutEmail = Jwts.builder()
+        String tokenWithoutEmail = buildToken(new JWTClaimsSet.Builder()
                 .subject(accountId)
                 .issuer(ISSUER)
-                .audience().add(AUDIENCE).and()
-                .issuedAt(Date.from(Instant.now()))
-                .expiration(Date.from(Instant.now().plusSeconds(300)))
-                .signWith(secretKey)
-                .compact();
+                .audience(List.of(AUDIENCE))
+                .issueTime(Date.from(Instant.now()))
+                .expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                .build(), SECRET);
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/bookings/123");
         request.addHeader("Authorization", "Bearer " + tokenWithoutEmail);
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -260,16 +254,27 @@ class JwtAuthenticationFilterTest {
         assertThat(response.getStatus()).isEqualTo(401);
     }
 
+    // ── helpers ─────────────────────────────────────────────────────────────
+
     private String validToken(String subject, String email) {
-        return Jwts.builder()
+        return buildToken(new JWTClaimsSet.Builder()
                 .subject(subject)
                 .issuer(ISSUER)
-                .audience().add(AUDIENCE).and()
+                .audience(List.of(AUDIENCE))
                 .claim("email", email)
-                .issuedAt(Date.from(Instant.now()))
-                .expiration(Date.from(Instant.now().plusSeconds(300)))
-                .signWith(secretKey)
-                .compact();
+                .issueTime(Date.from(Instant.now()))
+                .expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                .build(), SECRET);
+    }
+
+    private static String buildToken(JWTClaimsSet claims, String secret) {
+        try {
+            SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), claims);
+            jwt.sign(new MACSigner(secret.getBytes(StandardCharsets.UTF_8)));
+            return jwt.serialize();
+        } catch (JOSEException e) {
+            throw new IllegalStateException("Failed to sign test JWT", e);
+        }
     }
 
     private FilterChain neverInvokedChain() {

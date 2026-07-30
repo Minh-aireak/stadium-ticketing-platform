@@ -27,12 +27,10 @@
         <resilience4j.version>2.4.0</resilience4j.version>
         <!-- redisson 4.6.1 published 2026-06-18; Spring Boot 4.1 support added in 4.6.0 -->
         <redisson.version>4.6.1</redisson.version>
-        <!-- jjwt latest compatible -->
-        <jjwt.version>0.12.6</jjwt.version>
         <!-- Testcontainers BOM -->
         <testcontainers-bom.version>1.21.0</testcontainers-bom.version>
-        <!-- Elasticsearch Java client (independent of SB version) -->
-        <elasticsearch-java.version>8.18.3</elasticsearch-java.version>
+        <!-- Elasticsearch Java client 9.2.0 — first version with Jackson3JsonpMapper -->
+        <elasticsearch-java.version>9.2.0</elasticsearch-java.version>
 
         <!-- Plugins -->
         <maven-compiler-plugin.version>3.14.0</maven-compiler-plugin.version>
@@ -119,29 +117,20 @@
                 <version>${resilience4j.version}</version>
             </dependency>
 
-            <!-- JJWT -->
-            <dependency>
-                <groupId>io.jsonwebtoken</groupId>
-                <artifactId>jjwt-api</artifactId>
-                <version>${jjwt.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.jsonwebtoken</groupId>
-                <artifactId>jjwt-impl</artifactId>
-                <version>${jjwt.version}</version>
-                <scope>runtime</scope>
-            </dependency>
-            <dependency>
-                <groupId>io.jsonwebtoken</groupId>
-                <artifactId>jjwt-jackson</artifactId>
-                <version>${jjwt.version}</version>
-                <scope>runtime</scope>
-            </dependency>
-
-            <!-- Elasticsearch Java client (standalone, not through Spring Data auto-config) -->
+            <!-- Elasticsearch Java client 9.2.0 — standalone, not through Spring Data auto-config.
+                 9.2.0 is the first version with Jackson3JsonpMapper (Jackson 3 / tools.jackson support). -->
             <dependency>
                 <groupId>co.elastic.clients</groupId>
                 <artifactId>elasticsearch-java</artifactId>
+                <version>${elasticsearch-java.version}</version>
+            </dependency>
+
+            <!-- Low-level REST client required by RestClientTransport (used by ElasticsearchClientConfig).
+                 In elasticsearch-java 9.x the rest client is a separate artifact and must be declared
+                 explicitly — it is no longer bundled as a transitive compile dependency. -->
+            <dependency>
+                <groupId>org.elasticsearch.client</groupId>
+                <artifactId>elasticsearch-rest-client</artifactId>
                 <version>${elasticsearch-java.version}</version>
             </dependency>
         </dependencies>

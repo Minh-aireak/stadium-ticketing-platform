@@ -8,7 +8,7 @@ import com.aireak.booking.domain.model.Booking;
 import com.aireak.booking.domain.model.BookingAmount;
 import com.aireak.booking.domain.model.BookingStatus;
 import com.aireak.booking.domain.model.SeatSelection;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import jakarta.persistence.EntityManager;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
@@ -150,8 +150,9 @@ class OutboxEventPublisherIntegrationTest {
     static class TestSupportConfig {
 
         @Bean
-        ObjectMapper objectMapper() {
-            return new ObjectMapper().findAndRegisterModules();
+        JsonMapper objectMapper() {
+            return JsonMapper.builder().findAndAddModules(
+                    OutboxEventPublisherIntegrationTest.class.getClassLoader()).build();
         }
     }
 }
