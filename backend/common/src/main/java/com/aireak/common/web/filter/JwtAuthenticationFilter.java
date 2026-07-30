@@ -60,23 +60,25 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final java.util.Set<String> HTTP_METHODS = java.util.Set.of(
             "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS");
 
-    private final JWSVerifier verifier;
+    private final JWSVerifier primaryVerifier;
+    private final JWSVerifier previousVerifier;
+    private final JWSVerifier internalVerifier;
     private final JwtAuthProperties properties;
-    // Deliberately not injected: this filter must serialize a 401 body even in a slice test (or
-    // any context) that doesn't happen to expose the app's own ObjectMapper bean — the fixed,
-    // tiny ProblemDetail shape here needs none of that bean's app-wide customization anyway.
-    // Jackson 3: ObjectMapper is immutable; build once via builder.
     private final JsonMapper jsonMapper = JsonMapper.builder().findAndAddModules(
             JwtAuthenticationFilter.class.getClassLoader()).build();
 
     public JwtAuthenticationFilter(JwtAuthProperties properties) {
         this.properties = properties;
         try {
-            this.verifier = new MACVerifier(
-                    properties.secret().getBytes(StandardCharsets.UTF_8));
+            this.primaryVerifier = new MACVerifier(properties.secret().getBytes(StandardCharsets.UTF_8));
+            this.previousVerifier = (properties.previousSecret() != null && !properties.previousSecret().isBlank())
+                    ? new MACVerifier(properties.previousSecret().getBytes(StandardCharsets.UTF_8))
+                    : null;
+            this.internalVerifier = (properties.internalSecret() != null && !properties.internalSecret().isBlank())
+                    ? new MACVerifier(properties.internalSecret().getBytes(StandardCharsets.UTF_8))
+                    : null;
         } catch (JOSEException e) {
-            throw new IllegalStateException(
-                    "Failed to initialise JWT verifier (secret too short?)", e);
+            throw new IllegalStateException("Failed to initialise JWT verifier (secret too short?)", e);
         }
     }
 
@@ -87,12 +89,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         return properties.excludedPaths().stream().anyMatch(pattern -> matches(pattern, method, path));
     }
 
-    /**
-     * A pattern of the form {@code "GET:/api/v1/matches"} excludes only that HTTP method;
-     * a bare path pattern (e.g. {@code "/actuator/**"}) excludes all methods, as before.
-     * Needed when a public read (GET) and an authenticated write (POST) share the exact
-     * same path — {@code excludedPaths} alone can't tell those apart without a method.
-     */
     private boolean matches(String pattern, String method, String path) {
         int colon = pattern.indexOf(':');
         if (colon > 0 && HTTP_METHODS.contains(pattern.substring(0, colon).toUpperCase(java.util.Locale.ROOT))) {
@@ -119,7 +115,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         JWTClaimsSet claims;
         try {
             SignedJWT signedJWT = SignedJWT.parse(token);
-            if (!signedJWT.verify(verifier)) {
+            boolean verified = signedJWT.verify(primaryVerifier);
+            if (!verified && previousVerifier != null) {
+                verified = signedJWT.verify(previousVerifier);
+            }
+            if (!verified && internalVerifier != null) {
+                verified = signedJWT.verify(internalVerifier);
+            }
+
+            if (!verified) {
                 reject(response, "Invalid token signature");
                 return;
             }

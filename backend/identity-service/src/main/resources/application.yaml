@@ -28,6 +28,11 @@ jwt:
   # No default — must be injected via env var in every environment. A hardcoded fallback here
   # would let anyone who reads the source mint valid tokens if the env var is ever left unset.
   secret: ${JWT_SECRET}
+  # Set only during a secret rotation window — see docs/secrets_management_strategy.md.
+  previous-secret: ${JWT_PREVIOUS_SECRET:}
+  # Distinct secret used only for service-to-service tokens (see JwtAuthProperties) — never
+  # accepted for user-issued tokens or vice versa.
+  internal-secret: ${JWT_INTERNAL_SECRET:}
   # Access token is short-lived by design — 15 min balances UX (silent refresh) vs blast radius if leaked.
   expiration-seconds: ${JWT_EXPIRATION_SECONDS:900}
   issuer: ${JWT_ISSUER:https://auth.aireak.com}
@@ -71,7 +76,7 @@ management:
         include: health,info,metrics
   endpoint:
     health:
-      show-details: always
+      show-details: when-authorized
 
 logging:
   pattern:

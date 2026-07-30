@@ -52,9 +52,11 @@ class RateLimitingWebFilterTest {
     private static final String AUDIENCE = "stadium-clients";
 
     private final JwtValidationProperties jwtProperties = new JwtValidationProperties(
-            SECRET, ISSUER, AUDIENCE,
+            SECRET, null, ISSUER, AUDIENCE,
             List.of("/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh",
                     "/api/v1/auth/logout", "/actuator/health", "/actuator/info"));
+    private final com.aireak.gateway.config.GatewayProperties gatewayProperties = new com.aireak.gateway.config.GatewayProperties(
+            List.of("127.0.0.1", "10.0.0.0/8", "203.0.113.99"));
 
 
     private Map<RateLimitPolicy, RedisRateLimiter> limiters;
@@ -68,7 +70,7 @@ class RateLimitingWebFilterTest {
             limiters.put(policy, mock(RedisRateLimiter.class));
         }
         meterRegistry = new SimpleMeterRegistry();
-        filter = new RateLimitingWebFilter(limiters, jwtProperties, meterRegistry);
+        filter = new RateLimitingWebFilter(limiters, jwtProperties, gatewayProperties, meterRegistry);
     }
 
     private void allow(RateLimitPolicy policy) {
@@ -259,5 +261,35 @@ class RateLimitingWebFilterTest {
 
         verify(limiters.get(RateLimitPolicy.REFRESH_TOKEN))
                 .isAllowed("REFRESH_TOKEN", "user:" + accountId);
+    }
+
+    @Test
+    void readsXForwardedForOnlyWhenRequestComesFromTrustedProxy() {
+        allow(RateLimitPolicy.REFRESH_TOKEN);
+        MockServerWebExchange trustedExchange = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/v1/auth/refresh")
+                        .remoteAddress(new InetSocketAddress("203.0.113.99", 5555))
+                        .header("X-Forwarded-For", "198.51.100.44, 203.0.113.99")
+                        .build());
+
+        filter.filter(trustedExchange, ex -> Mono.empty()).block(Duration.ofSeconds(5));
+
+        verify(limiters.get(RateLimitPolicy.REFRESH_TOKEN))
+                .isAllowed("REFRESH_TOKEN", "ip:198.51.100.44");
+    }
+
+    @Test
+    void ignoresXForwardedForWhenRequestComesFromUntrustedRemoteAddress() {
+        allow(RateLimitPolicy.REFRESH_TOKEN);
+        MockServerWebExchange untrustedExchange = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/v1/auth/refresh")
+                        .remoteAddress(new InetSocketAddress("198.51.100.5", 5555))
+                        .header("X-Forwarded-For", "1.1.1.1")
+                        .build());
+
+        filter.filter(untrustedExchange, ex -> Mono.empty()).block(Duration.ofSeconds(5));
+
+        verify(limiters.get(RateLimitPolicy.REFRESH_TOKEN))
+                .isAllowed("REFRESH_TOKEN", "ip:198.51.100.5");
     }
 }

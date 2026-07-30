@@ -57,17 +57,21 @@ public class JwtAuthenticationWebFilter implements WebFilter, Ordered {
      */
     public static final String USER_ROLE_ATTRIBUTE = JwtAuthenticationWebFilter.class.getName() + ".USER_ROLE";
 
-    private final JWSVerifier verifier;
+    private static final String TYPE_BASE = "https://aireak.com/errors/";
+
+    private final JWSVerifier primaryVerifier;
+    private final JWSVerifier previousVerifier;
     private final JwtValidationProperties properties;
 
     public JwtAuthenticationWebFilter(JwtValidationProperties properties) {
         this.properties = properties;
         try {
-            this.verifier = new MACVerifier(
-                    properties.secret().getBytes(StandardCharsets.UTF_8));
+            this.primaryVerifier = new MACVerifier(properties.secret().getBytes(StandardCharsets.UTF_8));
+            this.previousVerifier = (properties.previousSecret() != null && !properties.previousSecret().isBlank())
+                    ? new MACVerifier(properties.previousSecret().getBytes(StandardCharsets.UTF_8))
+                    : null;
         } catch (JOSEException e) {
-            throw new IllegalStateException(
-                    "Failed to initialise JWT verifier (secret too short?)", e);
+            throw new IllegalStateException("Failed to initialise JWT verifier (secret too short?)", e);
         }
     }
 
@@ -80,10 +84,6 @@ public class JwtAuthenticationWebFilter implements WebFilter, Ordered {
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         String path = exchange.getRequest().getURI().getPath();
         if (isPublic(path)) {
-            // Public paths (login/register/refresh/logout/health) skip validation, but a client
-            // could still attach X-User-Id/X-User-Email itself; strip them unconditionally so
-            // nothing downstream (including gateway-side rate limiting keyed on X-User-Id) can
-            // ever observe a client-forged identity header on a route we didn't authenticate.
             ServerHttpRequest strippedRequest = exchange.getRequest().mutate()
                     .headers(headers -> {
                         headers.remove("X-User-Id");
@@ -102,20 +102,21 @@ public class JwtAuthenticationWebFilter implements WebFilter, Ordered {
         JWTClaimsSet claims;
         try {
             SignedJWT signedJWT = SignedJWT.parse(token);
-            if (!signedJWT.verify(verifier)) {
+            boolean verified = signedJWT.verify(primaryVerifier);
+            if (!verified && previousVerifier != null) {
+                verified = signedJWT.verify(previousVerifier);
+            }
+            if (!verified) {
                 return unauthorized(exchange, "Invalid token signature");
             }
             claims = signedJWT.getJWTClaimsSet();
 
-            // Validate issuer
             if (!properties.issuer().equals(claims.getIssuer())) {
                 return unauthorized(exchange, "Invalid access token");
             }
-            // Validate audience
             if (!claims.getAudience().contains(properties.audience())) {
                 return unauthorized(exchange, "Invalid access token");
             }
-            // Validate expiry
             Date expiration = claims.getExpirationTime();
             if (expiration == null || expiration.before(new Date())) {
                 return unauthorized(exchange, "Access token expired");
@@ -152,7 +153,15 @@ public class JwtAuthenticationWebFilter implements WebFilter, Ordered {
 
     private Mono<Void> unauthorized(ServerWebExchange exchange, String reason) {
         log.debug("Rejected request to {}: {}", exchange.getRequest().getURI().getPath(), reason);
-        exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
-        return exchange.getResponse().setComplete();
+        org.springframework.http.server.reactive.ServerHttpResponse response = exchange.getResponse();
+        response.setStatusCode(HttpStatus.UNAUTHORIZED);
+        response.getHeaders().setContentType(org.springframework.http.MediaType.APPLICATION_PROBLEM_JSON);
+
+        String body = String.format(
+                "{\"type\":\"%sunauthorized\",\"title\":\"Unauthorized\",\"status\":401,\"detail\":\"%s\",\"instance\":\"%s\",\"timestamp\":\"%s\"}",
+                TYPE_BASE, reason, exchange.getRequest().getURI().getPath(), java.time.Instant.now()
+        );
+        org.springframework.core.io.buffer.DataBuffer buffer = response.bufferFactory().wrap(body.getBytes(StandardCharsets.UTF_8));
+        return response.writeWith(Mono.just(buffer));
     }
 }

@@ -46,13 +46,20 @@ server:
 # Must match identity-service's jwt.secret/issuer/audience exactly — validated independently
 # here so this service is never unauthenticated just because a caller bypassed api-gateway.
 jwt:
-  # No default — must be injected via env var in every environment. A hardcoded fallback here
-  # would let anyone who reads the source mint valid tokens if the env var is ever left unset.
   secret: ${JWT_SECRET}
+  # Set only during a secret rotation window — see docs/secrets_management_strategy.md.
+  previous-secret: ${JWT_PREVIOUS_SECRET:}
+  # Distinct secret for service-to-service tokens (see InternalServiceTokenProvider) — never
+  # accepted for user-issued tokens or vice versa.
+  internal-secret: ${JWT_INTERNAL_SECRET:}
   issuer: ${JWT_ISSUER:https://auth.aireak.com}
   audience: ${JWT_AUDIENCE:aireak-platform}
   excluded-paths:
-    - /actuator/**
+    - /actuator/health
+    - /actuator/info
+    - /v3/api-docs/**
+    - /swagger-ui/**
+    - /swagger-ui.html
 
 # Downstream service URLs
 services:
@@ -145,7 +152,7 @@ management:
         include: health,info,metrics,circuitbreakers,bulkheads,ratelimiters
   endpoint:
     health:
-      show-details: always
+      show-details: when-authorized
 
 logging:
   pattern:

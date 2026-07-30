@@ -32,7 +32,7 @@ class JwtAuthenticationWebFilterTest {
     private static final String AUDIENCE = "stadium-clients";
 
     private final JwtValidationProperties properties = new JwtValidationProperties(
-            SECRET, ISSUER, AUDIENCE,
+            SECRET, null, ISSUER, AUDIENCE,
             List.of("/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh",
                     "/api/v1/auth/logout", "/actuator/health", "/actuator/info"));
 
@@ -282,6 +282,38 @@ class JwtAuthenticationWebFilterTest {
         HttpHeaders forwardedHeaders = forwarded.get().getRequest().getHeaders();
         assertThat(forwardedHeaders.getFirst("X-User-Id")).isNull();
         assertThat(forwardedHeaders.getFirst("X-User-Email")).isNull();
+    }
+
+    @Test
+    void acceptsTokenSignedWithPreviousSecretDuringRotation() {
+        String previousSecret = "old-secret-key-at-least-32-bytes-long-for-hs256!!";
+        JwtValidationProperties rotationProperties = new JwtValidationProperties(
+                SECRET, previousSecret, ISSUER, AUDIENCE,
+                List.of("/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh",
+                        "/api/v1/auth/logout", "/actuator/health", "/actuator/info"));
+        JwtAuthenticationWebFilter rotationFilter = new JwtAuthenticationWebFilter(rotationProperties);
+
+        String accountId = UUID.randomUUID().toString();
+        String tokenSignedWithOldSecret = buildToken(new JWTClaimsSet.Builder()
+                .subject(accountId)
+                .issuer(ISSUER)
+                .audience(List.of(AUDIENCE))
+                .issueTime(Date.from(Instant.now()))
+                .expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                .build(), previousSecret);
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/bookings/123")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenSignedWithOldSecret)
+                        .build());
+
+        AtomicReference<ServerWebExchange> forwarded = new AtomicReference<>();
+        rotationFilter.filter(exchange, ex -> {
+            forwarded.set(ex);
+            return Mono.empty();
+        }).block(Duration.ofSeconds(5));
+
+        assertThat(forwarded.get()).isNotNull();
+        assertThat(forwarded.get().getRequest().getHeaders().getFirst("X-User-Id")).isEqualTo(accountId);
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────

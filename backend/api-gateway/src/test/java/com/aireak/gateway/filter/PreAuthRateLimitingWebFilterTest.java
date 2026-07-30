@@ -39,9 +39,11 @@ import static org.mockito.Mockito.when;
 class PreAuthRateLimitingWebFilterTest {
 
     private static final JwtValidationProperties JWT_PROPERTIES = new JwtValidationProperties(
-            "test-secret-key-at-least-32-bytes-long-for-hs256!!", "identity-service", "stadium-clients",
+            "test-secret-key-at-least-32-bytes-long-for-hs256!!", null, "identity-service", "stadium-clients",
             List.of("/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh",
                     "/api/v1/auth/logout", "/api/v1/matches/**", "/actuator/health", "/actuator/info"));
+    private static final com.aireak.gateway.config.GatewayProperties GATEWAY_PROPERTIES = new com.aireak.gateway.config.GatewayProperties(
+            List.of("127.0.0.1", "10.0.0.0/8"));
 
     private Map<RateLimitPolicy, RedisRateLimiter> limiters;
     private RedisRateLimiter preAuthLimiter;
@@ -56,7 +58,7 @@ class PreAuthRateLimitingWebFilterTest {
         }
         preAuthLimiter = limiters.get(RateLimitPolicy.PRE_AUTH_IP);
         meterRegistry = new SimpleMeterRegistry();
-        filter = new PreAuthRateLimitingWebFilter(limiters, JWT_PROPERTIES, meterRegistry);
+        filter = new PreAuthRateLimitingWebFilter(limiters, JWT_PROPERTIES, GATEWAY_PROPERTIES, meterRegistry);
     }
 
     @Test

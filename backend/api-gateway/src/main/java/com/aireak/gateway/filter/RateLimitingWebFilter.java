@@ -87,14 +87,17 @@ public class RateLimitingWebFilter implements WebFilter, Ordered {
 
     private final Map<RateLimitPolicy, RedisRateLimiter> limiters;
     private final JwtValidationProperties jwtProperties;
+    private final com.aireak.gateway.config.GatewayProperties gatewayProperties;
     private final MeterRegistry meterRegistry;
     private final JWSVerifier verifier;
 
     public RateLimitingWebFilter(Map<RateLimitPolicy, RedisRateLimiter> limiters,
                                   JwtValidationProperties jwtProperties,
+                                  com.aireak.gateway.config.GatewayProperties gatewayProperties,
                                   MeterRegistry meterRegistry) {
         this.limiters = limiters;
         this.jwtProperties = jwtProperties;
+        this.gatewayProperties = gatewayProperties;
         this.meterRegistry = meterRegistry;
         try {
             this.verifier = new MACVerifier(
@@ -169,12 +172,8 @@ public class RateLimitingWebFilter implements WebFilter, Ordered {
         };
     }
 
-    private static String clientIp(ServerWebExchange exchange) {
-        InetSocketAddress remoteAddress = exchange.getRequest().getRemoteAddress();
-        if (remoteAddress == null || remoteAddress.getAddress() == null) {
-            return "unknown";
-        }
-        return remoteAddress.getAddress().getHostAddress();
+    private String clientIp(ServerWebExchange exchange) {
+        return com.aireak.gateway.util.TrustedProxyUtils.extractClientIp(exchange, gatewayProperties.trustedProxies());
     }
 
     /**

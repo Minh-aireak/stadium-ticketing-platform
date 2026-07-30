@@ -62,6 +62,10 @@ server:
 # injected via env var in every deployment, never hard-coded.
 jwt:
   secret: ${JWT_SECRET}
+  # Set only during a secret rotation window — see docs/secrets_management_strategy.md. Accepted
+  # as a fallback signature alongside `secret` so tokens minted before the rotation stay valid
+  # until they expire, without requiring every service to restart at the exact same instant.
+  previous-secret: ${JWT_PREVIOUS_SECRET:}
   issuer: ${JWT_ISSUER}
   audience: ${JWT_AUDIENCE}
   public-paths:
@@ -72,6 +76,17 @@ jwt:
     - /api/v1/matches/**
     - /actuator/health
     - /actuator/info
+    - /v3/api-docs/**
+    - /swagger-ui/**
+    - /swagger-ui.html
+
+# Direct socket addresses trusted to set X-Forwarded-For/Forwarded (the load balancer/ingress in
+# front of this gateway) — anything else is an untrusted client and those headers are ignored
+# outright, so a caller can never spoof its own IP to dodge rate limiting. Defaults (see
+# GatewayProperties) cover docker-compose/local; override per environment in production (e.g. the
+# ALB's subnet CIDRs — see docs/production_deployment_topology.md).
+gateway:
+  trusted-proxies: ${GATEWAY_TRUSTED_PROXIES:127.0.0.1,0:0:0:0:0:0:0:1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
 
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS}

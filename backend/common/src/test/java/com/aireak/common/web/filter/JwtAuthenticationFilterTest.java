@@ -32,7 +32,7 @@ class JwtAuthenticationFilterTest {
     private static final String AUDIENCE = "stadium-clients";
 
     private final JwtAuthProperties properties = new JwtAuthProperties(
-            SECRET, ISSUER, AUDIENCE, List.of("/actuator/**"));
+            SECRET, null, null, ISSUER, AUDIENCE, List.of("/actuator/health", "/actuator/info"));
 
     private final JwtAuthenticationFilter filter = new JwtAuthenticationFilter(properties);
 
@@ -227,7 +227,7 @@ class JwtAuthenticationFilterTest {
     @Test
     void methodScopedExclusionSkipsValidationOnlyForThatMethod() throws Exception {
         JwtAuthProperties scoped = new JwtAuthProperties(
-                SECRET, ISSUER, AUDIENCE, List.of("GET:/api/v1/matches"));
+                SECRET, null, null, ISSUER, AUDIENCE, List.of("GET:/api/v1/matches"));
         JwtAuthenticationFilter scopedFilter = new JwtAuthenticationFilter(scoped);
 
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/matches");
@@ -243,7 +243,7 @@ class JwtAuthenticationFilterTest {
     @Test
     void methodScopedExclusionStillProtectsOtherMethodsOnTheSamePath() throws Exception {
         JwtAuthProperties scoped = new JwtAuthProperties(
-                SECRET, ISSUER, AUDIENCE, List.of("GET:/api/v1/matches"));
+                SECRET, null, null, ISSUER, AUDIENCE, List.of("GET:/api/v1/matches"));
         JwtAuthenticationFilter scopedFilter = new JwtAuthenticationFilter(scoped);
 
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/matches");
@@ -275,6 +275,34 @@ class JwtAuthenticationFilterTest {
         } catch (JOSEException e) {
             throw new IllegalStateException("Failed to sign test JWT", e);
         }
+    }
+
+    @Test
+    void acceptsTokenSignedWithPreviousSecretDuringRotation() throws Exception {
+        String previousSecret = "old-secret-key-at-least-32-bytes-long-for-hs256!!";
+        JwtAuthProperties rotationProperties = new JwtAuthProperties(
+                SECRET, previousSecret, null, ISSUER, AUDIENCE, List.of());
+        JwtAuthenticationFilter rotationFilter = new JwtAuthenticationFilter(rotationProperties);
+
+        String userId = UUID.randomUUID().toString();
+        String tokenSignedWithOldSecret = buildToken(new JWTClaimsSet.Builder()
+                .subject(userId)
+                .issuer(ISSUER)
+                .audience(List.of(AUDIENCE))
+                .issueTime(Date.from(Instant.now()))
+                .expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                .build(), previousSecret);
+
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/protected");
+        request.addHeader("Authorization", "Bearer " + tokenSignedWithOldSecret);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        rotationFilter.doFilter(request, response, (req, res) -> {
+            assertThat(AuthenticatedUserContext.get()).isPresent();
+            assertThat(AuthenticatedUserContext.get().get().userId()).isEqualTo(userId);
+        });
+
+        assertThat(response.getStatus()).isEqualTo(200);
     }
 
     private FilterChain neverInvokedChain() {

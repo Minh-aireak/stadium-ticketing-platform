@@ -52,13 +52,16 @@ public class PreAuthRateLimitingWebFilter implements WebFilter, Ordered {
 
     private final RedisRateLimiter limiter;
     private final JwtValidationProperties jwtProperties;
+    private final com.aireak.gateway.config.GatewayProperties gatewayProperties;
     private final MeterRegistry meterRegistry;
 
     public PreAuthRateLimitingWebFilter(Map<RateLimitPolicy, RedisRateLimiter> limiters,
                                          JwtValidationProperties jwtProperties,
+                                         com.aireak.gateway.config.GatewayProperties gatewayProperties,
                                          MeterRegistry meterRegistry) {
         this.limiter = limiters.get(RateLimitPolicy.PRE_AUTH_IP);
         this.jwtProperties = jwtProperties;
+        this.gatewayProperties = gatewayProperties;
         this.meterRegistry = meterRegistry;
     }
 
@@ -98,12 +101,8 @@ public class PreAuthRateLimitingWebFilter implements WebFilter, Ordered {
         return jwtProperties.publicPaths().stream().anyMatch(pattern -> PATH_MATCHER.match(pattern, path));
     }
 
-    private static String clientIp(ServerWebExchange exchange) {
-        InetSocketAddress remoteAddress = exchange.getRequest().getRemoteAddress();
-        if (remoteAddress == null || remoteAddress.getAddress() == null) {
-            return "unknown";
-        }
-        return remoteAddress.getAddress().getHostAddress();
+    private String clientIp(ServerWebExchange exchange) {
+        return com.aireak.gateway.util.TrustedProxyUtils.extractClientIp(exchange, gatewayProperties.trustedProxies());
     }
 
     private static Mono<Void> tooManyRequests(ServerWebExchange exchange) {
