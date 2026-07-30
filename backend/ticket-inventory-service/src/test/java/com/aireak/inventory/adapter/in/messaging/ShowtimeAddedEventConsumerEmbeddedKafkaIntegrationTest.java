@@ -57,6 +57,7 @@ import static org.mockito.Mockito.verify;
 @SpringBootTest(classes = {
         KafkaConfig.class,
         ShowtimeAddedEventConsumer.class,
+        ShowtimeAddedDeadLetterConsumer.class,
         ShowtimeAddedEventConsumerEmbeddedKafkaIntegrationTest.EnableKafkaListenersConfig.class
 })
 @EmbeddedKafka(

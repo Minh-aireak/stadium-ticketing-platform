@@ -92,4 +92,32 @@ public class KafkaConfig {
         factory.setCommonErrorHandler(kafkaErrorHandler);
         return factory;
     }
+
+    /**
+     * Plain String/String factory for {@code ShowtimeAddedDeadLetterConsumer} — a record can land
+     * on the {@code -dlt} topic either because the listener threw (payload deserialized fine as an
+     * {@link EventEnvelope}) or because deserialization itself failed (payload is whatever raw
+     * bytes came in, not valid EventEnvelope JSON). Reusing {@link #consumerFactory()}'s
+     * EventEnvelope deserializer would throw on the second case and, with no error handler
+     * attached here, kill the DLT listener container outright — a plain String avoids ever
+     * failing to deserialize the alert itself.
+     */
+    @Bean
+    public ConsumerFactory<String, String> deadLetterConsumerFactory() {
+        Map<String, Object> props = new HashMap<>();
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        return new DefaultKafkaConsumerFactory<>(props, new StringDeserializer(), new StringDeserializer());
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, String> deadLetterKafkaListenerContainerFactory(
+            ConsumerFactory<String, String> deadLetterConsumerFactory) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(deadLetterConsumerFactory);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        return factory;
+    }
 }
