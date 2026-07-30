@@ -10,7 +10,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * Kafka consumer adapter for identity-related domain events.
- * Handles AccountRegisteredEvent to send welcome/verification emails.
+ * Handles AccountRegisteredEvent (welcome/verification email) and AccountActivatedEvent
+ * (activation confirmation email).
  */
 @Slf4j
 @Component
@@ -20,7 +21,7 @@ public class AccountEventConsumer {
     private final SendNotificationUseCase sendNotificationUseCase;
 
     @KafkaListener(
-            topics = KafkaTopics.ACCOUNT_REGISTERED,
+            topics = {KafkaTopics.ACCOUNT_REGISTERED, KafkaTopics.ACCOUNT_ACTIVATED},
             groupId = "notification-service-identity",
             containerFactory = "kafkaListenerContainerFactory"
     )

@@ -3,6 +3,7 @@ package com.aireak.notification.application.service;
 import com.aireak.booking.domain.event.BookingCancelledEvent;
 import com.aireak.booking.domain.event.BookingConfirmedEvent;
 import com.aireak.common.event.EventEnvelope;
+import com.aireak.identity.domain.event.AccountActivatedEvent;
 import com.aireak.identity.domain.event.AccountRegisteredEvent;
 import com.aireak.notification.application.port.out.EmailSenderPort;
 import com.aireak.notification.application.port.out.NotificationRepository;
@@ -21,6 +22,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
+import static com.aireak.common.kafka.KafkaTopics.ACCOUNT_ACTIVATED;
 import static com.aireak.common.kafka.KafkaTopics.ACCOUNT_REGISTERED;
 import static com.aireak.common.kafka.KafkaTopics.BOOKING_CANCELLED;
 import static com.aireak.common.kafka.KafkaTopics.BOOKING_CONFIRMED;
@@ -126,6 +128,28 @@ class NotificationDispatchServiceTest {
         assertThat(body.getValue()).doesNotContain("Failed to render");
         assertThat(body.getValue())
                 .contains("http://localhost:8081/api/v1/auth/verify-email?token=test-verification-token");
+
+        ArgumentCaptor<Notification> notification = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).save(notification.capture());
+        assertThat(notification.getValue().getRecipientId()).isEqualTo("acc-1");
+    }
+
+    @Test
+    void send_accountActivatedAsProducedInProduction_rendersRealTemplateAndEmailsTheAccountAddress() {
+        AccountActivatedEvent activated = new AccountActivatedEvent(
+                new AccountActivatedEvent.AccountId("acc-1"),
+                new AccountActivatedEvent.Email("new-user@example.com"),
+                Instant.now());
+        EventEnvelope<AccountActivatedEvent> envelope =
+                EventEnvelope.of(ACCOUNT_ACTIVATED, activated, null);
+
+        service.send(envelope.getEventId(), envelope.getEventType(), envelope.getPayload());
+
+        ArgumentCaptor<String> to = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(emailSenderPort).send(to.capture(), anyString(), body.capture());
+        assertThat(to.getValue()).isEqualTo("new-user@example.com");
+        assertThat(body.getValue()).doesNotContain("Failed to render").contains("acc-1");
 
         ArgumentCaptor<Notification> notification = ArgumentCaptor.forClass(Notification.class);
         verify(notificationRepository).save(notification.capture());

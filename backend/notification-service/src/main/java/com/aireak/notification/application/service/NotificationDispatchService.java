@@ -2,6 +2,7 @@ package com.aireak.notification.application.service;
 
 import com.aireak.booking.domain.event.BookingCancelledEvent;
 import com.aireak.booking.domain.event.BookingConfirmedEvent;
+import com.aireak.identity.domain.event.AccountActivatedEvent;
 import com.aireak.identity.domain.event.AccountRegisteredEvent;
 import com.aireak.notification.application.port.in.SendNotificationUseCase;
 import com.aireak.notification.application.port.out.EmailSenderPort;
@@ -65,7 +66,11 @@ public class NotificationDispatchService implements SendNotificationUseCase {
 
             "identity.account.registered",
             new NotificationTemplate("identity.account.registered", NotificationChannel.EMAIL,
-                    "Welcome! Please verify your email", "account-welcome")
+                    "Welcome! Please verify your email", "account-welcome"),
+
+            "identity.account.activated",
+            new NotificationTemplate("identity.account.activated", NotificationChannel.EMAIL,
+                    "Your account is now active", "account-activated")
     );
 
     @Override
@@ -164,6 +169,10 @@ public class NotificationDispatchService implements SendNotificationUseCase {
             model.put("verificationUrl", identityServiceBaseUrl
                     + "/api/v1/auth/verify-email?token=" + event.verificationToken());
             model.put("occurredAt", event.occurredAt());
+        } else if (payload instanceof AccountActivatedEvent event) {
+            model.put("accountId", event.accountId().value());
+            model.put("email", event.email().value());
+            model.put("occurredAt", event.occurredAt());
         } else if (payload instanceof Map<?, ?> map) {
             // Fallback for map type payloads
             map.forEach((k, v) -> model.put(k.toString(), v));
@@ -173,6 +182,8 @@ public class NotificationDispatchService implements SendNotificationUseCase {
 
     private String extractEmail(Object payload) {
         if (payload instanceof AccountRegisteredEvent event) {
+            return event.email().value();
+        } else if (payload instanceof AccountActivatedEvent event) {
             return event.email().value();
         } else if (payload instanceof BookingConfirmedEvent event) {
             return event.customerEmail();
@@ -191,6 +202,8 @@ public class NotificationDispatchService implements SendNotificationUseCase {
 
     private String extractRecipientId(Object payload) {
         if (payload instanceof AccountRegisteredEvent event) {
+            return event.accountId().value();
+        } else if (payload instanceof AccountActivatedEvent event) {
             return event.accountId().value();
         } else if (payload instanceof BookingConfirmedEvent event) {
             return event.customerId();

@@ -3,6 +3,7 @@ package com.aireak.notification.adapter.in.messaging;
 import com.aireak.booking.domain.event.BookingCancelledEvent;
 import com.aireak.booking.domain.event.BookingConfirmedEvent;
 import com.aireak.common.event.EventEnvelope;
+import com.aireak.identity.domain.event.AccountActivatedEvent;
 import com.aireak.identity.domain.event.AccountRegisteredEvent;
 import com.aireak.notification.application.port.in.SendNotificationUseCase;
 import com.aireak.notification.config.KafkaConfig;
@@ -34,6 +35,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
+import static com.aireak.common.kafka.KafkaTopics.ACCOUNT_ACTIVATED;
 import static com.aireak.common.kafka.KafkaTopics.ACCOUNT_REGISTERED;
 import static com.aireak.common.kafka.KafkaTopics.BOOKING_CANCELLED;
 import static com.aireak.common.kafka.KafkaTopics.BOOKING_CONFIRMED;
@@ -75,8 +77,9 @@ import static org.mockito.Mockito.verify;
 @EmbeddedKafka(
         partitions = 1,
         topics = {
-                BOOKING_CONFIRMED, BOOKING_CANCELLED, ACCOUNT_REGISTERED,
-                BOOKING_CONFIRMED + "-dlt", BOOKING_CANCELLED + "-dlt", ACCOUNT_REGISTERED + "-dlt"
+                BOOKING_CONFIRMED, BOOKING_CANCELLED, ACCOUNT_REGISTERED, ACCOUNT_ACTIVATED,
+                BOOKING_CONFIRMED + "-dlt", BOOKING_CANCELLED + "-dlt", ACCOUNT_REGISTERED + "-dlt",
+                ACCOUNT_ACTIVATED + "-dlt"
         },
         bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
@@ -150,6 +153,18 @@ class NotificationEventConsumersEmbeddedKafkaIntegrationTest {
 
         verify(sendNotificationUseCase, timeout(10_000))
                 .send(eq(eventId), eq(ACCOUNT_REGISTERED), any(AccountRegisteredEvent.class));
+    }
+
+    @Test
+    void consumesRealAccountActivatedRecord_andDispatchesWithTheDeserializedPayload() {
+        AccountActivatedEvent activated = new AccountActivatedEvent(
+                new AccountActivatedEvent.AccountId("acc-1"),
+                new AccountActivatedEvent.Email("new-user@example.com"),
+                Instant.now());
+        String eventId = publishAsDebeziumWouldForwardTheOutboxRow(ACCOUNT_ACTIVATED, activated);
+
+        verify(sendNotificationUseCase, timeout(10_000))
+                .send(eq(eventId), eq(ACCOUNT_ACTIVATED), any(AccountActivatedEvent.class));
     }
 
     @Test
