@@ -29,7 +29,7 @@
         <redisson.version>4.6.1</redisson.version>
         <!-- Testcontainers BOM -->
         <testcontainers-bom.version>1.21.0</testcontainers-bom.version>
-        <!-- Elasticsearch Java client 9.2.0 — first version with Jackson3JsonpMapper -->
+        <!-- Elasticsearch Java client 9.2.0 — compatible with Elasticsearch 9.2.0 server & Jackson 3 -->
         <elasticsearch-java.version>9.2.0</elasticsearch-java.version>
 
         <!-- Plugins -->
@@ -117,8 +117,7 @@
                 <version>${resilience4j.version}</version>
             </dependency>
 
-            <!-- Elasticsearch Java client 9.2.0 — standalone, not through Spring Data auto-config.
-                 9.2.0 is the first version with Jackson3JsonpMapper (Jackson 3 / tools.jackson support). -->
+            <!-- Elasticsearch Java client 9.2.0 — standalone read model adapter with Jackson 3. -->
             <dependency>
                 <groupId>co.elastic.clients</groupId>
                 <artifactId>elasticsearch-java</artifactId>
@@ -126,8 +125,8 @@
             </dependency>
 
             <!-- Low-level REST client required by RestClientTransport (used by ElasticsearchClientConfig).
-                 In elasticsearch-java 9.x the rest client is a separate artifact and must be declared
-                 explicitly — it is no longer bundled as a transitive compile dependency. -->
+                 In 8.x this is a transitive dependency of elasticsearch-java, but declared explicitly
+                 to ensure the version is locked to the same release. -->
             <dependency>
                 <groupId>org.elasticsearch.client</groupId>
                 <artifactId>elasticsearch-rest-client</artifactId>

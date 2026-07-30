@@ -72,22 +72,42 @@ public class Payment {
         return p;
     }
 
+    public static final String GATEWAY_AMBIGUOUS_PREFIX = "GATEWAY_AMBIGUOUS: ";
+
     // ----------------------------------------------------------------
     // Domain behavior
     // ----------------------------------------------------------------
 
     public void markSucceeded(String gatewayTransactionId) {
-        requireStatus(PaymentStatus.INITIATED, "markSucceeded");
+        if (status != PaymentStatus.INITIATED && !isAmbiguousFailure()) {
+            throw new InvalidPaymentStatusException(
+                    "Operation 'markSucceeded' requires INITIATED or FAILED (ambiguous), current: " + status);
+        }
         this.status = PaymentStatus.SUCCEEDED;
         this.gatewayTransactionId = gatewayTransactionId;
         domainEvents.add(new PaymentSucceededEvent(paymentId, bookingId, amount, currency, gatewayTransactionId));
     }
 
     public void markFailed(String reason) {
+        markFailed(reason, false);
+    }
+
+    public void markFailedAmbiguous(String reason) {
+        markFailed(reason, true);
+    }
+
+    public void markFailed(String reason, boolean ambiguous) {
         requireStatus(PaymentStatus.INITIATED, "markFailed");
         this.status = PaymentStatus.FAILED;
-        this.failureReason = reason;
-        domainEvents.add(new PaymentFailedEvent(paymentId, bookingId, reason));
+        String fullReason = ambiguous && (reason == null || !reason.startsWith(GATEWAY_AMBIGUOUS_PREFIX))
+                ? GATEWAY_AMBIGUOUS_PREFIX + (reason != null ? reason : "")
+                : reason;
+        this.failureReason = fullReason;
+        domainEvents.add(new PaymentFailedEvent(paymentId, bookingId, fullReason));
+    }
+
+    public boolean isAmbiguousFailure() {
+        return status == PaymentStatus.FAILED && failureReason != null && failureReason.startsWith(GATEWAY_AMBIGUOUS_PREFIX);
     }
 
     /**

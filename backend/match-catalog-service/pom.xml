@@ -37,14 +37,15 @@
             <scope>runtime</scope>
         </dependency>
         <!-- Elasticsearch Java client for search read model.
-             elasticsearch-java 9.2.0 (managed by root pom) is the first version with
-             Jackson3JsonpMapper — required for Jackson 3 / tools.jackson compatibility. -->
+             elasticsearch-java 8.18.0 (managed by root pom) — pinned to 8.x to match the
+             Elasticsearch server 8.18.3. Uses JacksonJsonpMapper (Jackson 2) with a dedicated
+             ObjectMapper, isolated from Spring Boot 4.1's Jackson 3 auto-configuration. -->
         <dependency>
             <groupId>co.elastic.clients</groupId>
             <artifactId>elasticsearch-java</artifactId>
         </dependency>
         <!-- Low-level REST client required by RestClientTransport (used in ElasticsearchClientConfig).
-             In elasticsearch-java 9.x this is a separate artifact that must be declared explicitly. -->
+             In 8.x this is a transitive dependency, but declared explicitly to lock the version. -->
         <dependency>
             <groupId>org.elasticsearch.client</groupId>
             <artifactId>elasticsearch-rest-client</artifactId>

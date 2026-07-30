@@ -1,5 +1,6 @@
 package com.aireak.payment.application.service;
 
+import com.aireak.payment.adapter.out.gateway.PaymentDeclinedException;
 import com.aireak.payment.application.port.in.GetPaymentUseCase;
 import com.aireak.payment.application.port.in.InitiatePaymentUseCase;
 import com.aireak.payment.application.port.in.RetryPaymentUseCase;
@@ -26,7 +27,7 @@ import java.util.Optional;
  *   1. Create Payment aggregate (INITIATED) + persist — commits immediately (PaymentSagaSteps)
  *   2. Call payment gateway (sync — @CircuitBreaker/@Retry/@Bulkhead on adapter), NO local transaction held
  *   3a. Success → markSucceeded + persist + publish PaymentSucceededEvent — commits immediately
- *   3b. Failure → markFailed + persist + publish PaymentFailedEvent — commits immediately
+ *   3b. Failure → markFailed/markFailedAmbiguous + persist + publish PaymentFailedEvent — commits immediately
  * </pre>
  *
  * <p>Not {@code @Transactional} at this level: each persist step is a short, independent
@@ -90,7 +91,11 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
             gatewayTxId = paymentGatewayPort.charge(bookingId, command.amount(), command.currency());
         } catch (Exception e) {
             log.error("Payment charge failed: id={}, reason={}", paymentId, e.getMessage());
-            sagaSteps.markFailed(paymentId, e.getMessage());
+            if (isDeclinedException(e)) {
+                sagaSteps.markFailed(paymentId, e.getMessage());
+            } else {
+                sagaSteps.markFailedAmbiguous(paymentId, e.getMessage());
+            }
             return paymentId;
         }
 
@@ -178,12 +183,27 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
             gatewayTxId = paymentGatewayPort.charge(payment.getBookingId(), payment.getAmount(), payment.getCurrency());
         } catch (Exception e) {
             log.error("Payment retry charge failed: id={}, reason={}", paymentId, e.getMessage());
-            sagaSteps.markFailed(paymentId, e.getMessage());
+            if (isDeclinedException(e)) {
+                sagaSteps.markFailed(paymentId, e.getMessage());
+            } else {
+                sagaSteps.markFailedAmbiguous(paymentId, e.getMessage());
+            }
             return Optional.of(paymentId);
         }
 
         persistSucceededOutcome(paymentId, payment.getBookingId(), gatewayTxId, payment.getAmount(), payment.getCurrency());
         return Optional.of(paymentId);
+    }
+
+    private boolean isDeclinedException(Throwable t) {
+        Throwable current = t;
+        while (current != null) {
+            if (current instanceof PaymentDeclinedException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private String existingPaymentIdOrThrow(String bookingId) {

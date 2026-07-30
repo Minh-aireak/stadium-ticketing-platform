@@ -97,6 +97,27 @@ class PaymentSagaStepsTest {
         ArgumentCaptor<Payment> saved = ArgumentCaptor.forClass(Payment.class);
         verify(paymentRepository).save(saved.capture());
         assertThat(saved.getValue().getStatus()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(saved.getValue().isAmbiguousFailure()).isFalse();
+
+        ArgumentCaptor<List<Object>> published = ArgumentCaptor.forClass(List.class);
+        verify(eventPublisher).publishAll(published.capture());
+        assertThat(published.getValue().get(0)).isInstanceOf(PaymentFailedEvent.class);
+    }
+
+    @Test
+    void markFailedAmbiguousSavesAndPublishesAmbiguousPaymentFailedEvent() {
+        newSagaSteps();
+        Payment existing = Payment.reconstitute("payment-1", "booking-1", new BigDecimal("100.00"),
+                "USD", PaymentStatus.INITIATED, null, null, Instant.now(), 0L);
+        when(paymentRepository.findById("payment-1")).thenReturn(Optional.of(existing));
+
+        sagaSteps.markFailedAmbiguous("payment-1", "gateway connection timeout");
+
+        ArgumentCaptor<Payment> saved = ArgumentCaptor.forClass(Payment.class);
+        verify(paymentRepository).save(saved.capture());
+        assertThat(saved.getValue().getStatus()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(saved.getValue().isAmbiguousFailure()).isTrue();
+        assertThat(saved.getValue().getFailureReason()).startsWith(Payment.GATEWAY_AMBIGUOUS_PREFIX);
 
         ArgumentCaptor<List<Object>> published = ArgumentCaptor.forClass(List.class);
         verify(eventPublisher).publishAll(published.capture());

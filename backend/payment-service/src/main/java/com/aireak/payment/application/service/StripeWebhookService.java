@@ -57,13 +57,19 @@ public class StripeWebhookService implements HandleStripeWebhookEventUseCase {
             return;
         }
         String paymentId = payment.get().getPaymentId();
+        boolean wasAmbiguousFailure = payment.get().isAmbiguousFailure();
         try {
             switch (outcome) {
                 case SUCCEEDED -> sagaSteps.markSucceeded(paymentId, command.paymentIntentId());
                 case FAILED -> sagaSteps.markFailed(paymentId, command.failureMessage());
             }
-            log.info("Payment reconciled via Stripe webhook: paymentId={}, bookingId={}, outcome={}",
-                    paymentId, command.bookingId(), outcome);
+            if (wasAmbiguousFailure && outcome == Reconciliation.SUCCEEDED) {
+                log.info("CORRECTION: Overriding payment status from FAILED (gateway ambiguous) to SUCCEEDED via Stripe webhook: paymentId={}, bookingId={}, gatewayTxId={}",
+                        paymentId, command.bookingId(), command.paymentIntentId());
+            } else {
+                log.info("Payment reconciled via Stripe webhook: paymentId={}, bookingId={}, outcome={}",
+                        paymentId, command.bookingId(), outcome);
+            }
         } catch (InvalidPaymentStatusException e) {
             log.info("Payment already in a terminal state, Stripe webhook is a no-op: paymentId={}, outcome={}",
                     paymentId, outcome);

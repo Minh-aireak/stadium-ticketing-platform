@@ -182,7 +182,7 @@ class PaymentServiceTest {
     }
 
     @Test
-    void executeMarksFailedInsteadOfPropagatingWhenGatewayThrows() {
+    void executeMarksFailedAmbiguousWhenGatewayThrowsGenericException() {
         newService();
         when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(true);
         when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.amount()), eq(COMMAND.currency())))
@@ -190,12 +190,30 @@ class PaymentServiceTest {
         when(paymentGatewayPort.charge(any(), any(), any()))
                 .thenThrow(new RuntimeException("gateway unreachable"));
 
-        // The gateway failure must NOT propagate out of execute() — it's translated into a
-        // FAILED payment so callers get a paymentId to poll, not an exception.
+        // Generic exception (network timeout/5xx) must call markFailedAmbiguous so webhook can correct it later
+        String paymentId = service.execute(COMMAND);
+
+        assertThat(paymentId).isEqualTo("payment-1");
+        verify(sagaSteps).markFailedAmbiguous(eq("payment-1"), anyString());
+        verify(sagaSteps, never()).markFailed(any(), any());
+        verify(sagaSteps, never()).markSucceeded(any(), any());
+    }
+
+    @Test
+    void executeMarksFailedWhenGatewayThrowsPaymentDeclinedException() {
+        newService();
+        when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(true);
+        when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.amount()), eq(COMMAND.currency())))
+                .thenReturn(new PaymentSagaSteps.InitiateOutcome.Created("payment-1"));
+        when(paymentGatewayPort.charge(any(), any(), any()))
+                .thenThrow(new com.aireak.payment.adapter.out.gateway.PaymentDeclinedException("Card declined"));
+
+        // PaymentDeclinedException must call standard markFailed (non-ambiguous decline)
         String paymentId = service.execute(COMMAND);
 
         assertThat(paymentId).isEqualTo("payment-1");
         verify(sagaSteps).markFailed(eq("payment-1"), anyString());
+        verify(sagaSteps, never()).markFailedAmbiguous(any(), any());
         verify(sagaSteps, never()).markSucceeded(any(), any());
     }
 
@@ -226,10 +244,11 @@ class PaymentServiceTest {
         assertThat(result).contains("payment-1");
         verify(sagaSteps).markSucceeded("payment-1", "gw-tx-2");
         verify(sagaSteps, never()).markFailed(any(), any());
+        verify(sagaSteps, never()).markFailedAmbiguous(any(), any());
     }
 
     @Test
-    void retryMarksFailedInsteadOfPropagatingWhenGatewayThrows() {
+    void retryMarksFailedAmbiguousInsteadOfPropagatingWhenGatewayThrows() {
         newService();
         Payment reopened = Payment.reconstitute("payment-1", "booking-1", new BigDecimal("100.00"), "USD",
                 PaymentStatus.INITIATED, null, null, Instant.now(), 1L);
@@ -241,7 +260,7 @@ class PaymentServiceTest {
         Optional<String> result = service.retry("payment-1");
 
         assertThat(result).contains("payment-1");
-        verify(sagaSteps).markFailed(eq("payment-1"), anyString());
+        verify(sagaSteps).markFailedAmbiguous(eq("payment-1"), anyString());
         verify(sagaSteps, never()).markSucceeded(any(), any());
     }
 

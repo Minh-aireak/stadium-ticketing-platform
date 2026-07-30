@@ -57,12 +57,34 @@ class PaymentTest {
     }
 
     @Test
-    void markSucceededRejectsWhenAlreadyFailed() {
+    void markSucceededRejectsWhenAlreadyFailedWithDefiniteDecline() {
         Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
-        payment.markFailed("gateway timeout");
+        payment.markFailed("card declined"); // non-ambiguous decline
 
+        assertThat(payment.isAmbiguousFailure()).isFalse();
         assertThatThrownBy(() -> payment.markSucceeded("gw-tx-1"))
                 .isInstanceOf(InvalidPaymentStatusException.class);
+    }
+
+    @Test
+    void markSucceededAllowsTransitionFromGatewayAmbiguousFailedState() {
+        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+        payment.markFailedAmbiguous("connection reset by peer");
+
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(payment.isAmbiguousFailure()).isTrue();
+        assertThat(payment.getFailureReason()).startsWith(Payment.GATEWAY_AMBIGUOUS_PREFIX);
+
+        payment.pullDomainEvents(); // clear previous events
+        payment.markSucceeded("gw-tx-webhook");
+
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.SUCCEEDED);
+        assertThat(payment.getGatewayTransactionId()).isEqualTo("gw-tx-webhook");
+
+        List<Object> events = payment.pullDomainEvents();
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0)).isInstanceOf(PaymentSucceededEvent.class);
+        assertThat(((PaymentSucceededEvent) events.get(0)).gatewayTransactionId()).isEqualTo("gw-tx-webhook");
     }
 
     @Test

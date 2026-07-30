@@ -14,13 +14,8 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * Elasticsearch client configuration using elasticsearch-java 9.2.0.
  *
- * <p>Uses {@link Jackson3JsonpMapper} (new in elasticsearch-java 9.2.0) instead of the legacy
- * {@code JacksonJsonpMapper}, because {@code JacksonJsonpMapper} depends on
- * {@code com.fasterxml.jackson} (Jackson 2) which conflicts with Spring Boot 4.1's
- * Jackson 3 autoconfiguration.
- *
- * <p>Jackson 3 ({@code tools.jackson}) has JavaTimeModule built-in — no manual registration
- * needed for {@code Instant} / {@code LocalDate} fields in {@code MatchDocument}.
+ * <p>Uses {@link Jackson3JsonpMapper} aligned with Spring Boot 4.1's Jackson 3
+ * ({@code tools.jackson.*}) ecosystem.
  */
 @Configuration
 public class ElasticsearchClientConfig {
@@ -35,9 +30,7 @@ public class ElasticsearchClientConfig {
 
     @Bean
     public ElasticsearchTransport elasticsearchTransport(RestClient restClient) {
-        // Jackson3JsonpMapper uses tools.jackson.databind.json.JsonMapper under the hood.
-        // JavaTimeModule is built-in to Jackson 3 — Instant fields serialize correctly
-        // without explicit registration.
+        // Jackson 3 JsonMapper — JavaTimeModule is built-in to Jackson 3
         JsonMapper jsonMapper = JsonMapper.builder()
                 .findAndAddModules(ElasticsearchClientConfig.class.getClassLoader())
                 .build();
