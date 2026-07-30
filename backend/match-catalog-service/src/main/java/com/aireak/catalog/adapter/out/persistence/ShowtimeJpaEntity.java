@@ -10,7 +10,9 @@ import java.time.Instant;
 @Setter
 @Entity
 @Table(name = "showtimes",
-        indexes = @Index(name = "idx_showtimes_match", columnList = "match_id"))
+        indexes = @Index(name = "idx_showtimes_match", columnList = "match_id"),
+        uniqueConstraints = @UniqueConstraint(name = "uk_showtimes_venue_time",
+                columnNames = {"venue_id", "start_time"}))
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
