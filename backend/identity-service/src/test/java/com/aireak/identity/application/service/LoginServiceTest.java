@@ -8,7 +8,7 @@ import com.aireak.identity.application.port.out.RefreshSessionStorePort;
 import com.aireak.identity.application.port.out.TokenGeneratorPort;
 import com.aireak.identity.application.port.out.dto.IssuedRefreshToken;
 import com.aireak.identity.config.JwtProperties;
-import com.aireak.identity.domain.exception.InvalidAccountStatusException;
+import com.aireak.identity.domain.exception.InvalidCredentialsException;
 import com.aireak.identity.domain.model.Account;
 import com.aireak.identity.domain.model.AccountStatus;
 import com.aireak.identity.domain.model.Email;
@@ -91,7 +91,7 @@ class LoginServiceTest {
         when(passwordHashPort.matches(any(RawPassword.class), eq(STORED_HASH))).thenReturn(false);
 
         assertThatThrownBy(() -> service.execute(new LoginCommand(EMAIL.value(), "WrongPass1")))
-                .isInstanceOf(InvalidAccountStatusException.class)
+                .isInstanceOf(InvalidCredentialsException.class)
                 .hasMessage("Invalid credentials");
         verify(tokenGeneratorPort, never()).generateToken(any());
         verify(refreshSessionStorePort, never()).createSession(any());
@@ -102,7 +102,7 @@ class LoginServiceTest {
         when(accountRepository.findByEmail(EMAIL)).thenReturn(java.util.Optional.empty());
 
         assertThatThrownBy(() -> service.execute(new LoginCommand(EMAIL.value(), "Abcdefg1")))
-                .isInstanceOf(InvalidAccountStatusException.class)
+                .isInstanceOf(InvalidCredentialsException.class)
                 .hasMessage("Invalid credentials");
     }
 
@@ -112,7 +112,7 @@ class LoginServiceTest {
 
         try {
             service.execute(new LoginCommand(EMAIL.value(), "Abcdefg1"));
-        } catch (InvalidAccountStatusException ignored) {
+        } catch (InvalidCredentialsException ignored) {
             // expected — asserting the timing-mitigation call happened, not the outcome
         }
 
@@ -128,7 +128,7 @@ class LoginServiceTest {
         when(passwordHashPort.matches(any(RawPassword.class), eq(STORED_HASH))).thenReturn(true);
 
         assertThatThrownBy(() -> service.execute(new LoginCommand(EMAIL.value(), "Abcdefg1")))
-                .isInstanceOf(InvalidAccountStatusException.class)
+                .isInstanceOf(InvalidCredentialsException.class)
                 .hasMessage("Invalid credentials");
     }
 
@@ -141,7 +141,7 @@ class LoginServiceTest {
         when(passwordHashPort.matches(any(RawPassword.class), eq(STORED_HASH))).thenReturn(true);
 
         assertThatThrownBy(() -> service.execute(new LoginCommand(EMAIL.value(), "Abcdefg1")))
-                .isInstanceOf(InvalidAccountStatusException.class);
+                .isInstanceOf(InvalidCredentialsException.class);
         verify(tokenGeneratorPort, never()).generateToken(any());
     }
 }

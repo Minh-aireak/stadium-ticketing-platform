@@ -14,6 +14,7 @@ import com.aireak.identity.application.port.in.command.RegisterAccountCommand;
 import com.aireak.identity.application.port.in.dto.AuthResult;
 import com.aireak.identity.config.AuthCookieProperties;
 import com.aireak.identity.config.CorsProperties;
+import com.aireak.identity.domain.exception.InvalidCredentialsException;
 import com.aireak.identity.domain.exception.InvalidRefreshTokenException;
 import com.aireak.identity.domain.exception.InvalidVerificationTokenException;
 import com.aireak.identity.domain.exception.RefreshSessionStoreUnavailableException;
@@ -133,6 +134,20 @@ public class AuthController {
         return ResponseEntity.noContent()
                 .header(HttpHeaders.SET_COOKIE, expiredCookie().toString())
                 .build();
+    }
+
+    /**
+     * Login failure (unknown email, wrong password, or non-ACTIVE account — see LoginService,
+     * which deliberately raises this same exception+message for all three so the response never
+     * differs by cause) → 401, not the common {@code GlobalExceptionHandler}'s generic 422 for
+     * {@code DomainException}: this is an authentication failure, not a correctable domain rule.
+     */
+    @ExceptionHandler(InvalidCredentialsException.class)
+    public ResponseEntity<ProblemDetail> handleInvalidCredentials(InvalidCredentialsException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage());
+        problem.setType(URI.create(TYPE_BASE + "invalid-credentials"));
+        problem.setTitle("Invalid Credentials");
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(problem);
     }
 
     // ---- reuse-detection / invalid-token handling: 401, and always clear the cookie ----

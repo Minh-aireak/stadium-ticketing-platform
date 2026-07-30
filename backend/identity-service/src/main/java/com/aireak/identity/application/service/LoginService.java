@@ -8,7 +8,7 @@ import com.aireak.identity.application.port.out.PasswordHashPort;
 import com.aireak.identity.application.port.out.RefreshSessionStorePort;
 import com.aireak.identity.application.port.out.TokenGeneratorPort;
 import com.aireak.identity.config.JwtProperties;
-import com.aireak.identity.domain.exception.InvalidAccountStatusException;
+import com.aireak.identity.domain.exception.InvalidCredentialsException;
 import com.aireak.identity.domain.model.Account;
 import com.aireak.identity.domain.model.AccountStatus;
 import com.aireak.identity.domain.model.Email;
@@ -62,16 +62,16 @@ public class LoginService implements LoginUseCase {
         HashedPassword passwordToCheck = accountOpt.map(Account::getPassword).orElse(dummyHash);
         boolean passwordMatches = passwordHashPort.matches(rawPassword, passwordToCheck);
 
-        var account = accountOpt.orElseThrow(() -> new InvalidAccountStatusException(
+        var account = accountOpt.orElseThrow(() -> new InvalidCredentialsException(
                 "Invalid credentials")); // intentionally vague — no user enumeration
 
         if (account.getStatus() != AccountStatus.ACTIVE) {
             log.warn("Login rejected: accountId={}, status={}", account.getId(), account.getStatus());
-            throw new InvalidAccountStatusException("Invalid credentials");
+            throw new InvalidCredentialsException("Invalid credentials");
         }
 
         if (!passwordMatches) {
-            throw new InvalidAccountStatusException("Invalid credentials");
+            throw new InvalidCredentialsException("Invalid credentials");
         }
 
         String accessToken = tokenGeneratorPort.generateToken(account);
