@@ -101,18 +101,18 @@ public class NotificationDispatchService implements SendNotificationUseCase {
     }
 
     private void dispatch(NotificationTemplate template, Object payload) {
-        String email = extractEmail(payload);
-        String phone = extractPhone(payload);
         String renderedBody = renderTemplate(template.getBodyTemplate(), payload);
 
         switch (template.getChannel()) {
             case EMAIL -> emailSenderPort.send(
-                    email,
+                    extractEmail(payload),
                     template.getSubjectTemplate(),
                     renderedBody
             );
+            // No entry in TEMPLATES uses SMS today — phone is only extracted here, lazily, so an
+            // eager (unconditional) call wouldn't fail every EMAIL send once SMS support lands.
             case SMS -> smsSenderPort.send(
-                    phone,
+                    extractPhone(payload),
                     template.getSubjectTemplate() + " - " + renderedBody
             );
             default -> log.warn("Unhandled channel: {}", template.getChannel());
@@ -179,11 +179,14 @@ public class NotificationDispatchService implements SendNotificationUseCase {
         } else if (payload instanceof BookingCancelledEvent event) {
             return event.customerEmail();
         }
-        return "user@example.com";
+        throw new IllegalStateException(
+                "No email extractor registered for payload type " + payload.getClass().getName());
     }
 
     private String extractPhone(Object payload) {
-        return "+84000000000";
+        throw new UnsupportedOperationException(
+                "SMS delivery is not implemented — no phone extractor for payload type "
+                        + payload.getClass().getName());
     }
 
     private String extractRecipientId(Object payload) {

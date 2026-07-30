@@ -20,7 +20,7 @@ public class Seat {
     private final SeatTier tier;
     private final BigDecimal price;
     private SeatStatus status;
-    private String reservedByBookingId; // null when AVAILABLE; the owning booking once RESERVED or SOLD
+    private String reservedByBookingId; // null when AVAILABLE; the owning booking once SOLD
 
     public Seat(SeatCode seatCode, SeatTier tier, BigDecimal price) {
         this.seatCode = Objects.requireNonNull(seatCode);
