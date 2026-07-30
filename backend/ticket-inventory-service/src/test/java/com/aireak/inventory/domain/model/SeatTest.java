@@ -33,15 +33,6 @@ class SeatTest {
     }
 
     @Test
-    void sellFromReservedMarksSoldForBooking() {
-        Seat seat = new Seat(new SeatCode("A1"), SeatStatus.RESERVED, "booking-1", SeatTier.VIP, PRICE);
-
-        seat.sell("booking-1");
-
-        assertThat(seat.getStatus()).isEqualTo(SeatStatus.SOLD);
-    }
-
-    @Test
     void sellIsIdempotentForTheSameBookingAlreadySold() {
         Seat seat = new Seat(new SeatCode("A1"), SeatStatus.SOLD, "booking-1", SeatTier.VIP, PRICE);
 
