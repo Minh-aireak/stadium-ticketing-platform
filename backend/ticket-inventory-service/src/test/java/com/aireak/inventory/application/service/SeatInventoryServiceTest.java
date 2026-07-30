@@ -1,5 +1,6 @@
 package com.aireak.inventory.application.service;
 
+import com.aireak.common.exception.ForbiddenException;
 import com.aireak.inventory.application.port.in.command.ConfirmSeatsCommand;
 import com.aireak.inventory.application.port.in.command.HoldSeatsCommand;
 import com.aireak.inventory.application.port.in.command.ReleaseSeatsCommand;
@@ -205,6 +206,35 @@ class SeatInventoryServiceTest {
         verify(eventPublisher).publishAll(published.capture());
         assertThat(published.getValue()).hasSize(1);
         assertThat(published.getValue().get(0)).isInstanceOf(SeatsReleasedEvent.class);
+    }
+
+    // CRIT-2-01: an internal-service-token release (no requestingCustomerId — see
+    // ReleaseSeatsCommand's 3-arg constructor, exercised by releaseRemovesHoldsAndPublishesEvent
+    // above) is trusted unconditionally and never calls isHeldByCustomerAndBooking. A
+    // customer-token release must own the reservation it's releasing.
+    @Test
+    void releaseWithCustomerTokenSucceedsWhenCallerOwnsTheReservation() {
+        when(seatHoldPort.isHeldByCustomerAndBooking(SHOWTIME_ID, SEAT_CODES, CUSTOMER_ID, BOOKING_ID))
+                .thenReturn(true);
+
+        service.execute(new ReleaseSeatsCommand(SHOWTIME_ID, BOOKING_ID, SEAT_CODE_STRINGS, CUSTOMER_ID));
+
+        verify(seatHoldPort).releaseHolds(SHOWTIME_ID, SEAT_CODES, BOOKING_ID);
+        verify(eventPublisher).publishAll(any());
+    }
+
+    @Test
+    void releaseWithCustomerTokenThrowsForbiddenWhenCallerDoesNotOwnTheReservationAndNeverReleases() {
+        String attackerId = "attacker-1";
+        when(seatHoldPort.isHeldByCustomerAndBooking(SHOWTIME_ID, SEAT_CODES, attackerId, BOOKING_ID))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> service.execute(
+                new ReleaseSeatsCommand(SHOWTIME_ID, BOOKING_ID, SEAT_CODE_STRINGS, attackerId)))
+                .isInstanceOf(ForbiddenException.class);
+
+        verify(seatHoldPort, never()).releaseHolds(any(), any(), any());
+        verify(eventPublisher, never()).publishAll(any());
     }
 
     @Test

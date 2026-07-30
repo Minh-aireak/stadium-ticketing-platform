@@ -21,6 +21,7 @@ import com.aireak.inventory.domain.exception.SeatsNotAvailableException;
 import com.aireak.inventory.domain.model.Seat;
 import com.aireak.inventory.domain.model.SeatCode;
 import com.aireak.inventory.domain.model.SeatStatus;
+import com.aireak.common.exception.ForbiddenException;
 import io.github.resilience4j.bulkhead.annotation.Bulkhead;
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import lombok.RequiredArgsConstructor;
@@ -150,6 +151,16 @@ public class SeatInventoryService implements ReserveSeatsUseCase, ReleaseSeatsUs
 
         distributedLockPort.executeWithLock(lockKey, LOCK_WAIT_SECONDS, LOCK_LEASE_SECONDS,
                 TimeUnit.SECONDS, () -> {
+                    // requestingCustomerId is only set when the caller used a real customer
+                    // token (see ReleaseSeatsCommand javadoc) — verify inside the same lock as
+                    // the actual release so there's no gap between the check and the effect.
+                    // An internal-service-token call skips this: it's already trusted the same
+                    // way confirm is (see SeatInventoryController#requireInternalService).
+                    if (command.requestingCustomerId() != null && !seatHoldPort.isHeldByCustomerAndBooking(
+                            command.showtimeId(), seatCodes, command.requestingCustomerId(), command.bookingId())) {
+                        throw new ForbiddenException(
+                                "Caller does not own the reservation being released");
+                    }
                     seatHoldPort.releaseHolds(command.showtimeId(), seatCodes, command.bookingId());
                     eventPublisher.publishAll(List.of(
                             new SeatsReleasedEvent(command.showtimeId(), seatCodes)));

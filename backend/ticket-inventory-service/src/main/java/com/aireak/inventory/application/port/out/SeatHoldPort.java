@@ -50,4 +50,18 @@ public interface SeatHoldPort {
      * that currently have an active (non-expired) hold, regardless of owner.
      */
     Set<SeatCode> findHeld(String showtimeId, List<SeatCode> seatCodes);
+
+    /**
+     * True unless some seat in {@code seatCodes} currently has an active hold confirmed (see
+     * {@link #confirmHold}) into a <em>different</em> customer/booking than the one given —
+     * i.e. the caller is not trying to release a reservation it doesn't own. A seat with no
+     * active hold at all (already released, or its TTL expired) passes vacuously, matching
+     * {@link #releaseHolds}'s own idempotent no-op semantics for such seats.
+     *
+     * <p>Used by the customer-token release path (see {@code ReleaseSeatsCommand}) to stop a
+     * customer from releasing another customer's active reservation just by knowing or guessing
+     * its bookingId — the bookingId path variable alone is not proof of ownership.
+     */
+    boolean isHeldByCustomerAndBooking(String showtimeId, List<SeatCode> seatCodes, String customerId,
+                                       String bookingId);
 }

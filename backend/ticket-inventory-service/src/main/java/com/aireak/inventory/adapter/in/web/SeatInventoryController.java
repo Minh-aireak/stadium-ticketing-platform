@@ -1,5 +1,6 @@
 package com.aireak.inventory.adapter.in.web;
 
+import com.aireak.common.exception.ForbiddenException;
 import com.aireak.common.security.AuthenticatedUser;
 import com.aireak.common.security.AuthenticatedUserContext;
 import com.aireak.inventory.adapter.in.web.dto.HoldSeatsRequest;
@@ -80,20 +81,37 @@ public class SeatInventoryController {
         return ResponseEntity.ok().build();
     }
 
-    /** DELETE /api/v1/inventory/{showtimeId}/reserve/{bookingId} */
+    /**
+     * DELETE /api/v1/inventory/{showtimeId}/reserve/{bookingId} — called with either an
+     * internal-service token (trusted unconditionally, e.g. the PAYMENT_FAILED-compensation
+     * path off a Kafka listener thread) or the original customer's own token (the
+     * createBooking-compensation path, still inside their HTTP request — see
+     * {@code TicketInventoryRestAdapter#authorizationToken}). For the latter, the bookingId path
+     * variable alone isn't proof of ownership, so the service layer verifies the caller actually
+     * owns the reservation it's asking to release (see {@code ReleaseSeatsCommand}).
+     */
     @DeleteMapping("/{showtimeId}/reserve/{bookingId}")
     public ResponseEntity<Void> release(@PathVariable String showtimeId,
                                         @PathVariable String bookingId,
                                         @RequestParam @NotEmpty java.util.List<String> seatCodes) {
-        releaseSeatsUseCase.execute(
-                new ReleaseSeatsCommand(showtimeId, bookingId, seatCodes));
+        AuthenticatedUser caller = currentUser();
+        ReleaseSeatsCommand command = caller.isInternalService()
+                ? new ReleaseSeatsCommand(showtimeId, bookingId, seatCodes)
+                : new ReleaseSeatsCommand(showtimeId, bookingId, seatCodes, caller.userId());
+        releaseSeatsUseCase.execute(command);
         return ResponseEntity.ok().build();
     }
 
-    /** POST /api/v1/inventory/{showtimeId}/confirm — finalizes the sale (payment succeeded). */
+    /**
+     * POST /api/v1/inventory/{showtimeId}/confirm — finalizes the sale (payment succeeded).
+     * Internal-service token only: {@code TicketInventoryRestAdapter#confirmReservation} never
+     * forwards a real customer token, so a request bearing one here cannot be a genuine
+     * post-payment confirmation — see {@link #requireInternalService}.
+     */
     @PostMapping("/{showtimeId}/confirm")
     public ResponseEntity<Void> confirm(@PathVariable String showtimeId,
                                         @Valid @RequestBody ReserveSeatsRequest request) {
+        requireInternalService();
         confirmSeatsUseCase.execute(
                 new ConfirmSeatsCommand(showtimeId, request.bookingId(), request.seatCodes()));
         return ResponseEntity.ok().build();
@@ -123,10 +141,23 @@ public class SeatInventoryController {
     // JwtAuthenticationFilter runs for every non-excluded path (no exclusion here), so this is
     // always populated by the time controller code executes — same pattern as booking-service's
     // BookingController.
-    private String currentUserId() {
+    private AuthenticatedUser currentUser() {
         return AuthenticatedUserContext.get()
-                .map(AuthenticatedUser::userId)
                 .orElseThrow(() -> new IllegalStateException("JwtAuthenticationFilter did not run for this request"));
+    }
+
+    private String currentUserId() {
+        return currentUser().userId();
+    }
+
+    /**
+     * No Spring Security in this service (see JwtAuthenticationFilter's javadoc) — same
+     * controller-level pattern as match-catalog-service's {@code MatchController#requireAdminRole}.
+     */
+    private void requireInternalService() {
+        if (!currentUser().isInternalService()) {
+            throw new ForbiddenException("This operation is restricted to internal service calls");
+        }
     }
 
     record SeatResponse(String code, String row, int number, String status, String tier, BigDecimal price) {}

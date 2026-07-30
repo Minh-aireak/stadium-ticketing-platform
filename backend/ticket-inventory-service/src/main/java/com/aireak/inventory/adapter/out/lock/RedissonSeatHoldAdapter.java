@@ -21,7 +21,18 @@ import java.util.stream.Collectors;
 /**
  * Redisson implementation of {@link SeatHoldPort}, backed by a single
  * {@code RMapCache} ("seat-holds") shared across all showtimes — key
- * {@code "{showtimeId}:{seatCode}"}, value {@code bookingId}, per-entry TTL.
+ * {@code "{showtimeId}:{seatCode}"}, per-entry TTL. Value encoding depends on
+ * what the hold represents:
+ * <ul>
+ *     <li>a standalone pre-booking hold ({@link #holdSeats}) — value is the plain owner id
+ *         (a customerId)</li>
+ *     <li>a hold confirmed into a booking ({@link #confirmHold}) — value is
+ *         {@code "{customerId}" + OWNER_SEP + "{bookingId}"}, so the owning customer stays
+ *         recoverable even though every other port method (and every Redisson-external caller)
+ *         only ever refers to the hold by bookingId. This is what lets
+ *         {@link #isHeldByCustomerAndBooking} verify a customer-token release actually owns the
+ *         reservation instead of trusting a bookingId path variable alone.</li>
+ * </ul>
  *
  * <p>Caller ({@code SeatInventoryService}) already serializes concurrent
  * attempts for the same showtime via {@code DistributedLockPort}, so a plain
@@ -35,6 +46,11 @@ import java.util.stream.Collectors;
 public class RedissonSeatHoldAdapter implements SeatHoldPort {
 
     private static final String CACHE_NAME = "seat-holds";
+
+    // Unlikely to ever appear inside a UUID-shaped customerId/bookingId; if it ever did, the
+    // owner would just fail to parse as a confirmed hold and be treated as a plain-owner value
+    // (matches nothing when compared for isHeldByCustomerAndBooking) — no ambiguity, fails closed.
+    private static final String OWNER_SEP = "::";
 
     private final RedissonClient redissonClient;
 
@@ -69,13 +85,28 @@ public class RedissonSeatHoldAdapter implements SeatHoldPort {
     @Override
     public void releaseHolds(String showtimeId, List<SeatCode> seatCodes, String bookingId) {
         RMapCache<String, String> holds = redissonClient.getMapCache(CACHE_NAME);
-        seatCodes.forEach(seatCode -> holds.remove(holdKey(showtimeId, seatCode), bookingId));
+        // Not a single atomic remove(key, expectedValue) any more, since a confirmed hold's
+        // stored value is no longer exactly bookingId (see class javadoc) — safe as a plain
+        // get-then-remove because every caller already holds the per-showtime DistributedLockPort
+        // lock for the duration of this call.
+        seatCodes.forEach(seatCode -> {
+            String key = holdKey(showtimeId, seatCode);
+            String current = holds.get(key);
+            if (current != null && ownerMatches(current, bookingId)) {
+                holds.remove(key);
+            }
+        });
         log.debug("Seats released: showtime={}, booking={}, seats={}", showtimeId, bookingId, seatCodes);
     }
 
     @Override
     public void confirmHold(String showtimeId, List<SeatCode> seatCodes, String previousOwnerId, String newOwnerId) {
         RMapCache<String, String> holds = redissonClient.getMapCache(CACHE_NAME);
+        // previousOwnerId is always the JWT-authenticated customer confirming their own
+        // pre-booking hold into newOwnerId (a bookingId) — see ReserveSeatsCommand. Stored as a
+        // composite value (see class javadoc) so the customer stays attributable later, e.g. for
+        // isHeldByCustomerAndBooking.
+        String confirmedOwner = encodeConfirmedOwner(previousOwnerId, newOwnerId);
         List<SeatCode> placed = new ArrayList<>();
         List<SeatCode> unavailable = new ArrayList<>();
 
@@ -86,11 +117,11 @@ public class RedissonSeatHoldAdapter implements SeatHoldPort {
             // atomic swap: handing over an existing pre-booking hold, or — if it already expired
             // or was never placed — falling back to a plain new hold.
             if (holds.remove(key, previousOwnerId)) {
-                holds.put(key, newOwnerId, holdTtlMinutes, TimeUnit.MINUTES);
+                holds.put(key, confirmedOwner, holdTtlMinutes, TimeUnit.MINUTES);
                 placed.add(seatCode);
                 continue;
             }
-            String previous = holds.putIfAbsent(key, newOwnerId, holdTtlMinutes, TimeUnit.MINUTES);
+            String previous = holds.putIfAbsent(key, confirmedOwner, holdTtlMinutes, TimeUnit.MINUTES);
             if (previous == null) {
                 placed.add(seatCode);
             } else {
@@ -99,12 +130,26 @@ public class RedissonSeatHoldAdapter implements SeatHoldPort {
         }
 
         if (!unavailable.isEmpty()) {
-            placed.forEach(seatCode -> holds.remove(holdKey(showtimeId, seatCode), newOwnerId));
+            placed.forEach(seatCode -> holds.remove(holdKey(showtimeId, seatCode), confirmedOwner));
             throw new SeatsNotAvailableException(showtimeId, unavailable);
         }
 
         log.debug("Seat hold confirmed: showtime={}, previousOwner={}, newOwner={}, seats={}",
                 showtimeId, previousOwnerId, newOwnerId, seatCodes);
+    }
+
+    @Override
+    public boolean isHeldByCustomerAndBooking(String showtimeId, List<SeatCode> seatCodes, String customerId,
+                                              String bookingId) {
+        RMapCache<String, String> holds = redissonClient.getMapCache(CACHE_NAME);
+        String expectedOwner = encodeConfirmedOwner(customerId, bookingId);
+        for (SeatCode seatCode : seatCodes) {
+            String current = holds.get(holdKey(showtimeId, seatCode));
+            if (current != null && !current.equals(expectedOwner)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override
@@ -127,5 +172,24 @@ public class RedissonSeatHoldAdapter implements SeatHoldPort {
 
     private String holdKey(String showtimeId, SeatCode seatCode) {
         return showtimeId + ":" + seatCode.value();
+    }
+
+    private String encodeConfirmedOwner(String customerId, String bookingId) {
+        return customerId + OWNER_SEP + bookingId;
+    }
+
+    /**
+     * True if {@code storedValue} (a hold's current Redis value) is owned by {@code ownerId} —
+     * either a plain standalone-hold value equal to it, or a confirmed-hold composite value
+     * (see class javadoc) whose bookingId component equals it. Used by {@link #releaseHolds},
+     * where {@code ownerId} is always a bookingId for booking-flow releases and a customerId for
+     * the standalone {@code unhold} path.
+     */
+    private boolean ownerMatches(String storedValue, String ownerId) {
+        if (storedValue.equals(ownerId)) {
+            return true;
+        }
+        int sepIndex = storedValue.indexOf(OWNER_SEP);
+        return sepIndex >= 0 && storedValue.substring(sepIndex + OWNER_SEP.length()).equals(ownerId);
     }
 }
