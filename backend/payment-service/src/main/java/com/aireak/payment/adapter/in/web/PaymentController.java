@@ -1,9 +1,14 @@
 package com.aireak.payment.adapter.in.web;
 
+import com.aireak.common.exception.IdentityMismatchException;
+import com.aireak.common.security.AuthenticatedUser;
+import com.aireak.common.security.AuthenticatedUserContext;
 import com.aireak.payment.application.port.in.GetPaymentUseCase;
 import com.aireak.payment.application.port.in.InitiatePaymentUseCase;
 import com.aireak.payment.application.port.in.RetryPaymentUseCase;
 import com.aireak.payment.application.port.in.command.InitiatePaymentCommand;
+import com.aireak.payment.application.port.out.BookingOwnershipPort;
+import com.aireak.payment.domain.model.Payment;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
@@ -29,9 +34,11 @@ public class PaymentController {
     private final InitiatePaymentUseCase initiatePaymentUseCase;
     private final GetPaymentUseCase getPaymentUseCase;
     private final RetryPaymentUseCase retryPaymentUseCase;
+    private final BookingOwnershipPort bookingOwnershipPort;
 
     @PostMapping
     public ResponseEntity<InitiatePaymentResponse> initiate(@Valid @RequestBody InitiatePaymentRequest request) {
+        enforceBookingOwnership(request.bookingId());
         String paymentId = initiatePaymentUseCase.execute(
                 new InitiatePaymentCommand(request.bookingId(), request.amount(), request.currency()));
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -41,6 +48,12 @@ public class PaymentController {
     /** POST /api/v1/payments/{paymentId}/retry — re-attempts a FAILED payment on the same row. */
     @PostMapping("/{paymentId}/retry")
     public ResponseEntity<InitiatePaymentResponse> retry(@PathVariable("paymentId") String paymentId) {
+        // Resolve paymentId → bookingId so we can verify ownership before touching the payment.
+        Payment payment = getPaymentUseCase.getById(paymentId).orElse(null);
+        if (payment == null) {
+            return ResponseEntity.notFound().build();
+        }
+        enforceBookingOwnership(payment.getBookingId());
         return retryPaymentUseCase.retry(paymentId)
                 .map(id -> ResponseEntity.ok(new InitiatePaymentResponse(id)))
                 .orElseGet(() -> ResponseEntity.notFound().build());
@@ -48,11 +61,29 @@ public class PaymentController {
 
     @GetMapping("/{bookingId}")
     public ResponseEntity<PaymentStatusResponse> getByBookingId(@PathVariable("bookingId") String bookingId) {
+        enforceBookingOwnership(bookingId);
         return getPaymentUseCase.getByBookingId(bookingId)
                 .map(p -> ResponseEntity.ok(new PaymentStatusResponse(
                         p.getPaymentId(), p.getBookingId(), p.getStatus().name(),
                         p.getGatewayTransactionId(), p.getFailureReason())))
                 .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    /**
+     * If the caller is an internal service (reconciliation job, booking-service saga step) the
+     * ownership check is skipped — those calls operate on behalf of the system, not an end-user.
+     * Otherwise, forwards the caller's original bearer token to booking-service's
+     * {@code GET /api/v1/bookings/{bookingId}}, which enforces ownership itself (403/404 for
+     * non-owners), so payment-service never duplicates that logic.
+     */
+    private void enforceBookingOwnership(String bookingId) {
+        AuthenticatedUser user = AuthenticatedUserContext.get()
+                .orElseThrow(() -> new IllegalStateException(
+                        "JwtAuthenticationFilter did not run for this request"));
+        if (user.isInternalService()) {
+            return;
+        }
+        bookingOwnershipPort.verifyCallerOwnsBooking(bookingId, user.token());
     }
 
     // fraction = 2 for every currency (simplification: no zero-decimal currency support like

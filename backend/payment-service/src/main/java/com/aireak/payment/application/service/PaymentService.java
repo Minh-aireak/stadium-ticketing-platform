@@ -154,6 +154,11 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
         return paymentRepository.findByBookingId(bookingId);
     }
 
+    @Override
+    public Optional<Payment> getById(String paymentId) {
+        return paymentRepository.findById(paymentId);
+    }
+
     /**
      * Re-opens a FAILED payment (see {@link Payment#retry}) and re-attempts the gateway charge —
      * same two-phase shape as {@link #execute}: reopen-and-persist commits first (so the row is

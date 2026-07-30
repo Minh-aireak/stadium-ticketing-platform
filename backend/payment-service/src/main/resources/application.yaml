@@ -54,6 +54,10 @@ jwt:
     # not a platform JWT, since Stripe is not a logged-in user.
     - "POST:/api/v1/payments/webhook"
 
+services:
+  booking:
+    base-url: ${BOOKING_SERVICE_URL:http://localhost:8083}
+
 stripe:
   # No default — must be injected via env var (STRIPE_SECRET_KEY), same rationale as jwt.secret.
   secret-key: ${STRIPE_SECRET_KEY}
