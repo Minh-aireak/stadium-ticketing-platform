@@ -72,7 +72,6 @@ public class MatchPersistenceAdapter implements MatchRepository {
                 .awayTeam(match.getAwayTeam())
                 .competition(match.getCompetition())
                 .status(match.getStatus())
-                .createdAt(match.getCreatedAt())
                 .build();
         entity.getShowtimes().clear();
         entity.getShowtimes().addAll(showtimeEntities);

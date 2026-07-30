@@ -48,7 +48,6 @@ public class PaymentPersistenceAdapter implements PaymentRepository {
                 .status(p.getStatus())
                 .gatewayTransactionId(p.getGatewayTransactionId())
                 .failureReason(p.getFailureReason())
-                .createdAt(p.getCreatedAt())
                 .version(p.getVersion())
                 .build();
     }

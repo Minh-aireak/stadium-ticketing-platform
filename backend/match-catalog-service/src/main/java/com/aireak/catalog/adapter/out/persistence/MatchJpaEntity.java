@@ -5,7 +5,6 @@ import com.aireak.common.persistence.BaseAuditEntity;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -34,9 +33,6 @@ public class MatchJpaEntity extends BaseAuditEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private MatchStatus status;
-
-    @Column(name = "created_at", nullable = false, updatable = false)
-    private Instant createdAt;
 
     @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @JoinColumn(name = "match_id", referencedColumnName = "match_id",

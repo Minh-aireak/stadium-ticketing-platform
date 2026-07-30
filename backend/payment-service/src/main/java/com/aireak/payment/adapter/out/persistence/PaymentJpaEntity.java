@@ -8,7 +8,6 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 
 @Getter
 @Setter
@@ -43,9 +42,6 @@ public class PaymentJpaEntity extends BaseAuditEntity {
 
     @Column(name = "failure_reason", length = 500)
     private String failureReason;
-
-    @Column(name = "created_at", nullable = false, updatable = false)
-    private Instant createdAt;
 
     @Version
     @Column(name = "version")
