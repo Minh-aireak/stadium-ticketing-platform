@@ -17,9 +17,7 @@ import java.util.List;
 @Getter
 @Setter
 @Entity
-@Table(name = "seat_inventories",
-        indexes = @Index(name = "idx_seat_inventories_showtime",
-                columnList = "showtime_id", unique = true))
+@Table(name = "seat_inventories")
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
