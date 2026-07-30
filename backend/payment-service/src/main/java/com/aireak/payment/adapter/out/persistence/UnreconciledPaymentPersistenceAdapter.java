@@ -1,10 +1,14 @@
 package com.aireak.payment.adapter.out.persistence;
 
 import com.aireak.payment.application.port.out.PaymentReconciliationPort;
+import com.aireak.payment.domain.model.UnreconciledPayment;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
 
 @Component
 @RequiredArgsConstructor
@@ -18,4 +22,27 @@ public class UnreconciledPaymentPersistenceAdapter implements PaymentReconciliat
         jpaRepository.save(UnreconciledPaymentJpaEntity.of(
                 paymentId, bookingId, gatewayTransactionId, amount, currency, failureReason));
     }
+
+    @Override
+    public List<UnreconciledPayment> findUnresolvedOlderThan(Instant cutoff, int limit) {
+        return jpaRepository.findByResolvedFalseAndCreatedAtBefore(cutoff, PageRequest.of(0, limit))
+                .stream()
+                .map(this::toDomain)
+                .toList();
+    }
+
+    private UnreconciledPayment toDomain(UnreconciledPaymentJpaEntity entity) {
+        return new UnreconciledPayment(
+                entity.getId(),
+                entity.getPaymentId(),
+                entity.getBookingId(),
+                entity.getGatewayTransactionId(),
+                entity.getAmount(),
+                entity.getCurrency(),
+                entity.getFailureReason(),
+                entity.isResolved(),
+                entity.getCreatedAt()
+        );
+    }
 }
+

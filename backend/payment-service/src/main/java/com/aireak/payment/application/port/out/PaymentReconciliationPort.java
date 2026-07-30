@@ -1,6 +1,10 @@
 package com.aireak.payment.application.port.out;
 
+import com.aireak.payment.domain.model.UnreconciledPayment;
+
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
 
 /**
  * Outbound port: durable holding area for payments whose gateway charge succeeded but whose
@@ -16,4 +20,14 @@ public interface PaymentReconciliationPort {
      */
     void recordUnpersistedSuccess(String paymentId, String bookingId, String gatewayTransactionId,
                                    BigDecimal amount, String currency, String failureReason);
+
+    /**
+     * Retrieves unresolved unreconciled payment records created before the specified cutoff timestamp.
+     *
+     * @param cutoff timestamp threshold
+     * @param limit maximum number of records to return
+     * @return list of unresolved unreconciled payments
+     */
+    List<UnreconciledPayment> findUnresolvedOlderThan(Instant cutoff, int limit);
 }
+
