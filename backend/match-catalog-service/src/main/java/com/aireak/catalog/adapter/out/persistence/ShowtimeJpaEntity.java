@@ -39,5 +39,6 @@ public class ShowtimeJpaEntity {
     private BigDecimal basePrice;
 
     @Column(name = "currency", nullable = false, length = 3)
+    @org.hibernate.annotations.JdbcTypeCode(java.sql.Types.CHAR)
     private String currency;
 }

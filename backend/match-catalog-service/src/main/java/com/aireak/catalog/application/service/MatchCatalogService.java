@@ -118,19 +118,13 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
             // MatchSearchPort) and can go stale after a match completes/cancels (the index is
             // only ever written on publish()), so every hit is re-read from the write-side JPA
             // repository for full showtime data and re-filtered to currently-PUBLISHED.
-            List<Match> hydrated = matchSearchPort.search(query).stream()
+            MatchSearchPort.SearchResult searchResult = matchSearchPort.search(query, page, size);
+            List<Match> items = searchResult.matches().stream()
                     .map(hit -> matchRepository.findById(hit.getMatchId()).orElse(null))
                     .filter(Objects::nonNull)
                     .filter(m -> m.getStatus() == MatchStatus.PUBLISHED)
                     .toList();
-            // matchSearchPort.search() has no page/size of its own (see MatchSearchPort) — page/
-            // size used to be silently dropped here, always returning every hydrated hit as one
-            // page. Window it in-memory instead so a caller-requested page/size is actually honored.
-            List<Match> pageItems = hydrated.stream()
-                    .skip((long) page * size)
-                    .limit(size)
-                    .toList();
-            return new MatchPage(pageItems, hydrated.size(), page, size);
+            return new MatchPage(items, searchResult.totalHits(), page, size);
         }
 
         List<Match> items = matchRepository.findByStatus(MatchStatus.PUBLISHED, page, size);

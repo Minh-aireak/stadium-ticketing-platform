@@ -46,20 +46,26 @@ public class ElasticsearchMatchSearchAdapter implements MatchSearchPort {
     }
 
     @Override
-    public List<Match> search(String query) {
+    public SearchResult search(String query, int page, int size) {
+        int from = page * size;
         try {
             SearchResponse<MatchDocument> response = elasticsearchClient.search(req -> req
                             .index(INDEX)
+                            .from(from)
+                            .size(size)
                             .query(q -> q.multiMatch(m -> m
                                     .query(query)
                                     .fields("homeTeam", "awayTeam", "competition"))),
                     MatchDocument.class);
 
-            return response.hits().hits().stream()
+            List<Match> matches = response.hits().hits().stream()
                     .map(co.elastic.clients.elasticsearch.core.search.Hit::source)
                     .filter(Objects::nonNull)
                     .map(this::toMatch)
                     .toList();
+
+            long totalHits = response.hits().total() != null ? response.hits().total().value() : matches.size();
+            return new SearchResult(matches, totalHits);
         } catch (IOException e) {
             throw new MatchSearchException("Failed to search matches with query: " + query, e);
         }

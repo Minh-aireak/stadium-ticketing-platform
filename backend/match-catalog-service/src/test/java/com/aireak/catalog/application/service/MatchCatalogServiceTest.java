@@ -203,7 +203,7 @@ class MatchCatalogServiceTest {
 
         assertThat(page.items()).containsExactly(published);
         assertThat(page.totalElements()).isEqualTo(1L);
-        verify(matchSearchPort, never()).search(any());
+        verify(matchSearchPort, never()).search(any(), anyInt(), anyInt());
     }
 
     @Test
@@ -215,7 +215,8 @@ class MatchCatalogServiceTest {
         // PUBLISHED here since listMatches() must filter out anything else after re-hydration.
         Match hydratedPublished = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
                 MatchStatus.PUBLISHED, hydrated.getCreatedAt(), hydrated.getShowtimes());
-        when(matchSearchPort.search("Home")).thenReturn(List.of(stub));
+        when(matchSearchPort.search("Home", 0, 20))
+                .thenReturn(new MatchSearchPort.SearchResult(List.of(stub), 1));
         when(matchRepository.findById("match-1")).thenReturn(Optional.of(hydratedPublished));
 
         ListMatchesUseCase.MatchPage page = service.listMatches("Home", 0, 20);
@@ -227,15 +228,11 @@ class MatchCatalogServiceTest {
 
     @Test
     void listMatchesWithQueryHonorsThePageAndSizeInsteadOfReturningEveryHitAsOnePage() {
-        // Regression test: page/size used to be silently ignored whenever `query` was non-blank —
-        // every hydrated hit came back as a single page regardless of what the caller asked for.
-        Match match1 = publishedStub("match-1");
+        // Test that page/size are passed directly to matchSearchPort.search()
         Match match2 = publishedStub("match-2");
-        Match match3 = publishedStub("match-3");
-        when(matchSearchPort.search("Home")).thenReturn(List.of(match1, match2, match3));
-        when(matchRepository.findById("match-1")).thenReturn(Optional.of(match1));
+        when(matchSearchPort.search("Home", 1, 1))
+                .thenReturn(new MatchSearchPort.SearchResult(List.of(match2), 3));
         when(matchRepository.findById("match-2")).thenReturn(Optional.of(match2));
-        when(matchRepository.findById("match-3")).thenReturn(Optional.of(match3));
 
         ListMatchesUseCase.MatchPage page = service.listMatches("Home", 1, 1);
 
@@ -256,7 +253,8 @@ class MatchCatalogServiceTest {
                 MatchStatus.PUBLISHED, Instant.now(), List.of());
         Match nowCancelled = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
                 MatchStatus.CANCELLED, Instant.now(), List.of());
-        when(matchSearchPort.search("Home")).thenReturn(List.of(stub));
+        when(matchSearchPort.search("Home", 0, 20))
+                .thenReturn(new MatchSearchPort.SearchResult(List.of(stub), 1));
         when(matchRepository.findById("match-1")).thenReturn(Optional.of(nowCancelled));
 
         ListMatchesUseCase.MatchPage page = service.listMatches("Home", 0, 20);

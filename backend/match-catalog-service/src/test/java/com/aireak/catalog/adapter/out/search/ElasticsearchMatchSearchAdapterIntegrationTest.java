@@ -15,6 +15,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import tools.jackson.databind.json.JsonMapper;
 
+import com.aireak.catalog.application.port.out.MatchSearchPort;
+
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
@@ -63,10 +65,31 @@ class ElasticsearchMatchSearchAdapterIntegrationTest {
         adapter.index(match);
         client.indices().refresh(r -> r.index("matches"));
 
-        List<Match> results = adapter.search("Hanoi FC");
+        MatchSearchPort.SearchResult results = adapter.search("Hanoi FC", 0, 10);
 
-        assertThat(results)
+        assertThat(results.matches())
                 .extracting(Match::getMatchId)
                 .contains(match.getMatchId());
+    }
+
+    @Test
+    void searchesWithPaginationOverTenMatches() throws IOException {
+        for (int i = 0; i < 15; i++) {
+            Match match = Match.create("PaginationTeam " + i, "Away FC", "V.League 1");
+            adapter.index(match);
+        }
+        client.indices().refresh(r -> r.index("matches"));
+
+        MatchSearchPort.SearchResult page0 = adapter.search("PaginationTeam", 0, 10);
+        assertThat(page0.matches()).hasSize(10);
+        assertThat(page0.totalHits()).isEqualTo(15L);
+
+        MatchSearchPort.SearchResult page1 = adapter.search("PaginationTeam", 1, 10);
+        assertThat(page1.matches()).hasSize(5);
+        assertThat(page1.totalHits()).isEqualTo(15L);
+
+        List<String> page0Ids = page0.matches().stream().map(Match::getMatchId).toList();
+        List<String> page1Ids = page1.matches().stream().map(Match::getMatchId).toList();
+        assertThat(page0Ids).doesNotContainAnyElementsOf(page1Ids);
     }
 }

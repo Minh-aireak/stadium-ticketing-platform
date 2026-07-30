@@ -11,5 +11,7 @@ import java.util.List;
  */
 public interface MatchSearchPort {
     void index(Match match);
-    List<Match> search(String query);
+    SearchResult search(String query, int page, int size);
+
+    record SearchResult(List<Match> matches, long totalHits) {}
 }

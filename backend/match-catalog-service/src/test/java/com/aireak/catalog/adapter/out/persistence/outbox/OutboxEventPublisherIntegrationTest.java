@@ -3,6 +3,7 @@ package com.aireak.catalog.adapter.out.persistence.outbox;
 import com.aireak.catalog.adapter.out.persistence.MatchPersistenceAdapter;
 import com.aireak.catalog.application.port.out.MatchSearchPort;
 import com.aireak.catalog.application.service.MatchCatalogService;
+import com.aireak.catalog.application.service.MatchSearchIndexer;
 import com.aireak.catalog.config.InfraConfig;
 import com.aireak.catalog.domain.model.Match;
 import tools.jackson.databind.json.JsonMapper;
@@ -46,6 +47,7 @@ import static org.assertj.core.api.Assertions.assertThat;
                             // never populated and every insert fails a NOT NULL constraint.
         MatchPersistenceAdapter.class,
         OutboxEventPublisher.class,
+        MatchSearchIndexer.class,
         MatchCatalogService.class,
         OutboxEventPublisherIntegrationTest.TestSupportConfig.class
 })
@@ -132,8 +134,8 @@ class OutboxEventPublisherIntegrationTest {
                 }
 
                 @Override
-                public List<Match> search(String query) {
-                    return List.of();
+                public SearchResult search(String query, int page, int size) {
+                    return new SearchResult(List.of(), 0);
                 }
             };
         }
