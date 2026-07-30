@@ -44,18 +44,6 @@
             <artifactId>spring-boot-starter-mail</artifactId>
         </dependency>
 
-        <!-- Resilience4j (spike: verify resilience4j-spring-boot4 resolves on Boot 4.1) -->
-        <dependency>
-            <groupId>io.github.resilience4j</groupId>
-            <artifactId>resilience4j-spring-boot4</artifactId>
-        </dependency>
-
-        <!-- Redisson (spike: verify 4.6.1 works with Boot 4.1) -->
-        <dependency>
-            <groupId>org.redisson</groupId>
-            <artifactId>redisson-spring-boot-starter</artifactId>
-        </dependency>
-
         <!-- Actuator -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

@@ -33,12 +33,6 @@ spring:
       mail.smtp.auth: false
       mail.smtp.starttls.enable: false
 
-  # Redisson config — Redis for distributed lock (spike verification)
-  data:
-    redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
-
 server:
   port: 8085
 
