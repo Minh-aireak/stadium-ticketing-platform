@@ -62,6 +62,12 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- OpenAPI Swagger UI -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+        </dependency>
+
         <!-- Nimbus JOSE+JWT — used by test code to sign tokens in integration tests.
              Replaces JJWT (jjwt-jackson conflicted with Spring Boot 4.1's Jackson 3). -->
         <dependency>

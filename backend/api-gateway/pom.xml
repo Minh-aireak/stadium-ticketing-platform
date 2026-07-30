@@ -37,6 +37,12 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- OpenAPI Swagger UI -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webflux-ui</artifactId>
+        </dependency>
+
         <!-- Redisson — distributed RedisRateLimiter backing store (reactive), same client
              every other service in this project uses. Pulls in spring-boot-starter-data-redis
              + spring-data-redis transitively, which is what Spring Cloud Gateway's

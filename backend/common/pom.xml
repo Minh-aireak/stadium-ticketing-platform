@@ -39,6 +39,11 @@
             <artifactId>spring-boot-starter-web</artifactId>
             <optional>true</optional>
         </dependency>
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <optional>true</optional>
+        </dependency>
 
         <!-- JPA concern: BaseAuditEntity (optional — only JPA services pull this) -->
         <dependency>
