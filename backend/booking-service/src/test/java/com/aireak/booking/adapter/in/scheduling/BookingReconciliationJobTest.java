@@ -47,6 +47,12 @@ class BookingReconciliationJobTest {
         job = new BookingReconciliationJob(bookingRepository, paymentPort, bookingOrchestrationService);
     }
 
+    private Booking draftBooking(String bookingId) {
+        return Booking.reconstitute(bookingId, "customer-1", "customer-1@example.com", "showtime-1",
+                new SeatSelection(List.of("A1")), BookingAmount.of(new BigDecimal("100.00"), "USD"),
+                BookingStatus.DRAFT, Instant.now(), null, 0L, false);
+    }
+
     private Booking pendingPaymentBooking(String bookingId) {
         return Booking.reconstitute(bookingId, "customer-1", "customer-1@example.com", "showtime-1",
                 new SeatSelection(List.of("A1")), BookingAmount.of(new BigDecimal("100.00"), "USD"),
@@ -55,15 +61,44 @@ class BookingReconciliationJobTest {
 
     @Test
     void doesNothingWhenNoBookingsAreStuck() {
+        when(bookingRepository.findDraftOlderThan(any(), anyInt())).thenReturn(List.of());
         when(bookingRepository.findPendingPaymentOlderThan(any(), anyInt())).thenReturn(List.of());
 
         job.reconcile();
 
         verify(paymentPort, never()).checkOutcome(any());
+        verify(bookingOrchestrationService, never()).cancelBookingOnPaymentFailure(any(), any());
+    }
+
+    @Test
+    void cancelsStaleDraftBookingsAndReleasesSeats() {
+        when(bookingRepository.findDraftOlderThan(any(), anyInt()))
+                .thenReturn(List.of(draftBooking("draft-1")));
+        when(bookingRepository.findPendingPaymentOlderThan(any(), anyInt())).thenReturn(List.of());
+
+        job.reconcile();
+
+        verify(bookingOrchestrationService).cancelBookingOnPaymentFailure(eq("draft-1"), eq("Draft booking expired"));
+    }
+
+    @Test
+    void aFailureReconcilingDraftBookingDoesNotStopPendingPaymentReconciliation() {
+        when(bookingRepository.findDraftOlderThan(any(), anyInt()))
+                .thenReturn(List.of(draftBooking("draft-1")));
+        org.mockito.Mockito.doThrow(new RuntimeException("DB error"))
+                .when(bookingOrchestrationService).cancelBookingOnPaymentFailure(eq("draft-1"), any());
+        when(bookingRepository.findPendingPaymentOlderThan(any(), anyInt()))
+                .thenReturn(List.of(pendingPaymentBooking("booking-2")));
+        when(paymentPort.checkOutcome("booking-2")).thenReturn(Optional.of(PaymentPort.PaymentOutcome.SUCCEEDED));
+
+        job.reconcile();
+
+        verify(bookingOrchestrationService).confirmBooking("booking-2");
     }
 
     @Test
     void confirmsBookingWhenPaymentServiceReportsSucceeded() {
+        when(bookingRepository.findDraftOlderThan(any(), anyInt())).thenReturn(List.of());
         when(bookingRepository.findPendingPaymentOlderThan(any(), anyInt()))
                 .thenReturn(List.of(pendingPaymentBooking("booking-1")));
         when(paymentPort.checkOutcome("booking-1")).thenReturn(Optional.of(PaymentPort.PaymentOutcome.SUCCEEDED));
@@ -76,6 +111,7 @@ class BookingReconciliationJobTest {
 
     @Test
     void cancelsBookingWhenPaymentServiceReportsFailed() {
+        when(bookingRepository.findDraftOlderThan(any(), anyInt())).thenReturn(List.of());
         when(bookingRepository.findPendingPaymentOlderThan(any(), anyInt()))
                 .thenReturn(List.of(pendingPaymentBooking("booking-1")));
         when(paymentPort.checkOutcome("booking-1")).thenReturn(Optional.of(PaymentPort.PaymentOutcome.FAILED));
@@ -88,6 +124,7 @@ class BookingReconciliationJobTest {
 
     @Test
     void leavesBookingAloneWhenOutcomeIsStillUnresolved() {
+        when(bookingRepository.findDraftOlderThan(any(), anyInt())).thenReturn(List.of());
         when(bookingRepository.findPendingPaymentOlderThan(any(), anyInt()))
                 .thenReturn(List.of(pendingPaymentBooking("booking-1")));
         when(paymentPort.checkOutcome("booking-1")).thenReturn(Optional.empty());
@@ -100,6 +137,7 @@ class BookingReconciliationJobTest {
 
     @Test
     void aFailureReconcilingOneBookingDoesNotStopTheRestOfTheBatch() {
+        when(bookingRepository.findDraftOlderThan(any(), anyInt())).thenReturn(List.of());
         when(bookingRepository.findPendingPaymentOlderThan(any(), anyInt()))
                 .thenReturn(List.of(pendingPaymentBooking("booking-1"), pendingPaymentBooking("booking-2")));
         when(paymentPort.checkOutcome("booking-1")).thenThrow(new RuntimeException("payment-service down"));
@@ -115,12 +153,14 @@ class BookingReconciliationJobTest {
     void queriesUsingTheConfiguredGracePeriodAndBatchSize() throws Exception {
         setField(job, "graceMinutes", 10L);
         setField(job, "batchSize", 50);
+        when(bookingRepository.findDraftOlderThan(any(), anyInt())).thenReturn(List.of());
         when(bookingRepository.findPendingPaymentOlderThan(any(), anyInt())).thenReturn(List.of());
 
         job.reconcile();
 
         ArgumentCaptor<Instant> cutoffCaptor = ArgumentCaptor.forClass(Instant.class);
-        verify(bookingRepository, times(1)).findPendingPaymentOlderThan(cutoffCaptor.capture(), eq(50));
+        verify(bookingRepository, times(1)).findDraftOlderThan(cutoffCaptor.capture(), eq(50));
+        verify(bookingRepository, times(1)).findPendingPaymentOlderThan(any(), eq(50));
         Instant expectedCutoff = Instant.now().minus(10, ChronoUnit.MINUTES);
         assertThat(cutoffCaptor.getValue()).isCloseTo(expectedCutoff, within(5, ChronoUnit.SECONDS));
     }

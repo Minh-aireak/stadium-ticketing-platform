@@ -35,6 +35,15 @@ public interface BookingRepository {
      */
     List<Booking> findPendingPaymentOlderThan(Instant updatedBefore, int limit);
 
+    /**
+     * DRAFT bookings last updated before {@code updatedBefore} — stuck in DRAFT prior to
+     * initiating payment (e.g. crash or network failure after draft creation). Used by
+     * {@code BookingReconciliationJob} to cancel stale draft bookings and release any seat holds.
+     *
+     * @param limit caps how many bookings a single run reconciles.
+     */
+    List<Booking> findDraftOlderThan(Instant updatedBefore, int limit);
+
     /** Page of a customer's bookings, newest first. */
     List<Booking> findByCustomerId(String customerId, int page, int size);
     long countByCustomerId(String customerId);

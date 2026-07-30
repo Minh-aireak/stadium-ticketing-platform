@@ -41,6 +41,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @DataJpaTest
 @TestPropertySource(properties = {
+        "spring.datasource.url=jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL",
+        "spring.datasource.driver-class-name=org.h2.Driver",
+        "spring.datasource.username=sa",
+        "spring.datasource.password=",
+        "spring.flyway.enabled=false",
         "spring.jpa.hibernate.ddl-auto=none",
         "spring.jpa.properties.hibernate.dialect="
 })

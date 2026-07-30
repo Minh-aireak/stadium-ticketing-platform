@@ -53,6 +53,30 @@ public class BookingReconciliationJob {
     @Scheduled(fixedDelayString = "${booking.payment-reconciliation-job.fixed-delay-ms:300000}")
     public void reconcile() {
         Instant cutoff = Instant.now().minus(graceMinutes, ChronoUnit.MINUTES);
+        reconcileDraftBookings(cutoff);
+        reconcilePendingPaymentBookings(cutoff);
+    }
+
+    private void reconcileDraftBookings(Instant cutoff) {
+        List<Booking> drafts = bookingRepository.findDraftOlderThan(cutoff, batchSize);
+        if (drafts.isEmpty()) {
+            return;
+        }
+
+        log.warn("Reconciling {} DRAFT booking(s) stuck past grace period", drafts.size());
+        for (Booking booking : drafts) {
+            try {
+                String bookingId = booking.getBookingId();
+                log.warn("Reconciling DRAFT booking {} as EXPIRED; cancelling and releasing seats if held", bookingId);
+                bookingOrchestrationService.cancelBookingOnPaymentFailure(bookingId, "Draft booking expired");
+            } catch (Exception e) {
+                log.error("DRAFT reconciliation failed for booking {}: {}",
+                        booking.getBookingId(), e.getMessage());
+            }
+        }
+    }
+
+    private void reconcilePendingPaymentBookings(Instant cutoff) {
         List<Booking> pending = bookingRepository.findPendingPaymentOlderThan(cutoff, batchSize);
         if (pending.isEmpty()) {
             return;
@@ -61,7 +85,7 @@ public class BookingReconciliationJob {
         log.warn("Reconciling {} PENDING_PAYMENT booking(s) with no resolved payment outcome", pending.size());
         for (Booking booking : pending) {
             try {
-                reconcileOne(booking);
+                reconcileOnePendingPayment(booking);
             } catch (Exception e) {
                 log.error("Payment reconciliation failed for booking {}: {}",
                         booking.getBookingId(), e.getMessage());
@@ -69,7 +93,7 @@ public class BookingReconciliationJob {
         }
     }
 
-    private void reconcileOne(Booking booking) {
+    private void reconcileOnePendingPayment(Booking booking) {
         String bookingId = booking.getBookingId();
         Optional<PaymentPort.PaymentOutcome> outcome = paymentPort.checkOutcome(bookingId);
         if (outcome.isEmpty()) {
