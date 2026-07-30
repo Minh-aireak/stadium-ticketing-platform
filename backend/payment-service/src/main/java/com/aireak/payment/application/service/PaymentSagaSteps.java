@@ -50,6 +50,13 @@ class PaymentSagaSteps {
         saveAndPublish(payment);
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markRefunded(String paymentId, String gatewayRefundId, String reason) {
+        Payment payment = findOrThrow(paymentId);
+        payment.refund(gatewayRefundId, reason);
+        saveAndPublish(payment);
+    }
+
     // Returns the reopened Payment so the caller (PaymentService) can read bookingId/amount/
     // currency for the follow-up gateway charge without a second lookup.
     @Transactional(propagation = Propagation.REQUIRES_NEW)

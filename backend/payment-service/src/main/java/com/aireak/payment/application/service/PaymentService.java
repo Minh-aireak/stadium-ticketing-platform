@@ -3,8 +3,10 @@ package com.aireak.payment.application.service;
 import com.aireak.payment.adapter.out.gateway.PaymentDeclinedException;
 import com.aireak.payment.application.port.in.GetPaymentUseCase;
 import com.aireak.payment.application.port.in.InitiatePaymentUseCase;
+import com.aireak.payment.application.port.in.RefundPaymentUseCase;
 import com.aireak.payment.application.port.in.RetryPaymentUseCase;
 import com.aireak.payment.application.port.in.command.InitiatePaymentCommand;
+import com.aireak.payment.domain.model.PaymentStatus;
 import com.aireak.payment.application.port.out.PaymentGatewayPort;
 import com.aireak.payment.application.port.out.PaymentIdempotencyPort;
 import com.aireak.payment.application.port.out.PaymentReconciliationPort;
@@ -47,7 +49,8 @@ import java.util.Optional;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase, RetryPaymentUseCase {
+public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase, RetryPaymentUseCase,
+        RefundPaymentUseCase {
 
     private static final String IDEMPOTENCY_KEY_PREFIX = "payment:idempotency:booking:";
     private static final Duration IDEMPOTENCY_TTL = Duration.ofMinutes(5);
@@ -193,6 +196,40 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
 
         persistSucceededOutcome(paymentId, payment.getBookingId(), gatewayTxId, payment.getAmount(), payment.getCurrency());
         return Optional.of(paymentId);
+    }
+
+    /**
+     * Refunds the SUCCEEDED payment for a booking (see {@link RefundPaymentUseCase} javadoc for
+     * the no-op cases). Same two-phase shape as {@link #execute}: the gateway refund call runs
+     * with no local transaction held, and only its outcome is persisted — a failure to persist an
+     * already-issued refund is a real gap (unlike {@link #execute}, there is no reconciliation
+     * backstop for it yet), but is left as a known limitation rather than duplicating the whole
+     * of {@link #persistSucceededOutcome}'s retry/reconciliation machinery for a path with no
+     * production traffic yet.
+     */
+    @Override
+    public Optional<String> refundByBookingId(String bookingId, String reason) {
+        Payment payment = paymentRepository.findByBookingId(bookingId).orElse(null);
+        if (payment == null || payment.getStatus() != PaymentStatus.SUCCEEDED) {
+            log.info("Refund skipped for bookingId={}: no SUCCEEDED payment found (status={})",
+                    bookingId, payment == null ? "none" : payment.getStatus());
+            return Optional.empty();
+        }
+
+        String gatewayRefundId;
+        try {
+            gatewayRefundId = paymentGatewayPort.refund(
+                    payment.getGatewayTransactionId(), payment.getAmount(), payment.getCurrency());
+        } catch (Exception e) {
+            log.error("Refund gateway call failed: paymentId={}, bookingId={}, reason={}",
+                    payment.getPaymentId(), bookingId, e.getMessage(), e);
+            throw new RuntimeException("Refund failed for bookingId=" + bookingId, e);
+        }
+
+        sagaSteps.markRefunded(payment.getPaymentId(), gatewayRefundId, reason);
+        log.info("Payment refunded: id={}, bookingId={}, gatewayRefundId={}",
+                payment.getPaymentId(), bookingId, gatewayRefundId);
+        return Optional.of(payment.getPaymentId());
     }
 
     private boolean isDeclinedException(Throwable t) {

@@ -2,6 +2,7 @@ package com.aireak.payment.domain.model;
 
 import com.aireak.payment.domain.event.PaymentFailedEvent;
 import com.aireak.payment.domain.event.PaymentInitiatedEvent;
+import com.aireak.payment.domain.event.PaymentRefundedEvent;
 import com.aireak.payment.domain.event.PaymentSucceededEvent;
 import com.aireak.payment.domain.exception.InvalidPaymentStatusException;
 import org.junit.jupiter.api.Test;
@@ -136,6 +137,41 @@ class PaymentTest {
         payment.markSucceeded("gw-tx-1");
 
         assertThatThrownBy(payment::retry)
+                .isInstanceOf(InvalidPaymentStatusException.class);
+    }
+
+    @Test
+    void refundTransitionsFromSucceededAndRaisesEvent() {
+        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+        payment.markSucceeded("gw-tx-1");
+        payment.pullDomainEvents(); // discard PaymentInitiatedEvent + PaymentSucceededEvent
+
+        payment.refund("gw-refund-1", "Match cancelled");
+
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.REFUNDED);
+        List<Object> events = payment.pullDomainEvents();
+        assertThat(events).hasSize(1);
+        PaymentRefundedEvent event = (PaymentRefundedEvent) events.get(0);
+        assertThat(event.gatewayRefundId()).isEqualTo("gw-refund-1");
+        assertThat(event.reason()).isEqualTo("Match cancelled");
+        assertThat(event.amount()).isEqualTo(AMOUNT);
+    }
+
+    @Test
+    void refundRejectsWhenNotSucceeded() {
+        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+
+        assertThatThrownBy(() -> payment.refund("gw-refund-1", "Match cancelled"))
+                .isInstanceOf(InvalidPaymentStatusException.class);
+    }
+
+    @Test
+    void refundRejectsWhenAlreadyRefunded() {
+        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+        payment.markSucceeded("gw-tx-1");
+        payment.refund("gw-refund-1", "first refund");
+
+        assertThatThrownBy(() -> payment.refund("gw-refund-2", "second refund"))
                 .isInstanceOf(InvalidPaymentStatusException.class);
     }
 

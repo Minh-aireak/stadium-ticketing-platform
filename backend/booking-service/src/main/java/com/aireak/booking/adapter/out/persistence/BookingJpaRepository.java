@@ -21,4 +21,6 @@ interface BookingJpaRepository extends JpaRepository<BookingJpaEntity, String> {
 
     Page<BookingJpaEntity> findByCustomerId(String customerId, Pageable pageable);
     long countByCustomerId(String customerId);
+
+    List<BookingJpaEntity> findByShowtimeIdAndStatusNot(String showtimeId, BookingStatus excludedStatus);
 }

@@ -56,6 +56,15 @@ class BookingSagaSteps {
         saveAndPublish(booking);
     }
 
+    /** @return whether the booking was CONFIRMED (and so needs a refund — see Booking#cancelDueToMatchCancellation) */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean cancelBookingDueToMatchCancellation(String bookingId, String reason) {
+        Booking booking = findOrThrow(bookingId);
+        boolean wasConfirmed = booking.cancelDueToMatchCancellation(reason);
+        saveAndPublish(booking);
+        return wasConfirmed;
+    }
+
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordCreationSucceeded(String bookingId) {
         Booking booking = findOrThrow(bookingId);

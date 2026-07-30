@@ -78,6 +78,14 @@ public class BookingPersistenceAdapter implements BookingRepository {
         return jpaRepository.countByCustomerId(customerId);
     }
 
+    @Override
+    public List<Booking> findActiveByShowtimeId(String showtimeId) {
+        return jpaRepository.findByShowtimeIdAndStatusNot(showtimeId, BookingStatus.CANCELLED)
+                .stream()
+                .map(this::toDomain)
+                .toList();
+    }
+
     private BookingJpaEntity toJpaEntity(Booking booking) {
         return BookingJpaEntity.builder()
                 .bookingId(booking.getBookingId())

@@ -158,6 +158,41 @@ class BookingTest {
     }
 
     @Test
+    void cancelDueToMatchCancellationFromConfirmedReturnsTrueAndRaisesEvent() {
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
+        booking.markPendingPayment();
+        booking.confirm();
+        booking.pullDomainEvents(); // discard BookingConfirmedEvent
+
+        boolean wasConfirmed = booking.cancelDueToMatchCancellation("Match cancelled by organizer");
+
+        assertThat(wasConfirmed).isTrue();
+        assertThat(booking.getStatus()).isEqualTo(BookingStatus.CANCELLED);
+        List<Object> events = booking.pullDomainEvents();
+        assertThat(events).hasSize(1);
+        assertThat(((BookingCancelledEvent) events.get(0)).reason()).isEqualTo("Match cancelled by organizer");
+    }
+
+    @Test
+    void cancelDueToMatchCancellationFromDraftReturnsFalse() {
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
+
+        boolean wasConfirmed = booking.cancelDueToMatchCancellation("Match cancelled by organizer");
+
+        assertThat(wasConfirmed).isFalse();
+        assertThat(booking.getStatus()).isEqualTo(BookingStatus.CANCELLED);
+    }
+
+    @Test
+    void cancelDueToMatchCancellationRejectsWhenAlreadyCancelled() {
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
+        booking.cancel("first cancel");
+
+        assertThatThrownBy(() -> booking.cancelDueToMatchCancellation("second cancel"))
+                .isInstanceOf(InvalidBookingStatusException.class);
+    }
+
+    @Test
     void recordCreationSucceededRaisesEventWhenStillPendingPayment() {
         Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
         booking.markPendingPayment();

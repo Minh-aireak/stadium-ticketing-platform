@@ -512,6 +512,36 @@ class BookingOrchestrationServiceTest {
     }
 
     @Nested
+    class CancelBookingsForShowtime {
+
+        @Test
+        void refundsOnlyBookingsThatWereConfirmedAndNeverReleasesSeats() {
+            when(bookingRepository.findActiveByShowtimeId(SHOWTIME_ID))
+                    .thenReturn(List.of(pendingPaymentBooking("booking-draft"), confirmedBooking("booking-paid")));
+            when(sagaSteps.cancelBookingDueToMatchCancellation("booking-draft", "Match cancelled")).thenReturn(false);
+            when(sagaSteps.cancelBookingDueToMatchCancellation("booking-paid", "Match cancelled")).thenReturn(true);
+
+            service.cancelBookingsForShowtime(SHOWTIME_ID, "Match cancelled");
+
+            verify(sagaSteps).cancelBookingDueToMatchCancellation("booking-draft", "Match cancelled");
+            verify(sagaSteps).cancelBookingDueToMatchCancellation("booking-paid", "Match cancelled");
+            verify(paymentPort, never()).refundPayment(eq("booking-draft"), anyString());
+            verify(paymentPort).refundPayment("booking-paid", "Match cancelled");
+            verify(ticketInventoryPort, never()).releaseSeats(anyString(), anyString(), any());
+        }
+
+        @Test
+        void isNoOpWhenNoActiveBookingsExistForTheShowtime() {
+            when(bookingRepository.findActiveByShowtimeId(SHOWTIME_ID)).thenReturn(List.of());
+
+            service.cancelBookingsForShowtime(SHOWTIME_ID, "Match cancelled");
+
+            verify(sagaSteps, never()).cancelBookingDueToMatchCancellation(anyString(), anyString());
+            verifyNoInteractions(paymentPort);
+        }
+    }
+
+    @Nested
     class ListMyBookings {
 
         @Test

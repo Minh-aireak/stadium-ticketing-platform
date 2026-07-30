@@ -6,8 +6,10 @@ import com.stripe.exception.CardException;
 import com.stripe.exception.InvalidRequestException;
 import com.stripe.exception.StripeException;
 import com.stripe.model.PaymentIntent;
+import com.stripe.model.Refund;
 import com.stripe.net.RequestOptions;
 import com.stripe.param.PaymentIntentCreateParams;
+import com.stripe.param.RefundCreateParams;
 import io.github.resilience4j.bulkhead.annotation.Bulkhead;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
@@ -97,6 +99,36 @@ public class StripeGatewayAdapter implements PaymentGatewayPort {
         }
     }
 
+    @Override
+    @Bulkhead(name = "payment-gateway", type = Bulkhead.Type.SEMAPHORE)
+    @CircuitBreaker(name = "payment-gateway", fallbackMethod = "refundFallback")
+    @Retry(name = "payment-gateway")
+    public String refund(String gatewayTransactionId, BigDecimal amount, String currency) {
+        try {
+            RefundCreateParams params = RefundCreateParams.builder()
+                    .setPaymentIntent(gatewayTransactionId)
+                    .setAmount(toSmallestUnit(amount, currency))
+                    .build();
+
+            // Idempotency key derived from the charge being refunded — a retried refund request
+            // for the same PaymentIntent must never double-refund it.
+            RequestOptions requestOptions = RequestOptions.builder()
+                    .setIdempotencyKey("refund:" + gatewayTransactionId)
+                    .build();
+
+            Refund refund = Refund.create(params, requestOptions);
+
+            log.info("[STRIPE] Refunded: paymentIntentId={}, amount={} {}, refundId={}",
+                    gatewayTransactionId, amount, currency, refund.getId());
+            return refund.getId();
+        } catch (InvalidRequestException e) {
+            throw new PaymentDeclinedException(
+                    "Refund rejected for paymentIntentId=" + gatewayTransactionId + ": " + e.getMessage(), e);
+        } catch (StripeException e) {
+            throw new RuntimeException("Stripe refund failed for paymentIntentId=" + gatewayTransactionId, e);
+        }
+    }
+
     /**
      * Stripe amounts are expressed in the currency's smallest unit. Zero-decimal currencies
      * (e.g. VND) have no fractional unit, so the amount is used as-is; all others are multiplied
@@ -111,6 +143,12 @@ public class StripeGatewayAdapter implements PaymentGatewayPort {
 
     private String chargeFallback(String bookingId, BigDecimal amount, String currency, Throwable t) {
         log.error("Payment gateway unavailable for bookingId={}: {}", bookingId, t.getMessage());
+        throw new RuntimeException("Payment gateway unavailable", t);
+    }
+
+    private String refundFallback(String gatewayTransactionId, BigDecimal amount, String currency, Throwable t) {
+        log.error("Payment gateway unavailable for refund of paymentIntentId={}: {}",
+                gatewayTransactionId, t.getMessage());
         throw new RuntimeException("Payment gateway unavailable", t);
     }
 }

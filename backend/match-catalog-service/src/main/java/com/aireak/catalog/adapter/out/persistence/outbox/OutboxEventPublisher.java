@@ -1,6 +1,8 @@
 package com.aireak.catalog.adapter.out.persistence.outbox;
 
 import com.aireak.catalog.application.port.out.DomainEventPublisher;
+import com.aireak.catalog.domain.event.MatchCancelledEvent;
+import com.aireak.catalog.domain.event.MatchCompletedEvent;
 import com.aireak.catalog.domain.event.MatchPublishedEvent;
 import com.aireak.catalog.domain.event.ShowtimeAddedEvent;
 import com.aireak.common.event.EventEnvelope;
@@ -67,6 +69,8 @@ public class OutboxEventPublisher implements DomainEventPublisher {
     private String resolveTopic(Object event) {
         return switch (event) {
             case MatchPublishedEvent ignored -> KafkaTopics.MATCH_PUBLISHED;
+            case MatchCancelledEvent ignored -> KafkaTopics.MATCH_CANCELLED;
+            case MatchCompletedEvent ignored -> KafkaTopics.MATCH_COMPLETED;
             case ShowtimeAddedEvent ignored -> KafkaTopics.SHOWTIME_CREATED;
             default -> null;
         };
@@ -75,6 +79,8 @@ public class OutboxEventPublisher implements DomainEventPublisher {
     private String resolveAggregateId(Object event) {
         return switch (event) {
             case MatchPublishedEvent e -> e.matchId();
+            case MatchCancelledEvent e -> e.matchId();
+            case MatchCompletedEvent e -> e.matchId();
             case ShowtimeAddedEvent e -> e.showtimeId();
             default -> throw new IllegalArgumentException(
                     "No aggregate id mapping for domain event type: " + event.getClass().getSimpleName());

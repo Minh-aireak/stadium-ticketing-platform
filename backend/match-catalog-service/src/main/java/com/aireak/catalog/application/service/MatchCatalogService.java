@@ -1,6 +1,8 @@
 package com.aireak.catalog.application.service;
 
 import com.aireak.catalog.application.port.in.AddShowtimeUseCase;
+import com.aireak.catalog.application.port.in.CancelMatchUseCase;
+import com.aireak.catalog.application.port.in.CompleteMatchUseCase;
 import com.aireak.catalog.application.port.in.CreateMatchUseCase;
 import com.aireak.catalog.application.port.in.GetMatchUseCase;
 import com.aireak.catalog.application.port.in.ListMatchesUseCase;
@@ -34,7 +36,7 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCase, PublishMatchUseCase,
-        ListMatchesUseCase, GetMatchUseCase {
+        ListMatchesUseCase, GetMatchUseCase, CancelMatchUseCase, CompleteMatchUseCase {
 
     private final MatchRepository matchRepository;
     private final MatchSearchPort matchSearchPort;
@@ -88,18 +90,24 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
         log.info("Match published: id={}", matchId);
     }
 
+    @Override
     @Transactional
     public void completeMatch(String matchId) {
         Match match = findOrThrow(matchId);
         match.complete();
         matchRepository.save(match);
+        eventPublisher.publishAll(match.pullDomainEvents());
+        log.info("Match completed: id={}", matchId);
     }
 
+    @Override
     @Transactional
-    public void cancelMatch(String matchId) {
+    public void cancelMatch(String matchId, String reason) {
         Match match = findOrThrow(matchId);
-        match.cancel();
+        match.cancel(reason);
         matchRepository.save(match);
+        eventPublisher.publishAll(match.pullDomainEvents());
+        log.info("Match cancelled: id={}, reason={}", matchId, reason);
     }
 
     private Match findOrThrow(String matchId) {

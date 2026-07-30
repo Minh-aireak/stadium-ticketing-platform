@@ -106,10 +106,13 @@ class MatchTest {
     void completeTransitionsFromPublished() {
         Match match = matchWithShowtime();
         match.publish();
+        match.pullDomainEvents();
 
         match.complete();
 
         assertThat(match.getStatus()).isEqualTo(MatchStatus.COMPLETED);
+        assertThat(match.pullDomainEvents()).hasSize(1)
+                .first().isInstanceOf(com.aireak.catalog.domain.event.MatchCompletedEvent.class);
     }
 
     @Test
@@ -124,19 +127,28 @@ class MatchTest {
     void cancelAllowedFromDraft() {
         Match match = Match.create("Home FC", "Away FC", "Premier League");
 
-        match.cancel();
+        match.cancel("Venue unavailable");
 
         assertThat(match.getStatus()).isEqualTo(MatchStatus.CANCELLED);
     }
 
     @Test
-    void cancelAllowedFromPublished() {
+    void cancelAllowedFromPublishedAndRaisesEventWithShowtimeIdsAndReason() {
         Match match = matchWithShowtime();
         match.publish();
+        match.pullDomainEvents();
+        String showtimeId = match.getShowtimes().get(0).getShowtimeId();
 
-        match.cancel();
+        match.cancel("Stadium closed for safety inspection");
 
         assertThat(match.getStatus()).isEqualTo(MatchStatus.CANCELLED);
+        assertThat(match.pullDomainEvents()).hasSize(1)
+                .first().satisfies(event -> {
+                    var cancelled = (com.aireak.catalog.domain.event.MatchCancelledEvent) event;
+                    assertThat(cancelled.matchId()).isEqualTo(match.getMatchId());
+                    assertThat(cancelled.showtimeIds()).containsExactly(showtimeId);
+                    assertThat(cancelled.reason()).isEqualTo("Stadium closed for safety inspection");
+                });
     }
 
     @Test
@@ -145,16 +157,16 @@ class MatchTest {
         match.publish();
         match.complete();
 
-        assertThatThrownBy(match::cancel)
+        assertThatThrownBy(() -> match.cancel("too late"))
                 .isInstanceOf(InvalidMatchStatusException.class);
     }
 
     @Test
     void cancelRejectsWhenAlreadyCancelled() {
         Match match = Match.create("Home FC", "Away FC", "Premier League");
-        match.cancel();
+        match.cancel("first cancellation");
 
-        assertThatThrownBy(match::cancel)
+        assertThatThrownBy(() -> match.cancel("second cancellation"))
                 .isInstanceOf(InvalidMatchStatusException.class);
     }
 

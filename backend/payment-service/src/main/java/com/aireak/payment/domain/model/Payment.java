@@ -2,6 +2,7 @@ package com.aireak.payment.domain.model;
 
 import com.aireak.payment.domain.event.PaymentFailedEvent;
 import com.aireak.payment.domain.event.PaymentInitiatedEvent;
+import com.aireak.payment.domain.event.PaymentRefundedEvent;
 import com.aireak.payment.domain.event.PaymentSucceededEvent;
 import com.aireak.payment.domain.exception.InvalidPaymentStatusException;
 
@@ -18,7 +19,8 @@ import java.util.UUID;
  * <p>Invariants:
  * <ul>
  *   <li>Only INITIATED payments can be marked as succeeded or failed</li>
- *   <li>Terminal states (SUCCEEDED, FAILED, REFUNDED) are immutable</li>
+ *   <li>Only SUCCEEDED payments can be refunded (see {@link #refund})</li>
+ *   <li>FAILED and REFUNDED are terminal — immutable except FAILED → INITIATED via {@link #retry}</li>
  * </ul>
  */
 public class Payment {
@@ -104,6 +106,18 @@ public class Payment {
                 : reason;
         this.failureReason = fullReason;
         domainEvents.add(new PaymentFailedEvent(paymentId, bookingId, fullReason));
+    }
+
+    /**
+     * Refunds a SUCCEEDED payment (e.g. its booking's match was cancelled) — the gateway call
+     * itself happens before this (see PaymentSagaSteps#markRefunded), so {@code gatewayRefundId}
+     * is already known by the time this runs. Terminal: a refund can never be retried or reversed
+     * through this aggregate.
+     */
+    public void refund(String gatewayRefundId, String reason) {
+        requireStatus(PaymentStatus.SUCCEEDED, "refund");
+        this.status = PaymentStatus.REFUNDED;
+        domainEvents.add(new PaymentRefundedEvent(paymentId, bookingId, amount, currency, gatewayRefundId, reason));
     }
 
     public boolean isAmbiguousFailure() {

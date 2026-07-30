@@ -1,6 +1,8 @@
 package com.aireak.catalog.adapter.in.web;
 
 import com.aireak.catalog.application.port.in.AddShowtimeUseCase;
+import com.aireak.catalog.application.port.in.CancelMatchUseCase;
+import com.aireak.catalog.application.port.in.CompleteMatchUseCase;
 import com.aireak.catalog.application.port.in.CreateMatchUseCase;
 import com.aireak.catalog.application.port.in.GetMatchUseCase;
 import com.aireak.catalog.application.port.in.ListMatchesUseCase;
@@ -69,6 +71,12 @@ class MatchControllerJwtAuthenticationIntegrationTest {
 
     @MockitoBean
     private GetMatchUseCase getMatchUseCase;
+
+    @MockitoBean
+    private CancelMatchUseCase cancelMatchUseCase;
+
+    @MockitoBean
+    private CompleteMatchUseCase completeMatchUseCase;
 
     @Test
     void rejectsRequestWithoutBearerToken() throws Exception {

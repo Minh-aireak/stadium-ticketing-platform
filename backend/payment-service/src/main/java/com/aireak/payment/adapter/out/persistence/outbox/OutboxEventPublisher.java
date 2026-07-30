@@ -5,6 +5,7 @@ import com.aireak.common.kafka.KafkaTopics;
 import com.aireak.payment.application.port.out.DomainEventPublisher;
 import com.aireak.payment.domain.event.PaymentFailedEvent;
 import com.aireak.payment.domain.event.PaymentInitiatedEvent;
+import com.aireak.payment.domain.event.PaymentRefundedEvent;
 import com.aireak.payment.domain.event.PaymentSucceededEvent;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
@@ -71,6 +72,7 @@ public class OutboxEventPublisher implements DomainEventPublisher {
             case PaymentInitiatedEvent ignored -> KafkaTopics.PAYMENT_INITIATED;
             case PaymentSucceededEvent ignored -> KafkaTopics.PAYMENT_SUCCEEDED;
             case PaymentFailedEvent ignored   -> KafkaTopics.PAYMENT_FAILED;
+            case PaymentRefundedEvent ignored -> KafkaTopics.PAYMENT_REFUNDED;
             default -> null;
         };
     }
@@ -80,6 +82,7 @@ public class OutboxEventPublisher implements DomainEventPublisher {
             case PaymentInitiatedEvent e -> e.paymentId();
             case PaymentSucceededEvent e -> e.paymentId();
             case PaymentFailedEvent e    -> e.paymentId();
+            case PaymentRefundedEvent e  -> e.paymentId();
             default -> throw new IllegalArgumentException(
                     "No aggregate id mapping for domain event type: " + event.getClass().getSimpleName());
         };

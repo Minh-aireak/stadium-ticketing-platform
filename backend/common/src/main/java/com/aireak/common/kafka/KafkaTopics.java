@@ -16,6 +16,8 @@ public final class KafkaTopics {
 
     // --- Catalog events ---
     public static final String MATCH_PUBLISHED    = "catalog.match.published";
+    public static final String MATCH_CANCELLED    = "catalog.match.cancelled";
+    public static final String MATCH_COMPLETED    = "catalog.match.completed";
     public static final String SHOWTIME_CREATED   = "catalog.showtime.created";
 
     // --- Inventory events ---
@@ -32,4 +34,5 @@ public final class KafkaTopics {
     public static final String PAYMENT_INITIATED  = "payment.payment.initiated";
     public static final String PAYMENT_SUCCEEDED  = "payment.payment.succeeded";
     public static final String PAYMENT_FAILED     = "payment.payment.failed";
+    public static final String PAYMENT_REFUNDED   = "payment.payment.refunded";
 }

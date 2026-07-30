@@ -265,6 +265,71 @@ class PaymentServiceTest {
     }
 
     @Test
+    void refundByBookingIdSkipsWhenNoPaymentExists() {
+        newService();
+        when(paymentRepository.findByBookingId("booking-1")).thenReturn(Optional.empty());
+
+        Optional<String> result = service.refundByBookingId("booking-1", "Match cancelled");
+
+        assertThat(result).isEmpty();
+        verify(paymentGatewayPort, never()).refund(any(), any(), any());
+        verify(sagaSteps, never()).markRefunded(any(), any(), any());
+    }
+
+    @Test
+    void refundByBookingIdSkipsWhenPaymentWasNeverSucceeded() {
+        newService();
+        Payment initiated = existingPayment("payment-1"); // status INITIATED
+        when(paymentRepository.findByBookingId("booking-1")).thenReturn(Optional.of(initiated));
+
+        Optional<String> result = service.refundByBookingId("booking-1", "Match cancelled");
+
+        assertThat(result).isEmpty();
+        verify(paymentGatewayPort, never()).refund(any(), any(), any());
+    }
+
+    @Test
+    void refundByBookingIdSkipsWhenAlreadyRefunded() {
+        newService();
+        Payment refunded = Payment.reconstitute("payment-1", "booking-1", new BigDecimal("100.00"), "USD",
+                PaymentStatus.REFUNDED, "gw-tx-1", null, Instant.now(), 2L);
+        when(paymentRepository.findByBookingId("booking-1")).thenReturn(Optional.of(refunded));
+
+        Optional<String> result = service.refundByBookingId("booking-1", "Match cancelled");
+
+        assertThat(result).isEmpty();
+        verify(paymentGatewayPort, never()).refund(any(), any(), any());
+    }
+
+    @Test
+    void refundByBookingIdChargesGatewayAndMarksRefundedOnSuccess() {
+        newService();
+        Payment succeeded = Payment.reconstitute("payment-1", "booking-1", new BigDecimal("100.00"), "USD",
+                PaymentStatus.SUCCEEDED, "gw-tx-1", null, Instant.now(), 1L);
+        when(paymentRepository.findByBookingId("booking-1")).thenReturn(Optional.of(succeeded));
+        when(paymentGatewayPort.refund("gw-tx-1", succeeded.getAmount(), succeeded.getCurrency()))
+                .thenReturn("gw-refund-1");
+
+        Optional<String> result = service.refundByBookingId("booking-1", "Match cancelled");
+
+        assertThat(result).contains("payment-1");
+        verify(sagaSteps).markRefunded("payment-1", "gw-refund-1", "Match cancelled");
+    }
+
+    @Test
+    void refundByBookingIdPropagatesWhenGatewayThrows() {
+        newService();
+        Payment succeeded = Payment.reconstitute("payment-1", "booking-1", new BigDecimal("100.00"), "USD",
+                PaymentStatus.SUCCEEDED, "gw-tx-1", null, Instant.now(), 1L);
+        when(paymentRepository.findByBookingId("booking-1")).thenReturn(Optional.of(succeeded));
+        when(paymentGatewayPort.refund(any(), any(), any())).thenThrow(new RuntimeException("gateway down"));
+
+        assertThatThrownBy(() -> service.refundByBookingId("booking-1", "Match cancelled"))
+                .isInstanceOf(RuntimeException.class);
+        verify(sagaSteps, never()).markRefunded(any(), any(), any());
+    }
+
+    @Test
     void getByBookingIdDelegatesToRepository() {
         newService();
         Payment payment = existingPayment("payment-1");

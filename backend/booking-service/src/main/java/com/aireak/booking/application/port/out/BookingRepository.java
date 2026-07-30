@@ -47,4 +47,11 @@ public interface BookingRepository {
     /** Page of a customer's bookings, newest first. */
     List<Booking> findByCustomerId(String customerId, int page, int size);
     long countByCustomerId(String customerId);
+
+    /**
+     * Every non-CANCELLED booking (DRAFT, PENDING_PAYMENT, or CONFIRMED) for a showtime — used by
+     * {@code MatchCancelledConsumer} to find every booking that needs cancelling (and, for the
+     * CONFIRMED ones, refunding) when the match those showtimes belong to is cancelled.
+     */
+    List<Booking> findActiveByShowtimeId(String showtimeId);
 }

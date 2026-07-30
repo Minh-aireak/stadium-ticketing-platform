@@ -120,6 +120,23 @@ public class Booking {
         domainEvents.add(new BookingCancelledEvent(bookingId, customerId, customerEmail, showtimeId, reason));
     }
 
+    /**
+     * System-triggered cancellation for a match that itself got cancelled (see
+     * MatchCancelledConsumer) — unlike {@link #cancel}, this is allowed from CONFIRMED (an
+     * already-paid booking) since the match no longer exists to honor it. Returns whether the
+     * booking was CONFIRMED, so the caller knows whether a refund is owed (a DRAFT/PENDING_PAYMENT
+     * booking was never charged).
+     */
+    public boolean cancelDueToMatchCancellation(String reason) {
+        if (status == BookingStatus.CANCELLED) {
+            throw new InvalidBookingStatusException("Cannot cancel a CANCELLED booking");
+        }
+        boolean wasConfirmed = status == BookingStatus.CONFIRMED;
+        this.status = BookingStatus.CANCELLED;
+        domainEvents.add(new BookingCancelledEvent(bookingId, customerId, customerEmail, showtimeId, reason));
+        return wasConfirmed;
+    }
+
     // Records that ticketInventoryPort.confirmReservation() actually succeeded. Idempotent —
     // safe to call again on a retry.
     public void markInventoryConfirmed() {

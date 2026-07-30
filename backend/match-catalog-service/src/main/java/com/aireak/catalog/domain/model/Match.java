@@ -1,5 +1,7 @@
 package com.aireak.catalog.domain.model;
 
+import com.aireak.catalog.domain.event.MatchCancelledEvent;
+import com.aireak.catalog.domain.event.MatchCompletedEvent;
 import com.aireak.catalog.domain.event.MatchPublishedEvent;
 import com.aireak.catalog.domain.event.ShowtimeAddedEvent;
 import com.aireak.catalog.domain.exception.InvalidMatchStatusException;
@@ -86,13 +88,21 @@ public class Match {
             throw new InvalidMatchStatusException("Only PUBLISHED matches can be completed, current: " + status);
         }
         this.status = MatchStatus.COMPLETED;
+        domainEvents.add(new MatchCompletedEvent(matchId, homeTeam, awayTeam));
     }
 
-    public void cancel() {
+    /**
+     * Cancels the match and raises {@link MatchCancelledEvent} carrying every showtime id —
+     * booking-service consumes it to cancel active bookings for those showtimes and refund the
+     * ones already paid (see AUDIT_FINAL_REPORT.md MEDIUM_match_cancel_unreachable).
+     */
+    public void cancel(String reason) {
         if (status == MatchStatus.COMPLETED || status == MatchStatus.CANCELLED) {
             throw new InvalidMatchStatusException("Cannot cancel a " + status + " match");
         }
         this.status = MatchStatus.CANCELLED;
+        List<String> showtimeIds = showtimes.stream().map(Showtime::getShowtimeId).toList();
+        domainEvents.add(new MatchCancelledEvent(matchId, homeTeam, awayTeam, showtimeIds, reason));
     }
 
     // ----------------------------------------------------------------

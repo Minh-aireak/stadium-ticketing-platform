@@ -159,7 +159,7 @@ class MatchCatalogServiceTest {
     }
 
     @Test
-    void completeMatchTransitionsAndSaves() {
+    void completeMatchTransitionsSavesAndPublishesEvent() {
         Match published = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
                 MatchStatus.PUBLISHED, Instant.now(), List.of());
         when(matchRepository.findById("match-1")).thenReturn(Optional.of(published));
@@ -169,19 +169,38 @@ class MatchCatalogServiceTest {
         ArgumentCaptor<Match> saved = ArgumentCaptor.forClass(Match.class);
         verify(matchRepository).save(saved.capture());
         assertThat(saved.getValue().getStatus()).isEqualTo(MatchStatus.COMPLETED);
+
+        ArgumentCaptor<List<Object>> published2 = ArgumentCaptor.forClass(List.class);
+        verify(eventPublisher).publishAll(published2.capture());
+        assertThat(published2.getValue()).hasSize(1);
+        assertThat(published2.getValue().get(0)).isInstanceOf(com.aireak.catalog.domain.event.MatchCompletedEvent.class);
     }
 
     @Test
-    void cancelMatchTransitionsAndSaves() {
-        Match draft = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
-                MatchStatus.DRAFT, Instant.now(), List.of());
-        when(matchRepository.findById("match-1")).thenReturn(Optional.of(draft));
+    void cancelMatchTransitionsSavesAndPublishesEventWithShowtimeIdsAndReason() {
+        Match published = matchWithShowtime("match-1");
+        when(matchRepository.findById("match-1")).thenReturn(Optional.of(published));
 
-        service.cancelMatch("match-1");
+        service.cancelMatch("match-1", "Stadium closed for safety inspection");
 
         ArgumentCaptor<Match> saved = ArgumentCaptor.forClass(Match.class);
         verify(matchRepository).save(saved.capture());
         assertThat(saved.getValue().getStatus()).isEqualTo(MatchStatus.CANCELLED);
+
+        ArgumentCaptor<List<Object>> published2 = ArgumentCaptor.forClass(List.class);
+        verify(eventPublisher).publishAll(published2.capture());
+        assertThat(published2.getValue()).hasSize(1);
+        var event = (com.aireak.catalog.domain.event.MatchCancelledEvent) published2.getValue().get(0);
+        assertThat(event.showtimeIds()).containsExactly("showtime-1");
+        assertThat(event.reason()).isEqualTo("Stadium closed for safety inspection");
+    }
+
+    @Test
+    void cancelMatchThrowsWhenMatchNotFound() {
+        when(matchRepository.findById("missing")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.cancelMatch("missing", "reason"))
+                .isInstanceOf(MatchNotFoundException.class);
     }
 
     @Test

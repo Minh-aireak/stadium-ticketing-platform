@@ -116,6 +116,26 @@ class OutboxEventPublisherIntegrationTest {
         assertThat(row.getPayload()).contains("MatchPublishedEvent", matchId, "Home FC", "Away FC");
     }
 
+    @Test
+    void cancellingMatchWritesOutboxRowWithShowtimeIdsAndReason() {
+        String matchId = matchCatalogService.createMatch("Home FC", "Away FC", "Premier League");
+        matchCatalogService.addShowtime(matchId, Instant.now().plusSeconds(3600), "venue-1", 100,
+                new BigDecimal("150000"), "VND");
+        matchCatalogService.publishMatch(matchId);
+        outboxEventJpaRepository.deleteAll(); // drop prior rows so only cancelMatch()'s row is asserted below
+
+        matchCatalogService.cancelMatch(matchId, "Stadium closed for safety inspection");
+
+        List<OutboxEventEntity> rows = outboxEventJpaRepository.findAll();
+
+        assertThat(rows).hasSize(1);
+        OutboxEventEntity row = rows.get(0);
+        assertThat(row.getAggregateType()).isEqualTo("catalog.match.cancelled");
+        assertThat(row.getAggregateId()).isEqualTo(matchId);
+        assertThat(row.getEventType()).isEqualTo("MatchCancelledEvent");
+        assertThat(row.getPayload()).contains("MatchCancelledEvent", matchId, "Stadium closed for safety inspection");
+    }
+
     @TestConfiguration
     static class TestSupportConfig {
 

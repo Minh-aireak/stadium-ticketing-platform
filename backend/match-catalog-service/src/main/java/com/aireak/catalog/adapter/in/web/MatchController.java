@@ -1,6 +1,8 @@
 package com.aireak.catalog.adapter.in.web;
 
 import com.aireak.catalog.application.port.in.AddShowtimeUseCase;
+import com.aireak.catalog.application.port.in.CancelMatchUseCase;
+import com.aireak.catalog.application.port.in.CompleteMatchUseCase;
 import com.aireak.catalog.application.port.in.CreateMatchUseCase;
 import com.aireak.catalog.application.port.in.GetMatchUseCase;
 import com.aireak.catalog.application.port.in.ListMatchesUseCase;
@@ -40,6 +42,8 @@ public class MatchController {
     private final PublishMatchUseCase publishMatchUseCase;
     private final ListMatchesUseCase listMatchesUseCase;
     private final GetMatchUseCase getMatchUseCase;
+    private final CancelMatchUseCase cancelMatchUseCase;
+    private final CompleteMatchUseCase completeMatchUseCase;
 
     /** POST /api/v1/matches — ADMIN only. */
     @PostMapping
@@ -64,6 +68,28 @@ public class MatchController {
     public ResponseEntity<Void> publish(@PathVariable String matchId) {
         requireAdminRole();
         publishMatchUseCase.publishMatch(matchId);
+        return ResponseEntity.ok().build();
+    }
+
+    /**
+     * PUT /api/v1/matches/{matchId}/cancel — ADMIN only. Raises {@code MatchCancelledEvent},
+     * which booking-service consumes to cancel active bookings for this match's showtimes and
+     * refund the ones already paid; notification-service emails affected customers via the
+     * existing booking-cancelled flow (see {@code MatchCancelledEvent} javadoc).
+     */
+    @PutMapping("/{matchId}/cancel")
+    public ResponseEntity<Void> cancel(@PathVariable String matchId,
+                                       @Valid @RequestBody CancelMatchRequest req) {
+        requireAdminRole();
+        cancelMatchUseCase.cancelMatch(matchId, req.reason());
+        return ResponseEntity.ok().build();
+    }
+
+    /** PUT /api/v1/matches/{matchId}/complete — ADMIN only. */
+    @PutMapping("/{matchId}/complete")
+    public ResponseEntity<Void> complete(@PathVariable String matchId) {
+        requireAdminRole();
+        completeMatchUseCase.completeMatch(matchId);
         return ResponseEntity.ok().build();
     }
 
@@ -126,6 +152,7 @@ public class MatchController {
     record AddShowtimeRequest(@NotNull Instant startTime, @NotBlank String venueId, @Positive int totalSeats,
                               @NotNull @DecimalMin(value = "0.0", inclusive = false) BigDecimal basePrice,
                               @NotBlank @Pattern(regexp = "^[A-Z]{3}$") String currency) {}
+    record CancelMatchRequest(@NotBlank String reason) {}
 
     record ShowtimeResponse(String showtimeId, Instant startTime, String venueId,
                             int totalSeats, int availableSeats, BigDecimal basePrice, String currency) {}

@@ -4,6 +4,7 @@ import com.aireak.common.exception.IdentityMismatchException;
 import com.aireak.common.security.AuthenticatedUser;
 import com.aireak.payment.application.port.in.GetPaymentUseCase;
 import com.aireak.payment.application.port.in.InitiatePaymentUseCase;
+import com.aireak.payment.application.port.in.RefundPaymentUseCase;
 import com.aireak.payment.application.port.in.RetryPaymentUseCase;
 import com.aireak.payment.application.port.out.BookingOwnershipPort;
 import com.aireak.payment.domain.model.Payment;
@@ -78,6 +79,9 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
 
     @MockitoBean
     private RetryPaymentUseCase retryPaymentUseCase;
+
+    @MockitoBean
+    private RefundPaymentUseCase refundPaymentUseCase;
 
     @MockitoBean
     private BookingOwnershipPort bookingOwnershipPort;
@@ -258,6 +262,39 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
                 .andExpect(status().isOk());
 
         verify(bookingOwnershipPort, never()).verifyCallerOwnsBooking(anyString(), anyString());
+    }
+
+    // ---------------------------------------------------------------
+    // Refund: internal-service token only
+    // ---------------------------------------------------------------
+
+    @Test
+    void refundRejectsACustomerTokenEvenIfItOwnsTheBooking() throws Exception {
+        mockMvc.perform(post("/api/v1/payments/{bookingId}/refund", BOOKING_ID)
+                        .header("Authorization", "Bearer " + validToken(CUSTOMER_A_ID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reason":"Match cancelled"}
+                                """))
+                .andExpect(status().isForbidden());
+
+        verify(refundPaymentUseCase, never()).refundByBookingId(anyString(), anyString());
+    }
+
+    @Test
+    void refundSucceedsForInternalServiceToken() throws Exception {
+        when(refundPaymentUseCase.refundByBookingId(BOOKING_ID, "Match cancelled"))
+                .thenReturn(Optional.of(PAYMENT_ID));
+
+        mockMvc.perform(post("/api/v1/payments/{bookingId}/refund", BOOKING_ID)
+                        .header("Authorization", "Bearer " + internalServiceToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reason":"Match cancelled"}
+                                """))
+                .andExpect(status().isOk());
+
+        verify(refundPaymentUseCase).refundByBookingId(BOOKING_ID, "Match cancelled");
     }
 
     // ---------------------------------------------------------------

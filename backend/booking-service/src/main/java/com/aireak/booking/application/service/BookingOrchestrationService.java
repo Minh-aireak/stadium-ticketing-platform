@@ -313,4 +313,22 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
         ticketInventoryPort.releaseSeats(booking.getShowtimeId(), bookingId, booking.getSeatSelection().seatCodes());
         log.info("Booking cancelled due to payment failure: id={}", bookingId);
     }
+
+    /**
+     * Called by {@code MatchCancelledConsumer} for every showtime of a cancelled match: cancels
+     * every active (non-CANCELLED) booking for it and refunds the ones that were CONFIRMED. The
+     * match no longer exists, so — unlike {@link #cancelBookingOnPaymentFailure} — inventory
+     * holds are not released here; nothing will ever book these showtimes again.
+     */
+    public void cancelBookingsForShowtime(String showtimeId, String reason) {
+        List<Booking> activeBookings = bookingRepository.findActiveByShowtimeId(showtimeId);
+        for (Booking booking : activeBookings) {
+            boolean wasConfirmed = sagaSteps.cancelBookingDueToMatchCancellation(booking.getBookingId(), reason);
+            if (wasConfirmed) {
+                paymentPort.refundPayment(booking.getBookingId(), reason);
+            }
+        }
+        log.info("Cancelled {} active booking(s) for showtime {} due to match cancellation",
+                activeBookings.size(), showtimeId);
+    }
 }

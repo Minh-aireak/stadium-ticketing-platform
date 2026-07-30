@@ -3,6 +3,7 @@ package com.aireak.payment.application.service;
 import com.aireak.payment.application.port.out.DomainEventPublisher;
 import com.aireak.payment.application.port.out.PaymentRepository;
 import com.aireak.payment.domain.event.PaymentFailedEvent;
+import com.aireak.payment.domain.event.PaymentRefundedEvent;
 import com.aireak.payment.domain.event.PaymentSucceededEvent;
 import com.aireak.payment.domain.model.Payment;
 import com.aireak.payment.domain.model.PaymentStatus;
@@ -122,6 +123,35 @@ class PaymentSagaStepsTest {
         ArgumentCaptor<List<Object>> published = ArgumentCaptor.forClass(List.class);
         verify(eventPublisher).publishAll(published.capture());
         assertThat(published.getValue().get(0)).isInstanceOf(PaymentFailedEvent.class);
+    }
+
+    @Test
+    void markRefundedSavesAndPublishesPaymentRefundedEvent() {
+        newSagaSteps();
+        Payment existing = Payment.reconstitute("payment-1", "booking-1", new BigDecimal("100.00"),
+                "USD", PaymentStatus.SUCCEEDED, "gw-tx-1", null, Instant.now(), 1L);
+        when(paymentRepository.findById("payment-1")).thenReturn(Optional.of(existing));
+
+        sagaSteps.markRefunded("payment-1", "gw-refund-1", "Match cancelled");
+
+        ArgumentCaptor<Payment> saved = ArgumentCaptor.forClass(Payment.class);
+        verify(paymentRepository).save(saved.capture());
+        assertThat(saved.getValue().getStatus()).isEqualTo(PaymentStatus.REFUNDED);
+        assertThat(saved.getValue()).isSameAs(existing);
+
+        ArgumentCaptor<List<Object>> published = ArgumentCaptor.forClass(List.class);
+        verify(eventPublisher).publishAll(published.capture());
+        assertThat(published.getValue()).hasSize(1);
+        assertThat(published.getValue().get(0)).isInstanceOf(PaymentRefundedEvent.class);
+    }
+
+    @Test
+    void markRefundedThrowsWhenPaymentNotFound() {
+        newSagaSteps();
+        when(paymentRepository.findById("missing")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> sagaSteps.markRefunded("missing", "gw-refund-1", "reason"))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
