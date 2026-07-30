@@ -2,35 +2,29 @@ package com.aireak.gateway.filter;
 
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
 
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+
 /**
- * Restricts {@code /actuator/metrics} and {@code /actuator/gateway} (internals: route table,
- * JVM/HTTP metrics) to the {@code ADMIN} role.
- *
- * <p>This service has no Spring Security filter chain — it is a plain WebFlux app whose only
- * auth is the custom {@link JwtAuthenticationWebFilter}. Spring Boot's standard
- * {@code management.endpoint.*.roles} property only ever gates the health endpoint's
- * show-details, and even then only works when a real {@code Authentication} is present in the
- * reactive security context, which nothing here populates — so it cannot be used to protect
- * arbitrary actuator endpoints like metrics/gateway. This filter is the actual enforcement
- * point, reading the role {@link JwtAuthenticationWebFilter} already extracted from the
- * validated JWT.
- *
- * <p>Runs after {@link JwtAuthenticationWebFilter} (order -50): neither path is in
- * {@code jwt.public-paths}, so by the time this filter runs the request already carries a
- * validated token (or was already rejected with 401) and, if valid, its role attribute.
+ * Restricts all non-public {@code /actuator/**} endpoints (e.g. metrics, gateway, env, beans) to the {@code ADMIN} role.
  */
 @Component
 @Order(-45)
 public class ActuatorAccessWebFilter implements WebFilter, Ordered {
 
     private static final String REQUIRED_ROLE = "ADMIN";
+    private static final String TYPE_BASE = "https://aireak.com/errors/";
 
     @Override
     public int getOrder() {
@@ -46,17 +40,30 @@ public class ActuatorAccessWebFilter implements WebFilter, Ordered {
 
         String role = exchange.getAttribute(JwtAuthenticationWebFilter.USER_ROLE_ATTRIBUTE);
         if (!REQUIRED_ROLE.equals(role)) {
-            exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
-            return exchange.getResponse().setComplete();
+            return forbidden(exchange, "ADMIN role required for actuator access");
         }
         return chain.filter(exchange);
     }
 
     private boolean isAdminOnly(String path) {
-        return isOrIsUnder(path, "/actuator/metrics") || isOrIsUnder(path, "/actuator/gateway");
+        if (!path.startsWith("/actuator")) {
+            return false;
+        }
+        return !path.equals("/actuator") && !path.equals("/actuator/")
+                && !path.startsWith("/actuator/health")
+                && !path.startsWith("/actuator/info");
     }
 
-    private boolean isOrIsUnder(String path, String prefix) {
-        return path.equals(prefix) || path.startsWith(prefix + "/");
+    private Mono<Void> forbidden(ServerWebExchange exchange, String detail) {
+        ServerHttpResponse response = exchange.getResponse();
+        response.setStatusCode(HttpStatus.FORBIDDEN);
+        response.getHeaders().setContentType(MediaType.APPLICATION_PROBLEM_JSON);
+
+        String body = String.format(
+                "{\"type\":\"%sforbidden\",\"title\":\"Forbidden\",\"status\":403,\"detail\":\"%s\",\"instance\":\"%s\",\"timestamp\":\"%s\"}",
+                TYPE_BASE, detail, exchange.getRequest().getURI().getPath(), Instant.now()
+        );
+        DataBuffer buffer = response.bufferFactory().wrap(body.getBytes(StandardCharsets.UTF_8));
+        return response.writeWith(Mono.just(buffer));
     }
 }
