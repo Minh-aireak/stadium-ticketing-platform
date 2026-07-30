@@ -117,22 +117,51 @@ class MatchControllerJwtAuthenticationIntegrationTest {
     @Test
     void validTokenReachesTheControllerWhichRejectsTheInvalidBody() throws Exception {
         mockMvc.perform(post("/api/v1/matches")
-                        .header("Authorization", "Bearer " + validToken())
+                        .header("Authorization", "Bearer " + validToken(null))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest());
     }
 
-    private String validToken() {
+    /** Closes the gap requireAdminRole() itself was never exercised by any test (only 401/400). */
+    @Test
+    void nonAdminTokenIsRejectedWithForbidden() throws Exception {
+        mockMvc.perform(post("/api/v1/matches")
+                        .header("Authorization", "Bearer " + validToken("USER"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"homeTeam":"Home FC","awayTeam":"Away FC","competition":"V.League 1"}"""))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(createMatchUseCase);
+    }
+
+    @Test
+    void adminTokenReachesTheControllerAndCreatesTheMatch() throws Exception {
+        org.mockito.Mockito.when(createMatchUseCase.createMatch("Home FC", "Away FC", "V.League 1"))
+                .thenReturn("match-1");
+
+        mockMvc.perform(post("/api/v1/matches")
+                        .header("Authorization", "Bearer " + validToken("ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"homeTeam":"Home FC","awayTeam":"Away FC","competition":"V.League 1"}"""))
+                .andExpect(status().isCreated());
+    }
+
+    /** @param role the JWT "role" claim value, or null to omit the claim entirely. */
+    private String validToken(String role) {
         try {
-            JWTClaimsSet claims = new JWTClaimsSet.Builder()
+            JWTClaimsSet.Builder claimsBuilder = new JWTClaimsSet.Builder()
                     .subject(UUID.randomUUID().toString())
                     .issuer(ISSUER)
                     .audience(List.of(AUDIENCE))
                     .issueTime(Date.from(Instant.now()))
-                    .expirationTime(Date.from(Instant.now().plusSeconds(300)))
-                    .build();
-            SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), claims);
+                    .expirationTime(Date.from(Instant.now().plusSeconds(300)));
+            if (role != null) {
+                claimsBuilder.claim("role", role);
+            }
+            SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), claimsBuilder.build());
             jwt.sign(new MACSigner(SECRET.getBytes(StandardCharsets.UTF_8)));
             return jwt.serialize();
         } catch (JOSEException e) {
