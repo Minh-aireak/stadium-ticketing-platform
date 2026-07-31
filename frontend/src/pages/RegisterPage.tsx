@@ -1,34 +1,54 @@
-import { useState, type FormEvent } from 'react'
+import { useState } from 'react'
+import { zodResolver } from '@hookform/resolvers/zod'
 import { motion } from 'framer-motion'
 import { CheckCircle2 } from 'lucide-react'
+import { useForm } from 'react-hook-form'
 import { Link } from 'react-router-dom'
 
 import { useAuth } from '@/features/auth/AuthContext'
+import { registerFormSchema, type RegisterFormValues } from '@/features/auth/registerSchema'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { getErrorMessage } from '@/lib/errors'
+import { PasswordChecklist } from '@/components/ui/password-checklist'
+import { PasswordStrengthMeter } from '@/components/ui/password-strength-meter'
+import { cn } from '@/lib/utils'
+import { getErrorMessage, isDuplicateEmailError } from '@/lib/errors'
 
 export function RegisterPage() {
-  const { register } = useAuth()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState(false)
+  const { register: registerAccount } = useAuth()
+  const [formError, setFormError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault()
-    setError(null)
-    setSubmitting(true)
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setError,
+    formState: { errors, isValid, isSubmitting },
+  } = useForm<RegisterFormValues>({
+    resolver: zodResolver(registerFormSchema),
+    mode: 'onChange',
+    defaultValues: { email: '', password: '', confirmPassword: '' },
+  })
+
+  const passwordValue = watch('password')
+
+  async function onSubmit(values: RegisterFormValues) {
+    setFormError(null)
     try {
-      await register(email, password)
+      await registerAccount(values.email.trim().toLowerCase(), values.password)
       setMessage('Đăng ký thành công! Vui lòng kiểm tra email để xác minh tài khoản.')
     } catch (err) {
-      setError(getErrorMessage(err, 'Không thể đăng ký. Vui lòng thử lại.'))
-    } finally {
-      setSubmitting(false)
+      if (isDuplicateEmailError(err)) {
+        setError('email', {
+          type: 'server',
+          message: 'Email này đã được đăng ký. Vui lòng dùng email khác hoặc đăng nhập.',
+        })
+        return
+      }
+      setFormError(getErrorMessage(err, 'Không thể đăng ký. Vui lòng thử lại.'))
     }
   }
 
@@ -55,39 +75,67 @@ export function RegisterPage() {
               </div>
             ) : (
               <>
-                <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+                <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor="email">Email</Label>
                     <Input
                       id="email"
                       type="email"
                       autoComplete="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      aria-invalid={!!errors.email}
+                      className={cn(errors.email && 'border-danger focus-visible:ring-danger')}
+                      {...register('email')}
                     />
+                    {errors.email && <p className="text-xs text-danger">{errors.email.message}</p>}
                   </div>
+
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor="password">Mật khẩu</Label>
                     <Input
                       id="password"
                       type="password"
                       autoComplete="new-password"
-                      minLength={8}
-                      required
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
+                      aria-invalid={!!errors.password}
+                      className={cn(errors.password && 'border-danger focus-visible:ring-danger')}
+                      {...register('password')}
                     />
+                    {errors.password && <p className="text-xs text-danger">{errors.password.message}</p>}
+                    {passwordValue && (
+                      <div className="flex flex-col gap-2 pt-1">
+                        <PasswordStrengthMeter password={passwordValue} />
+                        <PasswordChecklist password={passwordValue} />
+                      </div>
+                    )}
                   </div>
 
-                  {error && (
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="confirmPassword">Nhập lại mật khẩu</Label>
+                    <Input
+                      id="confirmPassword"
+                      type="password"
+                      autoComplete="new-password"
+                      aria-invalid={!!errors.confirmPassword}
+                      className={cn(errors.confirmPassword && 'border-danger focus-visible:ring-danger')}
+                      {...register('confirmPassword')}
+                    />
+                    {errors.confirmPassword && (
+                      <p className="text-xs text-danger">{errors.confirmPassword.message}</p>
+                    )}
+                  </div>
+
+                  {formError && (
                     <p className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
-                      {error}
+                      {formError}
                     </p>
                   )}
 
-                  <Button type="submit" variant="gradient" disabled={submitting} className="mt-2">
-                    {submitting ? 'Đang đăng ký…' : 'Đăng ký'}
+                  <Button
+                    type="submit"
+                    variant="gradient"
+                    disabled={!isValid || isSubmitting}
+                    className="mt-2"
+                  >
+                    {isSubmitting ? 'Đang đăng ký…' : 'Đăng ký'}
                   </Button>
                 </form>
 
