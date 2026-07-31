@@ -49,6 +49,19 @@ jwt:
   expiration-seconds: ${JWT_EXPIRATION_SECONDS:900}
   issuer: ${JWT_ISSUER:https://auth.aireak.com}
   audience: ${JWT_AUDIENCE:aireak-platform}
+  # Must mirror SecurityConfig's permitAll() requestMatchers — these are the entry points that
+  # establish identity in the first place (or have no user JWT to present), so the common
+  # module's stateless JwtAuthenticationFilter must not reject them for lacking a bearer token.
+  excluded-paths:
+    - /api/v1/auth/register
+    - /api/v1/auth/login
+    - /api/v1/auth/refresh
+    - /api/v1/auth/logout
+    - /api/v1/auth/verify-email
+    - /actuator/health
+    - /actuator/info
+    # Prometheus has no user JWT to present — public here for the same reason health/info are.
+    - /actuator/prometheus
 
 refresh-token:
   # Absolute cap on a refresh session's lifetime — rotation does NOT extend this. Forces re-login every 30 days.
