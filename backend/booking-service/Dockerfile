@@ -30,5 +30,5 @@ COPY --from=build /workspace/booking-service/target/*.jar app.jar
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 USER appuser
 
-EXPOSE 8082
+EXPOSE 8086
 ENTRYPOINT ["java", "-jar", "app.jar"]

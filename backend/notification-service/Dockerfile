@@ -30,5 +30,5 @@ COPY --from=build /workspace/notification-service/target/*.jar app.jar
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 USER appuser
 
-EXPOSE 8086
+EXPOSE 8085
 ENTRYPOINT ["java", "-jar", "app.jar"]

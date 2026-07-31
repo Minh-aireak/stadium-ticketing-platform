@@ -168,9 +168,12 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --save 60 1 --loglevel warning
+    # Every consumer (Redisson autoconfig, Spring Data's Lettuce client) sends an AUTH command
+    # unconditionally once spring.data.redis.password is set to anything, even "" — and a
+    # password-less Redis rejects AUTH outright, so a real password is required end-to-end here.
+    command: redis-server --save 60 1 --loglevel warning --requirepass ${REDIS_PASSWORD}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -289,6 +292,258 @@ services:
       interval: 20s
       timeout: 10s
       retries: 10
+
+  # ---- Mailpit (SMTP catcher for notification-service's outgoing emails) -----
+  # Web UI at http://localhost:8025 shows every email sent by notification-service —
+  # nothing is actually delivered to a real inbox in local dev.
+  mailpit:
+    image: axllent/mailpit:v1.24
+    container_name: mailpit_stadium_booking
+    networks: [stadium-net]
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  # ---- identity-service (auth, JWT issuance, admin bootstrap) ----------
+  identity-service:
+    build:
+      context: ./backend
+      dockerfile: identity-service/Dockerfile
+    container_name: identity-service_stadium_booking
+    networks: [stadium-net]
+    depends_on:
+      postgres-identity:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      DB_HOST: postgres-identity
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER}
+      JWT_AUDIENCE: ${JWT_AUDIENCE}
+      JWT_EXPIRATION_SECONDS: ${JWT_EXPIRATION_SECONDS}
+      REFRESH_TOKEN_ABSOLUTE_TTL_SECONDS: ${REFRESH_TOKEN_ABSOLUTE_TTL_SECONDS}
+      AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME}
+      AUTH_COOKIE_PATH: ${AUTH_COOKIE_PATH}
+      AUTH_COOKIE_DOMAIN: ${AUTH_COOKIE_DOMAIN}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE}
+      AUTH_COOKIE_SAME_SITE: ${AUTH_COOKIE_SAME_SITE}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-}
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
+
+  # ---- match-catalog-service (match browse/search, Elasticsearch read model) ----
+  match-catalog-service:
+    build:
+      context: ./backend
+      dockerfile: match-catalog-service/Dockerfile
+    container_name: match-catalog-service_stadium_booking
+    networks: [stadium-net]
+    depends_on:
+      postgres-catalog:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    ports:
+      - "8082:8082"
+    environment:
+      DB_HOST: postgres-catalog
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      ELASTICSEARCH_HOST: elasticsearch
+      ELASTICSEARCH_PORT: 9200
+      ELASTICSEARCH_SCHEME: http
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER}
+      JWT_AUDIENCE: ${JWT_AUDIENCE}
+
+  # ---- ticket-inventory-service (seat holds, Redisson locks) -----------
+  ticket-inventory-service:
+    build:
+      context: ./backend
+      dockerfile: ticket-inventory-service/Dockerfile
+    container_name: ticket-inventory-service_stadium_booking
+    networks: [stadium-net]
+    depends_on:
+      postgres-inventory:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    environment:
+      DB_HOST: postgres-inventory
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER}
+      JWT_AUDIENCE: ${JWT_AUDIENCE}
+
+  # ---- payment-service (Stripe charges, refunds) -----------------------
+  payment-service:
+    build:
+      context: ./backend
+      dockerfile: payment-service/Dockerfile
+    container_name: payment-service_stadium_booking
+    networks: [stadium-net]
+    depends_on:
+      postgres-payment:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8084:8084"
+    environment:
+      DB_HOST: postgres-payment
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # booking-service is reachable inside stadium-net by its container DNS name.
+      BOOKING_SERVICE_URL: http://booking-service:8086
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER}
+      JWT_AUDIENCE: ${JWT_AUDIENCE}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+
+  # ---- notification-service (Kafka consumer, transactional email) -----
+  notification-service:
+    build:
+      context: ./backend
+      dockerfile: notification-service/Dockerfile
+    container_name: notification-service_stadium_booking
+    networks: [stadium-net]
+    depends_on:
+      postgres-notification:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    ports:
+      - "8085:8085"
+    environment:
+      DB_HOST: postgres-notification
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      MAIL_HOST: mailpit
+      MAIL_PORT: 1025
+      # The verify-email link is opened by the end user's browser, so it must point at the
+      # host-mapped port, not identity-service's container DNS name.
+      IDENTITY_SERVICE_BASE_URL: http://localhost:8081
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER}
+      JWT_AUDIENCE: ${JWT_AUDIENCE}
+
+  # ---- booking-service (saga orchestration across inventory/payment) --
+  booking-service:
+    build:
+      context: ./backend
+      dockerfile: booking-service/Dockerfile
+    container_name: booking-service_stadium_booking
+    networks: [stadium-net]
+    depends_on:
+      postgres-booking:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      ticket-inventory-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
+    ports:
+      - "8086:8086"
+    environment:
+      DB_HOST: postgres-booking
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      TICKET_INVENTORY_SERVICE_URL: http://ticket-inventory-service:8083
+      PAYMENT_SERVICE_URL: http://payment-service:8084
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER}
+      JWT_AUDIENCE: ${JWT_AUDIENCE}
+
+  # ---- api-gateway (single entrypoint, JWT validation, rate limiting) --
+  api-gateway:
+    build:
+      context: ./backend
+      dockerfile: api-gateway/Dockerfile
+    container_name: api-gateway_stadium_booking
+    networks: [stadium-net]
+    depends_on:
+      redis:
+        condition: service_healthy
+      identity-service:
+        condition: service_started
+      match-catalog-service:
+        condition: service_started
+      ticket-inventory-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
+      booking-service:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      IDENTITY_SERVICE_URL: http://identity-service:8081
+      MATCH_CATALOG_SERVICE_URL: http://match-catalog-service:8082
+      TICKET_INVENTORY_SERVICE_URL: http://ticket-inventory-service:8083
+      PAYMENT_SERVICE_URL: http://payment-service:8084
+      NOTIFICATION_SERVICE_URL: http://notification-service:8085
+      BOOKING_SERVICE_URL: http://booking-service:8086
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER}
+      JWT_AUDIENCE: ${JWT_AUDIENCE}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+
+  # ---- frontend (React/Vite SPA, built and served via Nginx) -----------
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Baked into the JS bundle at build time — must be reachable from the browser
+        # (host-mapped api-gateway port), not api-gateway's container DNS name.
+        VITE_API_BASE_URL: http://localhost:8080/api/v1
+    container_name: frontend_stadium_booking
+    networks: [stadium-net]
+    depends_on:
+      - api-gateway
+    ports:
+      - "5173:80"
 
   # ---- Prometheus (metrics scraping) -----------------------------------
   # Scrapes /actuator/prometheus on every backend service's main API port (see

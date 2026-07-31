@@ -30,5 +30,5 @@ COPY --from=build /workspace/match-catalog-service/target/*.jar app.jar
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 USER appuser
 
-EXPOSE 8085
+EXPOSE 8082
 ENTRYPOINT ["java", "-jar", "app.jar"]
