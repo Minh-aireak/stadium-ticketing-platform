@@ -66,12 +66,13 @@
             <artifactId>resilience4j-spring-boot4</artifactId>
         </dependency>
 
-        <!-- Nimbus JOSE+JWT — used by test code to sign tokens in integration tests.
+        <!-- Nimbus JOSE+JWT — needed at runtime by common's JwtAuthenticationFilter (it's an
+             optional dependency there, so every consuming service must redeclare it), and by
+             test code to sign tokens in integration tests.
              Replaces JJWT (jjwt-jackson conflicted with Spring Boot 4.1's Jackson 3). -->
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-oauth2-jose</artifactId>
-            <scope>test</scope>
         </dependency>
 
         <!-- Common -->
