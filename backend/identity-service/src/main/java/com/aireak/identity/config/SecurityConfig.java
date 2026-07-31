@@ -1,6 +1,5 @@
 package com.aireak.identity.config;
 
-import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -12,11 +11,6 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
-import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.cors.CorsConfigurationSource;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-
-import java.util.List;
 
 /**
  * Spring Security configuration for identity-service.
@@ -30,18 +24,21 @@ import java.util.List;
  * CSRF protection (a JWT-in-header request would not, since an attacker's page can't read/set
  * an Authorization header cross-site — but the browser attaches cookies automatically).
  * Login/register are exempt: no session cookie exists yet to be ridden.
+ *
+ * <p>CORS is deliberately NOT configured here — the gateway is the single source of truth for
+ * allowed origins (see api-gateway's CorsConfig) and this service is never reached directly by
+ * a browser. A second CORS layer here would add its own Access-Control-Allow-Origin header on
+ * top of the gateway's, and Spring Cloud Gateway forwards downstream response headers as-is —
+ * the client ends up with a duplicated header, which browsers reject outright, masking every
+ * response (including legitimate validation errors) as an opaque network failure.
  */
 @Configuration
 @EnableWebSecurity
-@RequiredArgsConstructor
 public class SecurityConfig {
-
-    private final CorsProperties corsProperties;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .csrf(csrf -> csrf
                 .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
                 .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
@@ -75,17 +72,5 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder(12); // strength 12 for adequate security
-    }
-
-    private CorsConfigurationSource corsConfigurationSource() {
-        CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(corsProperties.allowedOrigins());
-        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-XSRF-TOKEN"));
-        configuration.setExposedHeaders(List.of("X-XSRF-TOKEN"));
-        configuration.setAllowCredentials(true); // required for the refresh cookie to be sent cross-origin
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", configuration);
-        return source;
     }
 }
