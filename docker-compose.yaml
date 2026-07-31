@@ -21,6 +21,8 @@ volumes:
   redis_data:
   kafka_data:
   elasticsearch_data:
+  prometheus_data:
+  grafana_data:
 
 services:
 
@@ -287,6 +289,75 @@ services:
       interval: 20s
       timeout: 10s
       retries: 10
+
+  # ---- Prometheus (metrics scraping) -----------------------------------
+  # Scrapes /actuator/prometheus on every backend service's main API port (see
+  # infra/prometheus/prometheus.yml) via each service's container DNS name, since every
+  # backend service is now built and run as a container on stadium-net (see above).
+  # /actuator/prometheus is deliberately public (no ADMIN JWT required) — see
+  # backend/common/.../ActuatorAccessFilter.java — since Prometheus has no user JWT to present.
+  prometheus:
+    image: prom/prometheus:v3.13.2
+    container_name: prometheus_stadium_booking
+    networks: [stadium-net]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ---- Node Exporter (host CPU/memory/disk/network metrics) ------------
+  # NOTE (Windows/Mac): Docker Desktop runs containers inside a Linux VM, so the /proc,
+  # /sys, / mounts below report metrics for that VM, not the raw Windows/Mac host. On a
+  # native Linux host this reports the real host machine.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: node_exporter_stadium_booking
+    networks: [stadium-net]
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    ports:
+      - "9100:9100"
+
+  # ---- Grafana (dashboards over Prometheus) ----------------------------
+  grafana:
+    image: grafana/grafana:13.1.1
+    container_name: grafana_stadium_booking
+    networks: [stadium-net]
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   # ---- Kafka UI (optional dev tool) -----------------------------------
   kafka-ui:

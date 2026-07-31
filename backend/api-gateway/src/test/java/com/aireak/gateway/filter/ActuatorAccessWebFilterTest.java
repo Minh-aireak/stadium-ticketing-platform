@@ -94,4 +94,18 @@ class ActuatorAccessWebFilterTest {
 
         assertThat(chainInvoked[0]).isTrue();
     }
+
+    @Test
+    void allowsPrometheusWithoutAdminRole() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/actuator/prometheus").build());
+
+        boolean[] chainInvoked = {false};
+        filter.filter(exchange, ex -> {
+            chainInvoked[0] = true;
+            return Mono.empty();
+        }).block(Duration.ofSeconds(5));
+
+        assertThat(chainInvoked[0]).isTrue();
+    }
 }

@@ -30,8 +30,19 @@ spring:
 
   data:
     redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6319}
+      password: ${REDIS_PASSWORD:}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT:30000}
+      # Redisson (RedissonIdempotencyStore + distributed lock), not Spring Data's Lettuce client,
+      # is what actually talks to Redis here — it manages its own connection pool and does not
+      # read these lettuce.pool.* properties. Kept for consistency with the other services.
+      lettuce:
+        pool:
+          max-active: ${REDIS_LETTUCE_POOL_MAX_ACTIVE:8}
+          max-idle: ${REDIS_LETTUCE_POOL_MAX_IDLE:8}
+          min-idle: ${REDIS_LETTUCE_POOL_MIN_IDLE:0}
+          max-wait: ${REDIS_LETTUCE_POOL_MAX_WAIT:-1ms}
 
 server:
   port: 8086
@@ -57,6 +68,8 @@ jwt:
   excluded-paths:
     - /actuator/health
     - /actuator/info
+    # Prometheus has no user JWT to present — public here for the same reason health/info are.
+    - /actuator/prometheus
     - /v3/api-docs/**
     - /swagger-ui/**
     - /swagger-ui.html
@@ -149,7 +162,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,circuitbreakers,bulkheads,ratelimiters
+        include: health,info,metrics,circuitbreakers,bulkheads,ratelimiters,prometheus
   endpoint:
     health:
       show-details: when-authorized

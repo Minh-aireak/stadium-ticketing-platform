@@ -17,7 +17,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 
 /**
- * Restricts all non-public {@code /actuator/**} endpoints (e.g. metrics, gateway, env, beans) to the {@code ADMIN} role.
+ * Restricts all non-public {@code /actuator/**} endpoints (e.g. metrics, gateway, env, beans) to
+ * the {@code ADMIN} role. {@code /actuator/prometheus} is public alongside health/info — Prometheus
+ * has no user JWT to present when it scrapes (see {@code docker-compose.yaml}'s prometheus service).
  */
 @Component
 @Order(-45)
@@ -51,7 +53,8 @@ public class ActuatorAccessWebFilter implements WebFilter, Ordered {
         }
         return !path.equals("/actuator") && !path.equals("/actuator/")
                 && !path.startsWith("/actuator/health")
-                && !path.startsWith("/actuator/info");
+                && !path.startsWith("/actuator/info")
+                && !path.startsWith("/actuator/prometheus");
     }
 
     private Mono<Void> forbidden(ServerWebExchange exchange, String detail) {

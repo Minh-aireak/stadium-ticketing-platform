@@ -62,7 +62,10 @@ public class SecurityConfig {
                     "/api/v1/auth/logout",
                     "/api/v1/auth/verify-email",
                     "/actuator/health",
-                    "/actuator/info"
+                    "/actuator/info",
+                    // Prometheus has no user JWT to present — public here for the same reason
+                    // health/info are (see docker-compose.yaml's prometheus service).
+                    "/actuator/prometheus"
                 ).permitAll()
                 .anyRequest().authenticated()
             );

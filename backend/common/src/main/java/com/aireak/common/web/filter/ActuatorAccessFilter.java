@@ -26,9 +26,11 @@ import java.util.Optional;
 /**
  * Secures Spring Boot Actuator endpoints across backend microservices.
  *
- * <p>Public access is allowed only to {@code /actuator/health} and {@code /actuator/info}.
- * Sensitive operational endpoints (metrics, env, prometheus, beans, circuitbreakers, etc.)
- * require authentication and the {@code ADMIN} role.
+ * <p>Public access is allowed only to {@code /actuator/health}, {@code /actuator/info}, and
+ * {@code /actuator/prometheus} — the last one because Prometheus has no user JWT to present when
+ * it scrapes (see {@code docker-compose.yaml}'s prometheus service), the same reason health/info
+ * are public. Every other operational endpoint (env, beans, circuitbreakers, etc.) still requires
+ * authentication and the {@code ADMIN} role.
  */
 @Component
 @Order(3)
@@ -79,7 +81,8 @@ public class ActuatorAccessFilter extends OncePerRequestFilter {
     private boolean isPublicActuatorPath(String path) {
         return path.equals("/actuator") || path.equals("/actuator/")
                 || PATH_MATCHER.match("/actuator/health/**", path)
-                || PATH_MATCHER.match("/actuator/info/**", path);
+                || PATH_MATCHER.match("/actuator/info/**", path)
+                || PATH_MATCHER.match("/actuator/prometheus", path);
     }
 
     private void reject(HttpServletResponse response, HttpStatus status, String detail, String errorType) throws IOException {

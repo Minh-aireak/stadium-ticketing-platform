@@ -1,0 +1,15 @@
+# Auto-loads any dashboard JSON dropped into this folder on Grafana startup — drop exported
+# dashboard JSON here (e.g. Grafana.com dashboard 4701 "JVM (Micrometer)" or 12900 "Spring Boot
+# 2.1 System Monitor") and it appears without a manual import step.
+apiVersion: 1
+
+providers:
+  - name: Stadium Ticketing Platform
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

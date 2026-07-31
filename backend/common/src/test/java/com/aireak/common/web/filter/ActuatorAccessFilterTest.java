@@ -63,6 +63,16 @@ class ActuatorAccessFilterTest {
     @Test
     void allowsMetricsForAdminRole() throws Exception {
         AuthenticatedUserContext.set(new AuthenticatedUser("admin-1", "admin@example.com", "ADMIN", "token"));
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/actuator/metrics");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, alwaysInvokedChain());
+
+        assertThat(response.getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    void allowsPrometheusWithoutAuthentication() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/actuator/prometheus");
         MockHttpServletResponse response = new MockHttpServletResponse();
 

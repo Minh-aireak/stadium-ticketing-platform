@@ -3,8 +3,18 @@ spring:
     name: api-gateway
   data:
     redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6319}
+      password: ${REDIS_PASSWORD:}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT:30000}
+      # Backs GatewayRedisAutoConfiguration's ReactiveRedisTemplate (see RateLimiterRegistryConfig),
+      # which is built on Spring Data's reactive Lettuce client — pool settings below apply to it.
+      lettuce:
+        pool:
+          max-active: ${REDIS_LETTUCE_POOL_MAX_ACTIVE:8}
+          max-idle: ${REDIS_LETTUCE_POOL_MAX_IDLE:8}
+          min-idle: ${REDIS_LETTUCE_POOL_MIN_IDLE:0}
+          max-wait: ${REDIS_LETTUCE_POOL_MAX_WAIT:-1ms}
   cloud:
     gateway:
       server:
@@ -76,6 +86,8 @@ jwt:
     - /api/v1/matches/**
     - /actuator/health
     - /actuator/info
+    # Prometheus has no user JWT to present — public here for the same reason health/info are.
+    - /actuator/prometheus
     - /v3/api-docs/**
     - /swagger-ui/**
     - /swagger-ui.html
@@ -95,7 +107,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,gateway
+        include: health,info,metrics,gateway,prometheus
   endpoint:
     health:
       # "always" leaked DB/broker connection details to any anonymous caller. This service has no
