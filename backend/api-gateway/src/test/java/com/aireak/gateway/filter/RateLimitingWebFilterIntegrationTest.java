@@ -34,14 +34,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 class RateLimitingWebFilterIntegrationTest {
 
+    // --requirepass is required: Redisson's autoconfiguration sends AUTH unconditionally once
+    // spring.data.redis.password resolves to anything, even "" — and a password-less Redis
+    // rejects any AUTH attempt outright, so a passwordless container fails every connection.
     @Container
     static GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
-            .withExposedPorts(6379);
+            .withExposedPorts(6379)
+            .withCommand("redis-server", "--requirepass", "test-redis-password");
 
     @DynamicPropertySource
     static void registerProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.data.redis.host", redis::getHost);
         registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
+        registry.add("spring.data.redis.password", () -> "test-redis-password");
         registry.add("IDENTITY_SERVICE_URL", () -> "http://localhost:19081");
         registry.add("MATCH_CATALOG_SERVICE_URL", () -> "http://localhost:19082");
         registry.add("TICKET_INVENTORY_SERVICE_URL", () -> "http://localhost:19083");

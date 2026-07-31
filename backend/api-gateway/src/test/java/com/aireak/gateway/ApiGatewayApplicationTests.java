@@ -32,14 +32,19 @@ import org.testcontainers.utility.DockerImageName;
 })
 class ApiGatewayApplicationTests {
 
+	// --requirepass is required: Redisson's autoconfiguration sends AUTH unconditionally once
+	// spring.data.redis.password resolves to anything, even "" — and a password-less Redis
+	// rejects any AUTH attempt outright, so a passwordless container fails every connection.
 	@Container
 	static GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
-			.withExposedPorts(6379);
+			.withExposedPorts(6379)
+			.withCommand("redis-server", "--requirepass", "test-redis-password");
 
 	@DynamicPropertySource
 	static void redisProperties(DynamicPropertyRegistry registry) {
 		registry.add("spring.data.redis.host", redis::getHost);
 		registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
+		registry.add("spring.data.redis.password", () -> "test-redis-password");
 	}
 
 	@Test
