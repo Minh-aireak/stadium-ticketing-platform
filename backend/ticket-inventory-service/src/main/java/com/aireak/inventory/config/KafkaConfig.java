@@ -8,6 +8,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
@@ -34,8 +35,15 @@ import java.util.Map;
  * javadoc for why each piece is needed (explicit {@code EventEnvelope} target type instead of
  * the no-arg deserializer form, a scoped {@code PolymorphicTypeValidator} for {@code
  * EventEnvelope.payload}'s {@code @JsonTypeInfo(use = Id.CLASS)}, retry-then-DLT error handling).
+ *
+ * <p>{@code @EnableKafka} is required here: defining {@code kafkaListenerContainerFactory} as a
+ * bean below satisfies Spring Boot's {@code @ConditionalOnMissingBean(name =
+ * "kafkaListenerContainerFactory")} guard on its own autoconfigured {@code @EnableKafka}, which
+ * disables it — silently leaving every {@code @KafkaListener} method unregistered (no consumer
+ * group, no subscription, no error) unless this class re-enables it explicitly.
  */
 @Configuration
+@EnableKafka
 public class KafkaConfig {
 
     @Value("${spring.kafka.bootstrap-servers}")

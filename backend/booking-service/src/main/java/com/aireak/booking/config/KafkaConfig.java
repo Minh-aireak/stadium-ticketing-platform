@@ -8,6 +8,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.*;
 import org.springframework.kafka.listener.ContainerProperties;
@@ -23,7 +24,12 @@ import tools.jackson.databind.jsontype.PolymorphicTypeValidator;
 import java.util.HashMap;
 import java.util.Map;
 
+// @EnableKafka is required: defining kafkaListenerContainerFactory as a bean below satisfies
+// Spring Boot's @ConditionalOnMissingBean(name = "kafkaListenerContainerFactory") guard on its
+// own autoconfigured @EnableKafka, which disables it — silently leaving every @KafkaListener
+// method unregistered (no consumer group, no subscription, no error) unless re-enabled here.
 @Configuration
+@EnableKafka
 public class KafkaConfig {
 
     @Value("${spring.kafka.bootstrap-servers}")
