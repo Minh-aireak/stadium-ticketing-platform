@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Bell, Loader2 } from 'lucide-react'
 
@@ -8,6 +8,7 @@ import { listMyNotifications, markNotificationRead } from '@/features/notificati
 import type { Notification } from '@/features/notifications/types'
 import { useToast } from '@/hooks/useToast'
 import { getErrorMessage } from '@/lib/errors'
+import { memoComponent } from '@/lib/memo'
 import { cn } from '@/lib/utils'
 
 const PAGE_SIZE = 20
@@ -19,6 +20,41 @@ function relativeTime(iso: string): string {
   if (Math.abs(diffHours) < 24) return relativeFormatter.format(diffHours, 'hour')
   return relativeFormatter.format(Math.round(diffHours / 24), 'day')
 }
+
+interface NotificationCardProps {
+  notification: Notification
+  onMarkRead: (notification: Notification) => void
+}
+
+function NotificationCard({ notification, onMarkRead }: NotificationCardProps) {
+  return (
+    <Card
+      className={cn(!notification.read && 'cursor-pointer border-accent/50')}
+      onClick={() => onMarkRead(notification)}
+    >
+      <CardContent className="flex items-start gap-3 p-5">
+        <div
+          className={cn(
+            'flex size-9 shrink-0 items-center justify-center rounded-full',
+            notification.read ? 'bg-surface-2 text-muted' : 'bg-accent/20 text-accent',
+          )}
+        >
+          <Bell className="size-4" />
+        </div>
+        <div className="flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-medium">{notification.title}</span>
+            <span className="text-xs text-muted">{relativeTime(notification.createdAt)}</span>
+          </div>
+          <p className="text-sm text-muted">{notification.body}</p>
+        </div>
+        {!notification.read && <span className="mt-1.5 size-2 shrink-0 rounded-full bg-accent" />}
+      </CardContent>
+    </Card>
+  )
+}
+
+const MemoizedNotificationCard = memoComponent(NotificationCard)
 
 export function NotificationsPage() {
   const { toast } = useToast()
@@ -54,7 +90,7 @@ export function NotificationsPage() {
     }
   }, [page, toast])
 
-  async function handleMarkRead(notification: Notification) {
+  const handleMarkRead = useCallback(async (notification: Notification) => {
     if (notification.read) return
     setNotifications((prev) =>
       prev.map((n) => (n.notificationId === notification.notificationId ? { ...n, read: true } : n)),
@@ -71,7 +107,7 @@ export function NotificationsPage() {
         variant: 'error',
       })
     }
-  }
+  }, [toast])
 
   const totalPages = Math.max(1, Math.ceil(totalElements / PAGE_SIZE))
 
@@ -105,30 +141,11 @@ export function NotificationsPage() {
           <>
             <div className="flex flex-col gap-3">
               {notifications.map((n) => (
-                <Card
+                <MemoizedNotificationCard
                   key={n.notificationId}
-                  className={cn(!n.read && 'cursor-pointer border-accent/50')}
-                  onClick={() => handleMarkRead(n)}
-                >
-                  <CardContent className="flex items-start gap-3 p-5">
-                    <div
-                      className={cn(
-                        'flex size-9 shrink-0 items-center justify-center rounded-full',
-                        n.read ? 'bg-surface-2 text-muted' : 'bg-accent/20 text-accent',
-                      )}
-                    >
-                      <Bell className="size-4" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium">{n.title}</span>
-                        <span className="text-xs text-muted">{relativeTime(n.createdAt)}</span>
-                      </div>
-                      <p className="text-sm text-muted">{n.body}</p>
-                    </div>
-                    {!n.read && <span className="mt-1.5 size-2 shrink-0 rounded-full bg-accent" />}
-                  </CardContent>
-                </Card>
+                  notification={n}
+                  onMarkRead={handleMarkRead}
+                />
               ))}
             </div>
 

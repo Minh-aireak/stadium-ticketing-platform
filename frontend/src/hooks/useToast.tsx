@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 
 import { Toast } from '@/components/ui/toast'
@@ -41,9 +41,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     },
     [dismiss],
   )
+  const value = useMemo<ToastContextValue>(() => ({ toast }), [toast])
 
   return (
-    <ToastContext.Provider value={{ toast }}>
+    <ToastContext.Provider value={value}>
       {children}
       <div className="pointer-events-none fixed inset-x-0 top-4 z-50 flex flex-col items-center gap-2 px-4 sm:items-end sm:px-6">
         <AnimatePresence>

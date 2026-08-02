@@ -1,4 +1,5 @@
 import { getPasswordStrength } from '@/features/auth/passwordPolicy'
+import { memoComponent } from '@/lib/memo'
 
 interface PasswordStrengthMeterProps {
   password: string
@@ -25,4 +26,6 @@ function PasswordStrengthMeter({ password }: PasswordStrengthMeterProps) {
   )
 }
 
-export { PasswordStrengthMeter }
+const MemoizedPasswordStrengthMeter = memoComponent(PasswordStrengthMeter)
+
+export { MemoizedPasswordStrengthMeter as PasswordStrengthMeter }

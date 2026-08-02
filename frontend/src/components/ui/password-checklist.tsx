@@ -1,6 +1,7 @@
 import { Check, X } from 'lucide-react'
 
 import { PASSWORD_REQUIREMENTS } from '@/features/auth/passwordPolicy'
+import { memoComponent } from '@/lib/memo'
 import { cn } from '@/lib/utils'
 
 interface PasswordChecklistProps {
@@ -26,4 +27,6 @@ function PasswordChecklist({ password }: PasswordChecklistProps) {
   )
 }
 
-export { PasswordChecklist }
+const MemoizedPasswordChecklist = memoComponent(PasswordChecklist)
+
+export { MemoizedPasswordChecklist as PasswordChecklist }
