@@ -20,7 +20,11 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 function userFromToken(token: string): AuthUser | null {
   const payload = decodeJwt(token)
   if (!payload) return null
-  return { id: payload.sub, email: payload.email ?? '' }
+  return {
+    id: payload.sub,
+    email: payload.email ?? '',
+    role: payload.role === 'ADMIN' ? 'ADMIN' : 'USER',
+  }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {

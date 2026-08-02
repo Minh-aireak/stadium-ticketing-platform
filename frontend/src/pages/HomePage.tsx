@@ -6,8 +6,8 @@ export function HomePage() {
   return (
     <>
       <Hero />
-      <Features />
       <FeaturedMatches />
+      <Features />
     </>
   )
 }

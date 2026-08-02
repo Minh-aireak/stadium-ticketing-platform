@@ -1,5 +1,5 @@
 import { api } from '@/lib/api'
-import type { Seat } from './types'
+import type { Seat, SeatLayout } from './types'
 
 export interface SeatMapResponse {
   showtimeId: string
@@ -12,6 +12,18 @@ export interface SeatMapResponse {
 export async function getSeatMap(showtimeId: string): Promise<SeatMapResponse> {
   const { data } = await api.get<SeatMapResponse>(`/inventory/${showtimeId}/seats`)
   return data
+}
+
+// GET /api/v1/inventory/{showtimeId}/layout — best-effort topology for the Section/Block
+// picker (Phương án B). The backend may not have deployed this endpoint yet, so callers
+// must treat 404/5xx as "no layout available" and fall back to the plain seat map.
+export async function getSeatLayout(showtimeId: string): Promise<SeatLayout | null> {
+  try {
+    const { data } = await api.get<SeatLayout>(`/inventory/${showtimeId}/layout`)
+    return data
+  } catch {
+    return null
+  }
 }
 
 export interface HoldSeatsResponse {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Loader2, Search } from 'lucide-react'
 
@@ -62,85 +62,121 @@ export function FeaturedMatches() {
   // result set — pagination only applies to the plain "browse all published" listing.
   const totalPages = Math.max(1, Math.ceil(totalElements / PAGE_SIZE))
 
+  // No dedicated leagues endpoint — derive the chip list from whatever matches are already
+  // loaded on this page rather than adding a new API just for a filter shortcut.
+  const leagues = useMemo(
+    () => Array.from(new Set(matches.map((m) => m.competition))).sort(),
+    [matches],
+  )
+
   return (
-    <section id="matches" className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
-      <div className="mb-10 flex flex-col gap-2 text-center">
-        <h2 className="text-3xl font-bold sm:text-4xl">Trận đấu nổi bật</h2>
-        <p className="text-muted">
-          Những trận cầu đáng chú ý nhất đang mở bán vé
-        </p>
-      </div>
+    <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+      <div id="leagues" className="mb-14 scroll-mt-24 text-center">
+        <h2 className="text-3xl font-bold sm:text-4xl">Giải đấu nổi bật</h2>
+        <p className="mt-2 text-muted">Lọc nhanh trận đấu theo giải bạn quan tâm</p>
 
-      <div className="mx-auto mb-8 max-w-md">
-        <div className="relative">
-          <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted" />
-          <Input
-            value={queryInput}
-            onChange={(e) => setQueryInput(e.target.value)}
-            placeholder="Tìm theo đội bóng, giải đấu…"
-            className="pl-9"
-            aria-label="Tìm kiếm trận đấu"
-          />
-        </div>
-      </div>
-
-      {loading && (
-        <div className="flex justify-center py-16">
-          <Loader2 className="size-8 animate-spin text-accent" />
-        </div>
-      )}
-
-      {!loading && error && (
-        <p className="mx-auto max-w-md rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-center text-sm text-danger">
-          {error}
-        </p>
-      )}
-
-      {!loading && !error && matches.length === 0 && (
-        <p className="text-center text-muted">Không tìm thấy trận đấu nào.</p>
-      )}
-
-      {!loading && !error && matches.length > 0 && (
-        <>
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {matches.map((match, index) => (
-              <motion.div
-                key={match.matchId}
-                initial={{ opacity: 0, y: 24 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, margin: '-60px' }}
-                transition={{ duration: 0.4, delay: index * 0.08 }}
-              >
-                <MatchCard match={match} />
-              </motion.div>
-            ))}
+        {leagues.length > 0 && (
+          <div className="mt-6 flex flex-wrap justify-center gap-2">
+            {leagues.map((league) => {
+              const active = query === league
+              return (
+                <button
+                  key={league}
+                  type="button"
+                  onClick={() => setQueryInput(active ? '' : league)}
+                  className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
+                    active
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-border bg-surface-2 text-muted hover:text-foreground'
+                  }`}
+                >
+                  {league}
+                </button>
+              )
+            })}
           </div>
+        )}
+      </div>
 
-          {!query && totalPages > 1 && (
-            <div className="mt-10 flex items-center justify-center gap-4">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page === 0}
-                onClick={() => setPage((p) => p - 1)}
-              >
-                Trước
-              </Button>
-              <span className="text-sm text-muted">
-                Trang {page + 1}/{totalPages}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page + 1 >= totalPages}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                Sau
-              </Button>
+      <div id="matches" className="scroll-mt-24">
+        <div className="mb-10 flex flex-col gap-2 text-center">
+          <h2 className="text-3xl font-bold sm:text-4xl">Trận đấu nổi bật</h2>
+          <p className="text-muted">
+            Những trận cầu đáng chú ý nhất đang mở bán vé
+          </p>
+        </div>
+
+        <div className="mx-auto mb-8 max-w-md">
+          <div className="relative">
+            <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted" />
+            <Input
+              value={queryInput}
+              onChange={(e) => setQueryInput(e.target.value)}
+              placeholder="Tìm theo đội bóng, giải đấu…"
+              className="pl-9"
+              aria-label="Tìm kiếm trận đấu"
+            />
+          </div>
+        </div>
+
+        {loading && (
+          <div className="flex justify-center py-16">
+            <Loader2 className="size-8 animate-spin text-accent" />
+          </div>
+        )}
+
+        {!loading && error && (
+          <p className="mx-auto max-w-md rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-center text-sm text-danger">
+            {error}
+          </p>
+        )}
+
+        {!loading && !error && matches.length === 0 && (
+          <p className="text-center text-muted">Không tìm thấy trận đấu nào.</p>
+        )}
+
+        {!loading && !error && matches.length > 0 && (
+          <>
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+              {matches.map((match, index) => (
+                <motion.div
+                  key={match.matchId}
+                  initial={{ opacity: 0, y: 24 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, margin: '-60px' }}
+                  transition={{ duration: 0.4, delay: index * 0.08 }}
+                >
+                  <MatchCard match={match} />
+                </motion.div>
+              ))}
             </div>
-          )}
-        </>
-      )}
+
+            {!query && totalPages > 1 && (
+              <div className="mt-10 flex items-center justify-center gap-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page === 0}
+                  onClick={() => setPage((p) => p - 1)}
+                >
+                  Trước
+                </Button>
+                <span className="text-sm text-muted">
+                  Trang {page + 1}/{totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page + 1 >= totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Sau
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </section>
   )
 }

@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import { Clock, MapPin } from 'lucide-react'
+import { memo, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 
 import { Badge } from '@/components/ui/badge'
@@ -7,11 +8,13 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { useCountdown } from '@/hooks/useCountdown'
 import { formatKickoff } from '@/lib/format'
+import { memoComponent } from '@/lib/memo'
 import { cn } from '@/lib/utils'
 import { catalogStatus, nearestShowtime, teamInitials, ticketsRemaining, type CatalogStatus } from './matchView'
 import type { Match } from './types'
 
 const statusMeta: Record<CatalogStatus, { label: string; variant: 'accent' | 'warning' | 'danger' }> = {
+  closed: { label: 'Đã kết thúc', variant: 'danger' },
   on_sale: { label: 'Đang mở bán', variant: 'accent' },
   few_left: { label: 'Sắp hết vé', variant: 'warning' },
   sold_out: { label: 'Hết vé', variant: 'danger' },
@@ -25,12 +28,18 @@ function TeamBadge({ initials }: { initials: string }) {
   )
 }
 
-export function MatchCard({ match }: { match: Match }) {
-  const showtime = nearestShowtime(match)
-  const status = statusMeta[catalogStatus(match)]
-  const soldOut = catalogStatus(match) === 'sold_out'
+const MemoizedTeamBadge = memoComponent(TeamBadge)
+
+function MatchCardComponent({ match }: { match: Match }) {
+  const { showtime, catalogState, remainingTickets } = useMemo(() => ({
+    showtime: nearestShowtime(match),
+    catalogState: catalogStatus(match),
+    remainingTickets: ticketsRemaining(match),
+  }), [match])
+  const status = statusMeta[catalogState]
+  const bookingClosed = catalogState === 'sold_out' || catalogState === 'closed'
   const countdown = useCountdown(showtime?.startTime ?? match.createdAt)
-  const showCountdown = !soldOut && !countdown.isPast && countdown.days < 3
+  const showCountdown = !bookingClosed && !countdown.isPast && countdown.days < 3
 
   return (
     <motion.div
@@ -41,7 +50,7 @@ export function MatchCard({ match }: { match: Match }) {
       <Card
         className={cn(
           'group flex h-full flex-col overflow-hidden transition-shadow duration-300 hover:shadow-glow-accent',
-          soldOut && 'opacity-60',
+          bookingClosed && 'opacity-60',
         )}
       >
         <CardHeader className="flex-row items-center justify-between gap-2 space-y-0 pb-4">
@@ -54,12 +63,12 @@ export function MatchCard({ match }: { match: Match }) {
         <CardContent className="flex flex-1 flex-col gap-5 pt-0">
           <div className="flex items-center justify-between gap-3">
             <div className="flex flex-1 flex-col items-center gap-2 text-center">
-              <TeamBadge initials={teamInitials(match.homeTeam)} />
+              <MemoizedTeamBadge initials={teamInitials(match.homeTeam)} />
               <span className="text-sm font-medium">{match.homeTeam}</span>
             </div>
             <span className="text-xs font-semibold text-muted">VS</span>
             <div className="flex flex-1 flex-col items-center gap-2 text-center">
-              <TeamBadge initials={teamInitials(match.awayTeam)} />
+              <MemoizedTeamBadge initials={teamInitials(match.awayTeam)} />
               <span className="text-sm font-medium">{match.awayTeam}</span>
             </div>
           </div>
@@ -72,7 +81,7 @@ export function MatchCard({ match }: { match: Match }) {
               </div>
               <div className="flex items-center gap-2">
                 <MapPin className="size-4 text-accent" />
-                <span>{showtime.venueId}</span>
+                <span>{showtime.stadiumName}</span>
               </div>
             </div>
           )}
@@ -91,13 +100,15 @@ export function MatchCard({ match }: { match: Match }) {
 
         <CardFooter className="flex items-center justify-between gap-3">
           <div className="text-sm text-muted">
-            {ticketsRemaining(match) > 0
-              ? `Còn ${ticketsRemaining(match).toLocaleString('vi-VN')} vé`
+            {catalogState === 'closed'
+              ? 'Đã kết thúc'
+              : remainingTickets > 0
+              ? `Còn ${remainingTickets.toLocaleString('vi-VN')} vé`
               : 'Đã hết vé'}
           </div>
-          {soldOut ? (
+          {bookingClosed ? (
             <Button variant="outline" disabled>
-              Hết vé
+              {status.label}
             </Button>
           ) : (
             <Button asChild variant="gradient">
@@ -109,3 +120,5 @@ export function MatchCard({ match }: { match: Match }) {
     </motion.div>
   )
 }
+
+export const MatchCard = memo(MatchCardComponent)

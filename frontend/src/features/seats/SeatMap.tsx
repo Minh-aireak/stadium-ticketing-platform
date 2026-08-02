@@ -1,5 +1,7 @@
 import { motion } from 'framer-motion'
+import { memo, useMemo } from 'react'
 
+import { useMemoizedSet } from '@/lib/memo'
 import { cn } from '@/lib/utils'
 import type { Seat } from './types'
 
@@ -7,24 +9,27 @@ interface SeatMapProps {
   seats: Seat[]
   selected: string[]
   onToggle: (code: string) => void
+  tierFilter?: 'all' | Seat['tier']
+  blockSeatCodes?: ReadonlySet<string> | null
 }
 
-const legend: { status: Seat['status'] | 'selected'; label: string; className: string }[] = [
-  { status: 'available', label: 'Còn trống', className: 'border border-border bg-surface-2' },
-  { status: 'selected', label: 'Đang chọn', className: 'bg-primary text-primary-foreground' },
-  { status: 'held', label: 'Đang giữ', className: 'bg-warning/30 text-warning' },
-  { status: 'sold', label: 'Đã bán', className: 'bg-danger/20 text-danger' },
-]
-
-export function SeatMap({ seats, selected, onToggle }: SeatMapProps) {
+function SeatMapComponent({ seats, selected, onToggle, tierFilter = 'all', blockSeatCodes = null }: SeatMapProps) {
   // Row count/letters come from the backend layout (see SeatMapLayout), not a fixed A-F —
   // derive them from the actual seats instead of hardcoding, so showtimes with more/fewer
   // seats than the old 6-row mock still render every row.
-  const rows = Array.from(new Set(seats.map((s) => s.row))).sort()
-  const byRow = rows.map((row) => ({
-    row,
-    seats: seats.filter((s) => s.row === row).sort((a, b) => a.number - b.number),
-  }))
+  const byRow = useMemo(() => {
+    const grouped = new Map<string, Seat[]>()
+    seats.forEach((seat) => {
+      const row = grouped.get(seat.row)
+      if (row) row.push(seat)
+      else grouped.set(seat.row, [seat])
+    })
+    return Array.from(grouped, ([row, rowSeats]) => ({
+      row,
+      seats: rowSeats.toSorted((a, b) => a.number - b.number),
+    })).toSorted((a, b) => a.row.localeCompare(b.row))
+  }, [seats])
+  const selectedSet = useMemoizedSet(selected)
 
   return (
     <div className="flex flex-col items-center gap-6">
@@ -38,8 +43,10 @@ export function SeatMap({ seats, selected, onToggle }: SeatMapProps) {
             <span className="w-4 text-xs font-semibold text-muted">{row}</span>
             <div className="flex gap-1.5">
               {rowSeats.map((seat) => {
-                const isSelected = selected.includes(seat.code)
-                const disabled = seat.status !== 'available' && !isSelected
+                const isSelected = selectedSet.has(seat.code)
+                const outOfTier = tierFilter !== 'all' && seat.tier !== tierFilter
+                const outOfBlock = blockSeatCodes !== null && !blockSeatCodes.has(seat.code)
+                const disabled = (seat.status !== 'available' || outOfTier || outOfBlock) && !isSelected
                 return (
                   <motion.button
                     key={seat.code}
@@ -51,6 +58,7 @@ export function SeatMap({ seats, selected, onToggle }: SeatMapProps) {
                     title={`${seat.code} · ${seat.tier} · ${seat.price.toLocaleString('vi-VN')}đ`}
                     className={cn(
                       'flex size-6 items-center justify-center rounded-md text-[10px] font-medium transition-colors sm:size-7',
+                      (outOfTier || outOfBlock) && !isSelected && 'opacity-35 cursor-not-allowed',
                       seat.status === 'available' && !isSelected && 'border border-border bg-surface-2 hover:border-accent',
                       seat.status === 'held' && !isSelected && 'cursor-not-allowed bg-warning/30 text-warning',
                       seat.status === 'sold' && 'cursor-not-allowed bg-danger/20 text-danger',
@@ -65,15 +73,8 @@ export function SeatMap({ seats, selected, onToggle }: SeatMapProps) {
           </div>
         ))}
       </div>
-
-      <div className="flex flex-wrap justify-center gap-4 text-xs text-muted">
-        {legend.map((item) => (
-          <div key={item.status} className="flex items-center gap-1.5">
-            <span className={cn('size-3 rounded', item.className)} />
-            {item.label}
-          </div>
-        ))}
-      </div>
     </div>
   )
 }
+
+export const SeatMap = memo(SeatMapComponent)

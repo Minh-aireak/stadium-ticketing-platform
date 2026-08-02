@@ -90,6 +90,12 @@ export function LoginPage() {
                 Đăng ký ngay
               </Link>
             </p>
+
+            {import.meta.env.DEV && (
+              <p className="mt-4 rounded-lg border border-border bg-surface-2 px-3 py-2 text-center text-xs text-muted">
+                Tài khoản quản trị (dev): admin@stadiumgo.local / Admin@123
+              </p>
+            )}
           </CardContent>
         </Card>
       </motion.div>

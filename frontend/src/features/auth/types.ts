@@ -20,7 +20,10 @@ export interface RegisterResponse {
   message: string
 }
 
+export type AccountRole = 'USER' | 'ADMIN'
+
 export interface AuthUser {
   id: string
   email: string
+  role: AccountRole
 }

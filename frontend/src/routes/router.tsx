@@ -1,8 +1,10 @@
 import { createBrowserRouter } from 'react-router-dom'
 
 import App from '@/App'
+import { AdminRoute } from '@/features/auth/AdminRoute'
 import { ProtectedRoute } from '@/features/auth/ProtectedRoute'
 import { AccountPage } from '@/pages/AccountPage'
+import { AdminPage } from '@/pages/AdminPage'
 import { CheckoutPage } from '@/pages/CheckoutPage'
 import { HomePage } from '@/pages/HomePage'
 import { LoginPage } from '@/pages/LoginPage'
@@ -30,6 +32,10 @@ export const router = createBrowserRouter([
           { path: 'account', element: <AccountPage /> },
           { path: 'notifications', element: <NotificationsPage /> },
         ],
+      },
+      {
+        element: <AdminRoute />,
+        children: [{ path: 'admin', element: <AdminPage /> }],
       },
     ],
   },

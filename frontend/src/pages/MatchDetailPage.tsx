@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Clock, Loader2, MapPin, Users } from 'lucide-react'
 import { Link, Navigate, useParams } from 'react-router-dom'
@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { getMatch } from '@/features/matches/matchesApi'
-import { ticketsRemaining } from '@/features/matches/matchView'
+import { ticketsRemaining, upcomingShowtimes } from '@/features/matches/matchView'
 import type { Match } from '@/features/matches/types'
 import { useToast } from '@/hooks/useToast'
 import { getErrorMessage } from '@/lib/errors'
@@ -20,6 +20,17 @@ export function MatchDetailPage() {
   const [match, setMatch] = useState<Match | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+  const matchView = useMemo(() => {
+    if (!match) return { showtimes: [], upcomingCount: 0, remainingTickets: 0 }
+    const upcoming = upcomingShowtimes(match)
+    return {
+      showtimes: match.showtimes.toSorted(
+        (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime(),
+      ),
+      upcomingCount: upcoming.length,
+      remainingTickets: ticketsRemaining(match),
+    }
+  }, [match])
 
   useEffect(() => {
     if (!matchId) return
@@ -65,10 +76,6 @@ export function MatchDetailPage() {
     )
   }
 
-  const showtimes = [...match.showtimes].sort(
-    (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime(),
-  )
-
   return (
     <section className="mx-auto max-w-4xl px-4 py-12 sm:px-6">
       <motion.div
@@ -86,18 +93,23 @@ export function MatchDetailPage() {
           </h1>
           <div className="flex items-center justify-center gap-2 text-sm text-muted">
             <Users className="size-4 text-accent" />
-            {ticketsRemaining(match) > 0
-              ? `Còn ${ticketsRemaining(match).toLocaleString('vi-VN')} vé`
+            {matchView.upcomingCount === 0
+              ? 'Trận đấu đã kết thúc'
+              : matchView.remainingTickets > 0
+              ? `Còn ${matchView.remainingTickets.toLocaleString('vi-VN')} vé`
               : 'Đã hết vé'}
           </div>
         </div>
 
         <div className="mt-10 flex flex-col gap-4">
-          {showtimes.map((showtime) => {
+          {matchView.showtimes.map((showtime) => {
+            const showtimeStarted = new Date(showtime.startTime).getTime() <= Date.now()
             const showtimeSoldOut = showtime.availableSeats <= 0
             const seatSelectionState: SeatSelectionState = {
               matchLabel: `${match.homeTeam} vs ${match.awayTeam}`,
               showtimeId: showtime.showtimeId,
+              startTime: showtime.startTime,
+              stadiumId: showtime.stadiumId,
             }
             return (
               <Card key={showtime.showtimeId}>
@@ -109,7 +121,7 @@ export function MatchDetailPage() {
                     </span>
                     <span className="flex items-center gap-2">
                       <MapPin className="size-4 text-accent" />
-                      {showtime.venueId}
+                      {showtime.stadiumName}
                     </span>
                     <span className="text-xs">Giá từ {formatCurrency(showtime.basePrice)}</span>
                   </div>
@@ -118,7 +130,11 @@ export function MatchDetailPage() {
                       {showtime.availableSeats.toLocaleString('vi-VN')} /{' '}
                       {showtime.totalSeats.toLocaleString('vi-VN')} ghế trống
                     </div>
-                    {showtimeSoldOut ? (
+                    {showtimeStarted ? (
+                      <Button variant="outline" size="sm" disabled>
+                        Đã diễn ra
+                      </Button>
+                    ) : showtimeSoldOut ? (
                       <Button variant="outline" size="sm" disabled>
                         Đã hết vé
                       </Button>

@@ -1,14 +1,14 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Bell, Menu, Ticket, X } from 'lucide-react'
+import { Bell, Menu, ShieldCheck, Ticket, X } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/features/auth/AuthContext'
 
 const navLinks = [
-  { label: 'Trận đấu', href: '#matches' },
-  { label: 'Giải đấu', href: '#leagues' },
+  { label: 'Trận đấu', to: '/#matches' },
+  { label: 'Giải đấu', to: '/#leagues' },
 ]
 
 export function Navbar() {
@@ -32,13 +32,13 @@ export function Navbar() {
 
         <div className="hidden items-center gap-8 md:flex">
           {navLinks.map((link) => (
-            <a
-              key={link.href}
-              href={link.href}
+            <Link
+              key={link.to}
+              to={link.to}
               className="text-sm font-medium text-muted transition-colors hover:text-foreground"
             >
               {link.label}
-            </a>
+            </Link>
           ))}
           {status === 'authenticated' && (
             <Link
@@ -46,6 +46,15 @@ export function Navbar() {
               className="text-sm font-medium text-muted transition-colors hover:text-foreground"
             >
               Vé của tôi
+            </Link>
+          )}
+          {status === 'authenticated' && user?.role === 'ADMIN' && (
+            <Link
+              to="/admin"
+              className="flex items-center gap-1.5 text-sm font-medium text-muted transition-colors hover:text-foreground"
+            >
+              <ShieldCheck className="size-4" />
+              Quản trị
             </Link>
           )}
         </div>
@@ -98,14 +107,14 @@ export function Navbar() {
           >
             <div className="flex flex-col gap-4 px-4 py-4">
               {navLinks.map((link) => (
-                <a
-                  key={link.href}
-                  href={link.href}
+                <Link
+                  key={link.to}
+                  to={link.to}
                   onClick={() => setOpen(false)}
                   className="text-sm font-medium text-muted hover:text-foreground"
                 >
                   {link.label}
-                </a>
+                </Link>
               ))}
 
               {status === 'authenticated' ? (
@@ -116,6 +125,16 @@ export function Navbar() {
                   <Link to="/notifications" onClick={() => setOpen(false)} className="text-sm font-medium text-muted hover:text-foreground">
                     Thông báo
                   </Link>
+                  {user?.role === 'ADMIN' && (
+                    <Link
+                      to="/admin"
+                      onClick={() => setOpen(false)}
+                      className="flex items-center gap-1.5 text-sm font-medium text-muted hover:text-foreground"
+                    >
+                      <ShieldCheck className="size-4" />
+                      Quản trị
+                    </Link>
+                  )}
                   <Button variant="outline" size="sm" onClick={handleLogout}>
                     Đăng xuất ({user?.email})
                   </Button>

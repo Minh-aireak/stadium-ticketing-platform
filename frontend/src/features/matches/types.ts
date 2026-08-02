@@ -4,7 +4,8 @@ export type MatchStatus = 'DRAFT' | 'PUBLISHED' | 'COMPLETED' | 'CANCELLED'
 export interface Showtime {
   showtimeId: string
   startTime: string // ISO timestamp
-  venueId: string
+  stadiumId: string
+  stadiumName: string
   totalSeats: number
   availableSeats: number
   basePrice: number
