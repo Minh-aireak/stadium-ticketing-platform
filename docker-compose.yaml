@@ -1,5 +1,3 @@
-version: "3.9"
-
 # =============================================================================
 # Stadium Ticketing Platform — Local Development Infrastructure
 # =============================================================================
@@ -219,7 +217,7 @@ services:
   #     --data @backend/identity-service/infra/debezium/identity-outbox-connector.json \
   #     http://localhost:8083/connectors
   kafka-connect:
-    image: debezium/connect:2.7
+    image: debezium/connect:2.7.3.Final
     container_name: kafka-connect_stadium_booking
     networks: [stadium-net]
     depends_on:
@@ -352,6 +350,8 @@ services:
         condition: service_healthy
       elasticsearch:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
     ports:
       - "8082:8082"
     environment:
@@ -362,6 +362,7 @@ services:
       ELASTICSEARCH_HOST: elasticsearch
       ELASTICSEARCH_PORT: 9200
       ELASTICSEARCH_SCHEME: http
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       JWT_SECRET: ${JWT_SECRET}
       JWT_ISSUER: ${JWT_ISSUER}
       JWT_AUDIENCE: ${JWT_AUDIENCE}
@@ -381,7 +382,9 @@ services:
       kafka:
         condition: service_healthy
     ports:
-      - "8083:8083"
+      # Host 8087 avoids clashing with kafka-connect's 8083; container-internal port and
+      # inter-service URLs (ticket-inventory-service:8083) are unchanged.
+      - "8087:8083"
     environment:
       DB_HOST: postgres-inventory
       DB_PORT: 5432
@@ -391,6 +394,7 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      MATCH_CATALOG_SERVICE_URL: http://match-catalog-service:8082
       JWT_SECRET: ${JWT_SECRET}
       JWT_ISSUER: ${JWT_ISSUER}
       JWT_AUDIENCE: ${JWT_AUDIENCE}

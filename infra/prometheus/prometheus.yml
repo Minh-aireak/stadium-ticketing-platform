@@ -19,6 +19,7 @@ scrape_configs:
       - targets: ["api-gateway:8080"]
         labels:
           service: api-gateway
+          application: api-gateway
 
   - job_name: identity-service
     metrics_path: /actuator/prometheus
@@ -26,6 +27,7 @@ scrape_configs:
       - targets: ["identity-service:8081"]
         labels:
           service: identity-service
+          application: identity-service
 
   - job_name: match-catalog-service
     metrics_path: /actuator/prometheus
@@ -33,6 +35,7 @@ scrape_configs:
       - targets: ["match-catalog-service:8082"]
         labels:
           service: match-catalog-service
+          application: match-catalog-service
 
   - job_name: ticket-inventory-service
     metrics_path: /actuator/prometheus
@@ -40,6 +43,7 @@ scrape_configs:
       - targets: ["ticket-inventory-service:8083"]
         labels:
           service: ticket-inventory-service
+          application: ticket-inventory-service
 
   - job_name: payment-service
     metrics_path: /actuator/prometheus
@@ -47,6 +51,7 @@ scrape_configs:
       - targets: ["payment-service:8084"]
         labels:
           service: payment-service
+          application: payment-service
 
   - job_name: notification-service
     metrics_path: /actuator/prometheus
@@ -54,6 +59,7 @@ scrape_configs:
       - targets: ["notification-service:8085"]
         labels:
           service: notification-service
+          application: notification-service
 
   - job_name: booking-service
     metrics_path: /actuator/prometheus
@@ -61,3 +67,4 @@ scrape_configs:
       - targets: ["booking-service:8086"]
         labels:
           service: booking-service
+          application: booking-service
