@@ -31,6 +31,11 @@ public class MatchPersistenceAdapter implements MatchRepository {
     }
 
     @Override
+    public Optional<Match> findByShowtimeId(String showtimeId) {
+        return jpaRepository.findByShowtimeId(showtimeId).map(this::toDomain);
+    }
+
+    @Override
     public List<Match> findByStatus(MatchStatus status, int page, int size) {
         return jpaRepository
                 .findByStatusWithShowtimes(status, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")))

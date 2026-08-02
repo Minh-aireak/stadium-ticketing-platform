@@ -14,6 +14,7 @@ import com.aireak.inventory.application.port.out.DistributedLockPort;
 import com.aireak.inventory.application.port.out.DomainEventPublisher;
 import com.aireak.inventory.application.port.out.SeatHoldPort;
 import com.aireak.inventory.application.port.out.SeatInventoryRepository;
+import com.aireak.inventory.application.port.out.ShowtimeCatalogPort;
 import com.aireak.inventory.domain.event.SeatsReleasedEvent;
 import com.aireak.inventory.domain.event.SeatsReservedEvent;
 import com.aireak.inventory.domain.exception.SeatInventoryNotFoundException;
@@ -78,6 +79,7 @@ public class SeatInventoryService implements ReserveSeatsUseCase, ReleaseSeatsUs
     private final SeatHoldPort seatHoldPort;
     private final DomainEventPublisher eventPublisher;
     private final SeatSaleConfirmer seatSaleConfirmer;
+    private final ShowtimeCatalogPort showtimeCatalogPort;
 
     // Bulkhead + RateLimiter guard the hot path *before* the 5s Redisson lock wait: once the
     // semaphore/rate budget is exhausted, calls are rejected immediately (BulkheadFullException /
@@ -90,6 +92,7 @@ public class SeatInventoryService implements ReserveSeatsUseCase, ReleaseSeatsUs
     @Bulkhead(name = "seat-inventory", type = Bulkhead.Type.SEMAPHORE)
     @RateLimiter(name = "seat-inventory")
     public BigDecimal execute(ReserveSeatsCommand command) {
+        showtimeCatalogPort.requireBookable(command.showtimeId());
         String lockKey = LOCK_PREFIX + command.showtimeId();
         List<SeatCode> seatCodes = command.seatCodes().stream().map(SeatCode::new).toList();
 
@@ -183,6 +186,7 @@ public class SeatInventoryService implements ReserveSeatsUseCase, ReleaseSeatsUs
     @Bulkhead(name = "seat-inventory", type = Bulkhead.Type.SEMAPHORE)
     @RateLimiter(name = "seat-inventory")
     public BigDecimal execute(HoldSeatsCommand command) {
+        showtimeCatalogPort.requireBookable(command.showtimeId());
         String lockKey = LOCK_PREFIX + command.showtimeId();
         List<SeatCode> seatCodes = command.seatCodes().stream().map(SeatCode::new).toList();
 

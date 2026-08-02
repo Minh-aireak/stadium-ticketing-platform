@@ -5,6 +5,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
@@ -19,6 +20,10 @@ interface MatchJpaRepository extends JpaRepository<MatchJpaEntity, String> {
      */
     @Query("SELECT m FROM MatchJpaEntity m LEFT JOIN FETCH m.showtimes WHERE m.matchId = :matchId")
     Optional<MatchJpaEntity> findByIdWithShowtimes(@Param("matchId") String matchId);
+
+    @Query("SELECT DISTINCT m FROM MatchJpaEntity m JOIN FETCH m.showtimes s " +
+            "WHERE s.showtimeId = :showtimeId")
+    Optional<MatchJpaEntity> findByShowtimeId(@Param("showtimeId") String showtimeId);
 
     /**
      * JOIN FETCH loads every match's showtimes in this one query instead of one lazy-load query
@@ -41,4 +46,9 @@ interface MatchJpaRepository extends JpaRepository<MatchJpaEntity, String> {
     @Query("SELECT COUNT(s) > 0 FROM MatchJpaEntity m JOIN m.showtimes s " +
             "WHERE s.venueId = :venueId AND s.startTime = :startTime")
     boolean existsShowtimeAtVenueAndTime(@Param("venueId") String venueId, @Param("startTime") Instant startTime);
+
+    @Modifying
+    @Query(value = "UPDATE showtimes SET available_seats = GREATEST(available_seats - :count, 0) " +
+            "WHERE showtime_id = :showtimeId", nativeQuery = true)
+    int decrementAvailableSeats(@Param("showtimeId") String showtimeId, @Param("count") int count);
 }

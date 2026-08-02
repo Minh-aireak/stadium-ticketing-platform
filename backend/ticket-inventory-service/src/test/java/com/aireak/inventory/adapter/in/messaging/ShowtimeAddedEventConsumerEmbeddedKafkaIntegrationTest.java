@@ -97,19 +97,22 @@ class ShowtimeAddedEventConsumerEmbeddedKafkaIntegrationTest {
     @Test
     void consumesRealShowtimeAddedRecord_andGeneratesTheSeatMapWithTheDeserializedFields() {
         ShowtimeAddedEvent event = new ShowtimeAddedEvent(
-                "match-1", "showtime-1", 25, new BigDecimal("150000"), "VND", java.time.Instant.now());
+                "match-1", "showtime-1", "my-dinh", 432,
+                new BigDecimal("150000"), "VND", java.time.Instant.now());
         publishAsDebeziumWouldForwardTheOutboxRow(SHOWTIME_CREATED, event);
 
         verify(generateSeatMapUseCase, timeout(10_000))
-                .generate(eq("showtime-1"), eq(25), eq(new BigDecimal("150000")));
+                .generate(eq("showtime-1"), eq("my-dinh"), eq(432), eq(new BigDecimal("150000")));
     }
 
     @Test
     void aPermanentlyFailingRecord_retriesThenLandsOnTheDeadLetterTopic() {
         doThrow(new RuntimeException("db down"))
-                .when(generateSeatMapUseCase).generate(anyString(), anyInt(), org.mockito.ArgumentMatchers.any());
+                .when(generateSeatMapUseCase).generate(anyString(), anyString(), anyInt(),
+                        org.mockito.ArgumentMatchers.any());
         ShowtimeAddedEvent event = new ShowtimeAddedEvent(
-                "match-2", "showtime-2", 10, new BigDecimal("100000"), "VND", java.time.Instant.now());
+                "match-2", "showtime-2", "thong-nhat", 320,
+                new BigDecimal("100000"), "VND", java.time.Instant.now());
         String eventId = publishAsDebeziumWouldForwardTheOutboxRow(SHOWTIME_CREATED, event);
 
         Map<String, Object> consumerProps = KafkaTestUtils.consumerProps(
@@ -123,7 +126,8 @@ class ShowtimeAddedEventConsumerEmbeddedKafkaIntegrationTest {
             assertThat(dltRecord.value()).contains(eventId);
         }
         verify(generateSeatMapUseCase, atLeast(2))
-                .generate(eq("showtime-2"), anyInt(), org.mockito.ArgumentMatchers.any());
+                .generate(eq("showtime-2"), eq("thong-nhat"), eq(320),
+                        org.mockito.ArgumentMatchers.any());
     }
 
     private String publishAsDebeziumWouldForwardTheOutboxRow(String topic, Object payload) {

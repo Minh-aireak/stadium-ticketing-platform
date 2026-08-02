@@ -11,13 +11,14 @@ import java.time.Instant;
 public record ShowtimeAddedEvent(
         String matchId,
         String showtimeId,
+        String stadiumId,
         int totalSeats,
         BigDecimal basePrice,
         String currency,
         Instant occurredAt
 ) {
-    public ShowtimeAddedEvent(String matchId, String showtimeId, int totalSeats,
+    public ShowtimeAddedEvent(String matchId, String showtimeId, String stadiumId, int totalSeats,
                                BigDecimal basePrice, String currency) {
-        this(matchId, showtimeId, totalSeats, basePrice, currency, Instant.now());
+        this(matchId, showtimeId, stadiumId, totalSeats, basePrice, currency, Instant.now());
     }
 }

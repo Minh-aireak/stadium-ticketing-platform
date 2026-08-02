@@ -21,15 +21,18 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -106,6 +109,18 @@ class MatchControllerJwtAuthenticationIntegrationTest {
     }
 
     @Test
+    void fixedStadiumCatalogIsPublicAndContainsThreeChoices() throws Exception {
+        mockMvc.perform(get("/api/v1/matches/stadiums"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(3))
+                .andExpect(jsonPath("$[0].id").value("my-dinh"))
+                .andExpect(jsonPath("$[0].totalSeats").value(432))
+                .andExpect(jsonPath("$[1].id").value("thong-nhat"))
+                .andExpect(jsonPath("$[2].id").value("hang-day"))
+                .andExpect(jsonPath("$[2].levels").value(3));
+    }
+
+    @Test
     void rejectsRequestWithInvalidToken() throws Exception {
         mockMvc.perform(post("/api/v1/matches")
                         .header("Authorization", "Bearer not-a-jwt")
@@ -147,6 +162,26 @@ class MatchControllerJwtAuthenticationIntegrationTest {
                         .content("""
                                 {"homeTeam":"Home FC","awayTeam":"Away FC","competition":"V.League 1"}"""))
                 .andExpect(status().isCreated());
+    }
+
+    @Test
+    void adminCreatesShowtimeBySelectingStadiumWithoutSendingSeatCount() throws Exception {
+        Instant startTime = Instant.parse("2099-08-02T12:00:00Z");
+
+        mockMvc.perform(post("/api/v1/matches/match-1/showtimes")
+                        .header("Authorization", "Bearer " + validToken("ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "startTime":"2099-08-02T12:00:00Z",
+                                  "stadiumId":"hang-day",
+                                  "basePrice":150000,
+                                  "currency":"VND"
+                                }"""))
+                .andExpect(status().isOk());
+
+        verify(addShowtimeUseCase).addShowtime(
+                "match-1", startTime, "hang-day", new BigDecimal("150000"), "VND");
     }
 
     /** @param role the JWT "role" claim value, or null to omit the claim entirely. */

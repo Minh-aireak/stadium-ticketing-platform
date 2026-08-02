@@ -30,16 +30,20 @@ public class SeatMapGenerationService implements GenerateSeatMapUseCase {
 
     @Override
     @Transactional
-    public void generate(String showtimeId, int totalSeats, BigDecimal basePrice) {
+    public void generate(String showtimeId, String stadiumId, int expectedTotalSeats, BigDecimal basePrice) {
         if (seatInventoryRepository.existsByShowtimeId(showtimeId)) {
             log.debug("Seat map already generated for showtime={}, skipping (idempotent replay)", showtimeId);
             return;
         }
 
-        List<Seat> seats = SeatMapLayout.generate(totalSeats, basePrice);
+        List<Seat> seats = SeatMapLayout.generate(stadiumId, basePrice);
+        if (seats.size() != expectedTotalSeats) {
+            throw new IllegalArgumentException("Stadium capacity mismatch for " + stadiumId
+                    + ": event=" + expectedTotalSeats + ", layout=" + seats.size());
+        }
         SeatInventory inventory = SeatInventory.create(showtimeId, seats);
         seatInventoryRepository.save(inventory);
 
-        log.info("Seat map generated: showtime={}, totalSeats={}, seats={}", showtimeId, totalSeats, seats.size());
+        log.info("Seat map generated: showtime={}, stadium={}, seats={}", showtimeId, stadiumId, seats.size());
     }
 }

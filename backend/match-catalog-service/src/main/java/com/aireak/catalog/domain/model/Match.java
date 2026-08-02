@@ -64,7 +64,8 @@ public class Match {
             throw new InvalidMatchStatusException("Cannot add showtime to match in status: " + status);
         }
         showtimes.add(showtime);
-        domainEvents.add(new ShowtimeAddedEvent(matchId, showtime.getShowtimeId(), showtime.getTotalSeats(),
+        domainEvents.add(new ShowtimeAddedEvent(matchId, showtime.getShowtimeId(), showtime.getVenueId(),
+                showtime.getTotalSeats(),
                 showtime.getBasePrice(), showtime.getCurrency()));
     }
 

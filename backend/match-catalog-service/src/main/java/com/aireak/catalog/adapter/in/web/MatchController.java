@@ -8,6 +8,7 @@ import com.aireak.catalog.application.port.in.GetMatchUseCase;
 import com.aireak.catalog.application.port.in.ListMatchesUseCase;
 import com.aireak.catalog.application.port.in.PublishMatchUseCase;
 import com.aireak.catalog.domain.model.Match;
+import com.aireak.catalog.domain.model.StadiumCatalog;
 import com.aireak.common.exception.ForbiddenException;
 import com.aireak.common.security.AuthenticatedUser;
 import com.aireak.common.security.AuthenticatedUserContext;
@@ -16,7 +17,6 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -58,7 +58,7 @@ public class MatchController {
     public ResponseEntity<Void> addShowtime(@PathVariable String matchId,
                                             @Valid @RequestBody AddShowtimeRequest req) {
         requireAdminRole();
-        addShowtimeUseCase.addShowtime(matchId, req.startTime(), req.venueId(), req.totalSeats(),
+        addShowtimeUseCase.addShowtime(matchId, req.startTime(), req.stadiumId(),
                 req.basePrice(), req.currency());
         return ResponseEntity.ok().build();
     }
@@ -123,6 +123,15 @@ public class MatchController {
         return ResponseEntity.ok(toListResponse(result));
     }
 
+    /** GET /api/v1/matches/stadiums — fixed stadium choices for showtime creation. */
+    @GetMapping("/stadiums")
+    public List<StadiumResponse> listStadiums() {
+        return StadiumCatalog.list().stream()
+                .map(stadium -> new StadiumResponse(stadium.id(), stadium.name(), stadium.totalSeats(),
+                        stadium.levels(), stadium.design()))
+                .toList();
+    }
+
     /** GET /api/v1/matches/{matchId} — public match detail, no auth required (method-scoped exclusion). */
     @GetMapping("/{matchId}")
     public ResponseEntity<MatchResponse> get(@PathVariable String matchId) {
@@ -139,8 +148,14 @@ public class MatchController {
 
     private MatchResponse toResponse(Match match) {
         List<ShowtimeResponse> showtimes = match.getShowtimes().stream()
-                .map(s -> new ShowtimeResponse(s.getShowtimeId(), s.getStartTime(), s.getVenueId(),
-                        s.getTotalSeats(), s.getAvailableSeats(), s.getBasePrice(), s.getCurrency()))
+                .map(s -> {
+                    String stadiumName = StadiumCatalog.find(s.getVenueId())
+                            .map(StadiumCatalog.StadiumDefinition::name)
+                            .orElse(s.getVenueId());
+                    return new ShowtimeResponse(s.getShowtimeId(), s.getStartTime(), s.getVenueId(),
+                            stadiumName, s.getTotalSeats(), s.getAvailableSeats(),
+                            s.getBasePrice(), s.getCurrency());
+                })
                 .toList();
         return new MatchResponse(match.getMatchId(), match.getHomeTeam(), match.getAwayTeam(),
                 match.getCompetition(), match.getStatus().name(), match.getCreatedAt(), showtimes);
@@ -149,12 +164,13 @@ public class MatchController {
     record CreateMatchRequest(@NotBlank String homeTeam, @NotBlank String awayTeam,
                               @NotBlank String competition) {}
     record CreateMatchResponse(String matchId) {}
-    record AddShowtimeRequest(@NotNull Instant startTime, @NotBlank String venueId, @Positive int totalSeats,
+    record AddShowtimeRequest(@NotNull Instant startTime, @NotBlank String stadiumId,
                               @NotNull @DecimalMin(value = "0.0", inclusive = false) BigDecimal basePrice,
                               @NotBlank @Pattern(regexp = "^[A-Z]{3}$") String currency) {}
     record CancelMatchRequest(@NotBlank String reason) {}
 
-    record ShowtimeResponse(String showtimeId, Instant startTime, String venueId,
+    record StadiumResponse(String id, String name, int totalSeats, int levels, String design) {}
+    record ShowtimeResponse(String showtimeId, Instant startTime, String stadiumId, String stadiumName,
                             int totalSeats, int availableSeats, BigDecimal basePrice, String currency) {}
     record MatchResponse(String matchId, String homeTeam, String awayTeam, String competition,
                         String status, Instant createdAt, List<ShowtimeResponse> showtimes) {}

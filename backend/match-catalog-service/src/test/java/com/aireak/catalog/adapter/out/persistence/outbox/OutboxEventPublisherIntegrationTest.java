@@ -84,7 +84,7 @@ class OutboxEventPublisherIntegrationTest {
     void addingShowtimeWritesOutboxRowInSameTransaction() {
         String matchId = matchCatalogService.createMatch("Home FC", "Away FC", "Premier League");
 
-        matchCatalogService.addShowtime(matchId, Instant.now().plusSeconds(3600), "venue-1", 100,
+        matchCatalogService.addShowtime(matchId, Instant.now().plusSeconds(3600), "my-dinh",
                 new BigDecimal("150000"), "VND");
 
         List<OutboxEventEntity> rows = outboxEventJpaRepository.findAll();
@@ -100,7 +100,7 @@ class OutboxEventPublisherIntegrationTest {
     void publishingMatchWritesOutboxRowInSameTransaction() {
         String matchId = matchCatalogService.createMatch("Home FC", "Away FC", "Premier League");
         // Match.publish() requires at least one showtime (see Match#publish invariant).
-        matchCatalogService.addShowtime(matchId, Instant.now().plusSeconds(3600), "venue-1", 100,
+        matchCatalogService.addShowtime(matchId, Instant.now().plusSeconds(3600), "my-dinh",
                 new BigDecimal("150000"), "VND");
         outboxEventJpaRepository.deleteAll(); // drop the addShowtime row so only publish()'s row is asserted below
 
@@ -119,7 +119,7 @@ class OutboxEventPublisherIntegrationTest {
     @Test
     void cancellingMatchWritesOutboxRowWithShowtimeIdsAndReason() {
         String matchId = matchCatalogService.createMatch("Home FC", "Away FC", "Premier League");
-        matchCatalogService.addShowtime(matchId, Instant.now().plusSeconds(3600), "venue-1", 100,
+        matchCatalogService.addShowtime(matchId, Instant.now().plusSeconds(3600), "my-dinh",
                 new BigDecimal("150000"), "VND");
         matchCatalogService.publishMatch(matchId);
         outboxEventJpaRepository.deleteAll(); // drop prior rows so only cancelMatch()'s row is asserted below

@@ -62,9 +62,20 @@ class SeatInventoryTest {
         inventory.sellSeats(List.of(A1, new SeatCode("Z9")), "booking-1");
 
         assertThat(inventory.getSeats()).hasSize(1);
-        // No exception for the unknown code — the event still records everything requested.
+        // Unknown codes are ignored and never decrement the catalog availability projection.
         assertThat(((SeatsSoldEvent) inventory.pullDomainEvents().get(0)).seatCodes())
-                .containsExactly(A1, new SeatCode("Z9"));
+                .containsExactly(A1);
+    }
+
+    @Test
+    void sellingTheSameSeatsAgainForTheSameBookingDoesNotPublishAnotherSoldEvent() {
+        SeatInventory inventory = SeatInventory.create("showtime-1", List.of(seat(A1)));
+        inventory.sellSeats(List.of(A1), "booking-1");
+        inventory.pullDomainEvents();
+
+        inventory.sellSeats(List.of(A1), "booking-1");
+
+        assertThat(inventory.pullDomainEvents()).isEmpty();
     }
 
     @Test

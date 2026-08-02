@@ -5,6 +5,7 @@ import com.aireak.catalog.application.port.in.CancelMatchUseCase;
 import com.aireak.catalog.application.port.in.CompleteMatchUseCase;
 import com.aireak.catalog.application.port.in.CreateMatchUseCase;
 import com.aireak.catalog.application.port.in.GetMatchUseCase;
+import com.aireak.catalog.application.port.in.GetShowtimeUseCase;
 import com.aireak.catalog.application.port.in.ListMatchesUseCase;
 import com.aireak.catalog.application.port.in.PublishMatchUseCase;
 import com.aireak.catalog.application.port.out.DomainEventPublisher;
@@ -15,6 +16,7 @@ import com.aireak.catalog.domain.exception.MatchNotFoundException;
 import com.aireak.catalog.domain.model.Match;
 import com.aireak.catalog.domain.model.MatchStatus;
 import com.aireak.catalog.domain.model.Showtime;
+import com.aireak.catalog.domain.model.StadiumCatalog;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -36,7 +38,7 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCase, PublishMatchUseCase,
-        ListMatchesUseCase, GetMatchUseCase, CancelMatchUseCase, CompleteMatchUseCase {
+        ListMatchesUseCase, GetMatchUseCase, GetShowtimeUseCase, CancelMatchUseCase, CompleteMatchUseCase {
 
     private final MatchRepository matchRepository;
     private final MatchSearchPort matchSearchPort;
@@ -54,21 +56,23 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
 
     @Override
     @Transactional
-    public void addShowtime(String matchId, Instant startTime, String venueId, int totalSeats,
+    public void addShowtime(String matchId, Instant startTime, String stadiumId,
                              BigDecimal basePrice, String currency) {
         if (!startTime.isAfter(Instant.now())) {
             throw new InvalidShowtimeException("startTime must be in the future: " + startTime);
         }
+        StadiumCatalog.StadiumDefinition stadium = StadiumCatalog.find(stadiumId)
+                .orElseThrow(() -> new InvalidShowtimeException("Unknown stadium: " + stadiumId));
         // Exact-match check only (no showtime duration in the domain model to compute a real
         // overlap window against) — still catches the double-booking case that matters: two
         // showtimes claiming the same venue at the same instant.
-        if (matchRepository.existsShowtimeAtVenueAndTime(venueId, startTime)) {
+        if (matchRepository.existsShowtimeAtVenueAndTime(stadiumId, startTime)) {
             throw new InvalidShowtimeException(
-                    "Another showtime already exists at venue " + venueId + " at " + startTime);
+                    "Another showtime already exists at stadium " + stadiumId + " at " + startTime);
         }
 
         Match match = findOrThrow(matchId);
-        match.addShowtime(new Showtime(startTime, venueId, totalSeats, basePrice, currency));
+        match.addShowtime(new Showtime(startTime, stadiumId, stadium.totalSeats(), basePrice, currency));
         matchRepository.save(match);
         eventPublisher.publishAll(match.pullDomainEvents());
     }
@@ -144,5 +148,15 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
     public Optional<Match> getMatch(String matchId) {
         return matchRepository.findById(matchId)
                 .filter(m -> m.getStatus() != MatchStatus.DRAFT);
+    }
+
+    @Override
+    public Optional<ShowtimeDetails> getShowtime(String showtimeId) {
+        return matchRepository.findByShowtimeId(showtimeId)
+                .flatMap(match -> match.getShowtimes().stream()
+                        .filter(showtime -> showtime.getShowtimeId().equals(showtimeId))
+                        .findFirst()
+                        .map(showtime -> new ShowtimeDetails(
+                                showtime.getShowtimeId(), showtime.getStartTime(), match.getStatus())));
     }
 }

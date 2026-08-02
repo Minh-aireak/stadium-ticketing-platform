@@ -10,10 +10,12 @@ import com.aireak.inventory.application.port.out.DistributedLockPort;
 import com.aireak.inventory.application.port.out.DomainEventPublisher;
 import com.aireak.inventory.application.port.out.SeatHoldPort;
 import com.aireak.inventory.application.port.out.SeatInventoryRepository;
+import com.aireak.inventory.application.port.out.ShowtimeCatalogPort;
 import com.aireak.inventory.domain.event.SeatsReleasedEvent;
 import com.aireak.inventory.domain.event.SeatsReservedEvent;
 import com.aireak.inventory.domain.exception.SeatInventoryNotFoundException;
 import com.aireak.inventory.domain.exception.SeatsNotAvailableException;
+import com.aireak.inventory.domain.exception.ShowtimeBookingClosedException;
 import com.aireak.inventory.domain.model.Seat;
 import com.aireak.inventory.domain.model.SeatCode;
 import com.aireak.inventory.domain.model.SeatStatus;
@@ -36,6 +38,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -66,6 +69,8 @@ class SeatInventoryServiceTest {
     private DomainEventPublisher eventPublisher;
     @Mock
     private SeatSaleConfirmer seatSaleConfirmer;
+    @Mock
+    private ShowtimeCatalogPort showtimeCatalogPort;
 
     private SeatInventoryService service;
 
@@ -73,10 +78,11 @@ class SeatInventoryServiceTest {
     @SuppressWarnings("unchecked")
     void setUp() {
         service = new SeatInventoryService(
-                seatInventoryRepository, distributedLockPort, seatHoldPort, eventPublisher, seatSaleConfirmer);
+                seatInventoryRepository, distributedLockPort, seatHoldPort, eventPublisher,
+                seatSaleConfirmer, showtimeCatalogPort);
 
         // Run the supplied action immediately, as if the lock were granted with zero contention.
-        when(distributedLockPort.executeWithLock(anyString(), anyLong(), anyLong(), any(), any()))
+        lenient().when(distributedLockPort.executeWithLock(anyString(), anyLong(), anyLong(), any(), any()))
                 .thenAnswer(invocation -> {
                     Supplier<Object> action = invocation.getArgument(4);
                     return action.get();
@@ -98,6 +104,19 @@ class SeatInventoryServiceTest {
         verify(eventPublisher).publishAll(published.capture());
         assertThat(published.getValue()).hasSize(1);
         assertThat(published.getValue().get(0)).isInstanceOf(SeatsReservedEvent.class);
+    }
+
+    @Test
+    void reserveRejectsAClosedShowtimeBeforeTakingTheDistributedLock() {
+        doThrow(new ShowtimeBookingClosedException(SHOWTIME_ID))
+                .when(showtimeCatalogPort).requireBookable(SHOWTIME_ID);
+
+        assertThatThrownBy(() -> service.execute(
+                new ReserveSeatsCommand(SHOWTIME_ID, BOOKING_ID, CUSTOMER_ID, SEAT_CODE_STRINGS)))
+                .isInstanceOf(ShowtimeBookingClosedException.class);
+
+        verify(distributedLockPort, never()).executeWithLock(any(), anyLong(), anyLong(), any(), any());
+        verify(seatHoldPort, never()).confirmHold(any(), any(), any(), any());
     }
 
     @Test

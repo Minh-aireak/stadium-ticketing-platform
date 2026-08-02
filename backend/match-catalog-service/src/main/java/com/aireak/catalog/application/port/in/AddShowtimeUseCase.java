@@ -5,6 +5,6 @@ import java.time.Instant;
 
 /** Inbound port: add a showtime to an existing match. */
 public interface AddShowtimeUseCase {
-    void addShowtime(String matchId, Instant startTime, String venueId, int totalSeats,
-                      BigDecimal basePrice, String currency);
+    void addShowtime(String matchId, Instant startTime, String stadiumId,
+                     BigDecimal basePrice, String currency);
 }

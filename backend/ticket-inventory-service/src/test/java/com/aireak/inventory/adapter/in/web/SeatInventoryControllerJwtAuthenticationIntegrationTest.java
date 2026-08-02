@@ -3,6 +3,7 @@ package com.aireak.inventory.adapter.in.web;
 import com.aireak.common.security.AuthenticatedUser;
 import com.aireak.inventory.application.port.in.ConfirmSeatsUseCase;
 import com.aireak.inventory.application.port.in.GetSeatMapUseCase;
+import com.aireak.inventory.application.port.in.GetSeatingLayoutUseCase;
 import com.aireak.inventory.application.port.in.HoldSeatsUseCase;
 import com.aireak.inventory.application.port.in.ReleaseSeatsUseCase;
 import com.aireak.inventory.application.port.in.ReserveSeatsUseCase;
@@ -36,6 +37,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -72,6 +74,9 @@ class SeatInventoryControllerJwtAuthenticationIntegrationTest {
 
     @MockitoBean
     private GetSeatMapUseCase getSeatMapUseCase;
+
+    @MockitoBean
+    private GetSeatingLayoutUseCase getSeatingLayoutUseCase;
 
     @MockitoBean
     private HoldSeatsUseCase holdSeatsUseCase;
@@ -122,6 +127,45 @@ class SeatInventoryControllerJwtAuthenticationIntegrationTest {
         mockMvc.perform(get("/api/v1/inventory/{showtimeId}/seats", "showtime-1")
                         .header("Authorization", "Bearer " + validToken()))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void getLayoutRejectsRequestWithoutBearerToken() throws Exception {
+        mockMvc.perform(get("/api/v1/inventory/{showtimeId}/layout", "showtime-1"))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(getSeatingLayoutUseCase);
+    }
+
+    @Test
+    void getLayoutWithValidTokenReturns404WhenNotFound() throws Exception {
+        when(getSeatingLayoutUseCase.getLayout("showtime-1")).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/v1/inventory/{showtimeId}/layout", "showtime-1")
+                        .header("Authorization", "Bearer " + validToken()))
+                .andExpect(status().isNotFound());
+    }
+
+    // Pins the exact response shape (id/name/blocks/seatCodes) the frontend's SeatLayout type
+    // depends on (see frontend/src/features/seats/types.ts) — a field rename here would silently
+    // break the Section/Block picker without failing any TypeScript build.
+    @Test
+    void getLayoutWithValidTokenReturnsSectionsAndBlocksInFrontendShape() throws Exception {
+        when(getSeatingLayoutUseCase.getLayout("showtime-1")).thenReturn(Optional.of(
+                new GetSeatingLayoutUseCase.LayoutResult("showtime-1", List.of(
+                        new GetSeatingLayoutUseCase.SectionSummary("VIP", List.of(
+                                new GetSeatingLayoutUseCase.BlockSummary("A", List.of("A1", "A2"))))))));
+
+        mockMvc.perform(get("/api/v1/inventory/{showtimeId}/layout", "showtime-1")
+                        .header("Authorization", "Bearer " + validToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.showtimeId").value("showtime-1"))
+                .andExpect(jsonPath("$.sections[0].id").value("sec-vip"))
+                .andExpect(jsonPath("$.sections[0].name").value("VIP"))
+                .andExpect(jsonPath("$.sections[0].blocks[0].id").value("blk-vip-a"))
+                .andExpect(jsonPath("$.sections[0].blocks[0].name").value("A"))
+                .andExpect(jsonPath("$.sections[0].blocks[0].seatCodes[0]").value("A1"))
+                .andExpect(jsonPath("$.sections[0].blocks[0].seatCodes[1]").value("A2"));
     }
 
     @Test

@@ -46,15 +46,16 @@ public class Seat {
      * (see SeatHoldPort), so a lost/expired hold can otherwise let two bookings both "win"
      * the same seat without this check.
      */
-    void sell(String bookingId) {
+    boolean sell(String bookingId) {
         if (status == SeatStatus.SOLD) {
             if (Objects.equals(reservedByBookingId, bookingId)) {
-                return;
+                return false;
             }
             throw new SeatAlreadySoldException(seatCode, reservedByBookingId, bookingId);
         }
         this.status = SeatStatus.SOLD;
         this.reservedByBookingId = bookingId;
+        return true;
     }
 
     public SeatCode getSeatCode()          { return seatCode; }

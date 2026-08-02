@@ -7,5 +7,5 @@ import java.math.BigDecimal;
  * Triggered by {@code ShowtimeAddedEventConsumer} off catalog-service's {@code ShowtimeAddedEvent}.
  */
 public interface GenerateSeatMapUseCase {
-    void generate(String showtimeId, int totalSeats, BigDecimal basePrice);
+    void generate(String showtimeId, String stadiumId, int expectedTotalSeats, BigDecimal basePrice);
 }

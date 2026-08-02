@@ -2,6 +2,7 @@ package com.aireak.inventory.application.service;
 
 import com.aireak.inventory.application.port.out.SeatInventoryRepository;
 import com.aireak.inventory.domain.model.SeatInventory;
+import com.aireak.inventory.domain.model.SeatMapLayout;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -35,12 +36,12 @@ class SeatMapGenerationServiceTest {
         newService();
         when(seatInventoryRepository.existsByShowtimeId("showtime-1")).thenReturn(false);
 
-        service.generate("showtime-1", 25, BASE_PRICE);
+        service.generate("showtime-1", SeatMapLayout.MY_DINH, 432, BASE_PRICE);
 
         ArgumentCaptor<SeatInventory> saved = ArgumentCaptor.forClass(SeatInventory.class);
         verify(seatInventoryRepository).save(saved.capture());
         assertThat(saved.getValue().getShowtimeId()).isEqualTo("showtime-1");
-        assertThat(saved.getValue().getSeats()).hasSize(25);
+        assertThat(saved.getValue().getSeats()).hasSize(432);
     }
 
     @Test
@@ -48,7 +49,7 @@ class SeatMapGenerationServiceTest {
         newService();
         when(seatInventoryRepository.existsByShowtimeId("showtime-1")).thenReturn(true);
 
-        service.generate("showtime-1", 25, BASE_PRICE);
+        service.generate("showtime-1", SeatMapLayout.MY_DINH, 432, BASE_PRICE);
 
         verify(seatInventoryRepository, never()).save(any());
     }

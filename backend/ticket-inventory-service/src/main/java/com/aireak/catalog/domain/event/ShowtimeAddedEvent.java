@@ -13,6 +13,7 @@ import java.time.Instant;
 public record ShowtimeAddedEvent(
         String matchId,
         String showtimeId,
+        String stadiumId,
         int totalSeats,
         BigDecimal basePrice,
         String currency,

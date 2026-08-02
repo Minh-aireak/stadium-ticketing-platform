@@ -7,6 +7,7 @@ import com.aireak.inventory.adapter.in.web.dto.HoldSeatsRequest;
 import com.aireak.inventory.adapter.in.web.dto.ReserveSeatsRequest;
 import com.aireak.inventory.application.port.in.ConfirmSeatsUseCase;
 import com.aireak.inventory.application.port.in.GetSeatMapUseCase;
+import com.aireak.inventory.application.port.in.GetSeatingLayoutUseCase;
 import com.aireak.inventory.application.port.in.HoldSeatsUseCase;
 import com.aireak.inventory.application.port.in.ReleaseSeatsUseCase;
 import com.aireak.inventory.application.port.in.ReserveSeatsUseCase;
@@ -41,6 +42,7 @@ public class SeatInventoryController {
     private final ReleaseSeatsUseCase releaseSeatsUseCase;
     private final ConfirmSeatsUseCase confirmSeatsUseCase;
     private final GetSeatMapUseCase getSeatMapUseCase;
+    private final GetSeatingLayoutUseCase getSeatingLayoutUseCase;
     private final HoldSeatsUseCase holdSeatsUseCase;
     private final UnholdSeatsUseCase unholdSeatsUseCase;
 
@@ -138,6 +140,38 @@ public class SeatInventoryController {
                 seat.price());
     }
 
+    /**
+     * GET /api/v1/inventory/{showtimeId}/layout — static seating topology (sections/blocks) for
+     * the frontend's Section/Block picker. Separate from {@link #getSeatMap}, which reflects live
+     * hold/sold state: this is best-effort/cacheable topology, so the frontend treats a 404 here
+     * (or the endpoint being unreachable) as "no Section/Block picker available" and falls back to
+     * the plain seat map.
+     */
+    @GetMapping("/{showtimeId}/layout")
+    public ResponseEntity<LayoutResponse> getLayout(@PathVariable String showtimeId) {
+        return getSeatingLayoutUseCase.getLayout(showtimeId)
+                .map(result -> ResponseEntity.ok(toLayoutResponse(result)))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    private LayoutResponse toLayoutResponse(GetSeatingLayoutUseCase.LayoutResult result) {
+        List<SectionResponse> sections = result.sections().stream().map(this::toSectionResponse).toList();
+        return new LayoutResponse(result.showtimeId(), sections);
+    }
+
+    private SectionResponse toSectionResponse(GetSeatingLayoutUseCase.SectionSummary section) {
+        String tierSlug = section.tier().toLowerCase();
+        List<BlockResponse> blocks = section.blocks().stream()
+                .map(block -> toBlockResponse(tierSlug, block))
+                .toList();
+        return new SectionResponse("sec-" + tierSlug, section.tier(), blocks);
+    }
+
+    private BlockResponse toBlockResponse(String tierSlug, GetSeatingLayoutUseCase.BlockSummary block) {
+        String rowSlug = block.row().toLowerCase();
+        return new BlockResponse("blk-" + tierSlug + "-" + rowSlug, block.row(), block.seatCodes());
+    }
+
     // JwtAuthenticationFilter runs for every non-excluded path (no exclusion here), so this is
     // always populated by the time controller code executes — same pattern as booking-service's
     // BookingController.
@@ -164,4 +198,7 @@ public class SeatInventoryController {
     record SeatMapResponse(String showtimeId, List<SeatResponse> seats) {}
     record ReserveSeatsResponse(BigDecimal totalPrice) {}
     record HoldSeatsResponse(BigDecimal totalPrice) {}
+    record BlockResponse(String id, String name, List<String> seatCodes) {}
+    record SectionResponse(String id, String name, List<BlockResponse> blocks) {}
+    record LayoutResponse(String showtimeId, List<SectionResponse> sections) {}
 }

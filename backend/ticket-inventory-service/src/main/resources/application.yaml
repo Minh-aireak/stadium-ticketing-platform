@@ -85,6 +85,10 @@ inventory:
     # after reserveSeats(), no explicit release or cleanup job needed.
     ttl-minutes: ${INVENTORY_HOLD_TTL_MINUTES:10}
 
+services:
+  catalog:
+    base-url: ${MATCH_CATALOG_SERVICE_URL:http://localhost:8082}
+
 outbox:
   cleanup:
     # Debezium reads outbox_events via WAL, not the table itself — rows older than this are

@@ -80,12 +80,12 @@ class MatchCatalogServiceTest {
         when(matchRepository.findById("match-1")).thenReturn(Optional.of(existing));
         Instant startTime = Instant.now().plusSeconds(7200);
 
-        service.addShowtime("match-1", startTime, "venue-1", 50, BASE_PRICE, "VND");
+        service.addShowtime("match-1", startTime, "my-dinh", BASE_PRICE, "VND");
 
         ArgumentCaptor<Match> saved = ArgumentCaptor.forClass(Match.class);
         verify(matchRepository).save(saved.capture());
         assertThat(saved.getValue().getShowtimes()).hasSize(1);
-        assertThat(saved.getValue().getShowtimes().get(0).getTotalSeats()).isEqualTo(50);
+        assertThat(saved.getValue().getShowtimes().get(0).getTotalSeats()).isEqualTo(432);
 
         ArgumentCaptor<List<Object>> published = ArgumentCaptor.forClass(List.class);
         verify(eventPublisher).publishAll(published.capture());
@@ -98,26 +98,37 @@ class MatchCatalogServiceTest {
         when(matchRepository.findById("missing")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.addShowtime(
-                "missing", Instant.now().plusSeconds(3600), "venue-1", 50, BASE_PRICE, "VND"))
+                "missing", Instant.now().plusSeconds(3600), "my-dinh", BASE_PRICE, "VND"))
                 .isInstanceOf(MatchNotFoundException.class);
     }
 
     @Test
     void addShowtimeThrowsWhenStartTimeIsNotInTheFuture() {
         assertThatThrownBy(() -> service.addShowtime(
-                "match-1", Instant.now().minusSeconds(1), "venue-1", 50, BASE_PRICE, "VND"))
+                "match-1", Instant.now().minusSeconds(1), "my-dinh", BASE_PRICE, "VND"))
                 .isInstanceOf(InvalidShowtimeException.class);
 
         verify(matchRepository, never()).findById(any());
     }
 
     @Test
+    void addShowtimeRejectsUnknownStadiumBeforePersistingAnything() {
+        assertThatThrownBy(() -> service.addShowtime(
+                "match-1", Instant.now().plusSeconds(3600), "unknown-stadium", BASE_PRICE, "VND"))
+                .isInstanceOf(InvalidShowtimeException.class)
+                .hasMessageContaining("Unknown stadium");
+
+        verify(matchRepository, never()).findById(any());
+        verify(matchRepository, never()).save(any());
+    }
+
+    @Test
     void addShowtimeThrowsWhenVenueAlreadyHasAShowtimeAtThatStartTime() {
         Instant startTime = Instant.now().plusSeconds(3600);
-        when(matchRepository.existsShowtimeAtVenueAndTime("venue-1", startTime)).thenReturn(true);
+        when(matchRepository.existsShowtimeAtVenueAndTime("my-dinh", startTime)).thenReturn(true);
 
         assertThatThrownBy(() -> service.addShowtime(
-                "match-1", startTime, "venue-1", 50, BASE_PRICE, "VND"))
+                "match-1", startTime, "my-dinh", BASE_PRICE, "VND"))
                 .isInstanceOf(InvalidShowtimeException.class);
 
         verify(matchRepository, never()).save(any());

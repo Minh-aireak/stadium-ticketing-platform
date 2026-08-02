@@ -10,6 +10,7 @@ import java.util.Optional;
 public interface MatchRepository {
     void save(Match match);
     Optional<Match> findById(String matchId);
+    Optional<Match> findByShowtimeId(String showtimeId);
 
     /** Page of matches in the given status, newest first. */
     List<Match> findByStatus(MatchStatus status, int page, int size);

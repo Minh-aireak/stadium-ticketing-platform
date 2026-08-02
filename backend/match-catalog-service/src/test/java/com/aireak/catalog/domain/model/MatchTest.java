@@ -18,7 +18,8 @@ class MatchTest {
 
     private Match matchWithShowtime() {
         Match match = Match.create("Home FC", "Away FC", "Premier League");
-        match.addShowtime(new Showtime(Instant.now().plusSeconds(3600), "venue-1", 100, BASE_PRICE, "VND"));
+        match.addShowtime(new Showtime(Instant.now().plusSeconds(3600), StadiumCatalog.MY_DINH,
+                432, BASE_PRICE, "VND"));
         // Drain the ShowtimeAddedEvent this raises so tests using this helper to reach a
         // "has one showtime" fixture can assert on their own event (e.g. MatchPublishedEvent)
         // in isolation, without also having to account for this setup step's event.
@@ -40,7 +41,8 @@ class MatchTest {
     void addShowtimeAppendsToListWhenDraft() {
         Match match = Match.create("Home FC", "Away FC", "Premier League");
 
-        match.addShowtime(new Showtime(Instant.now().plusSeconds(3600), "venue-1", 100, BASE_PRICE, "VND"));
+        match.addShowtime(new Showtime(Instant.now().plusSeconds(3600), StadiumCatalog.MY_DINH,
+                432, BASE_PRICE, "VND"));
 
         assertThat(match.getShowtimes()).hasSize(1);
     }
@@ -48,7 +50,8 @@ class MatchTest {
     @Test
     void addShowtimeRaisesShowtimeAddedEvent() {
         Match match = Match.create("Home FC", "Away FC", "Premier League");
-        Showtime showtime = new Showtime(Instant.now().plusSeconds(3600), "venue-1", 100, BASE_PRICE, "VND");
+        Showtime showtime = new Showtime(Instant.now().plusSeconds(3600), StadiumCatalog.MY_DINH,
+                432, BASE_PRICE, "VND");
 
         match.addShowtime(showtime);
 
@@ -58,7 +61,8 @@ class MatchTest {
         ShowtimeAddedEvent event = (ShowtimeAddedEvent) events.get(0);
         assertThat(event.matchId()).isEqualTo(match.getMatchId());
         assertThat(event.showtimeId()).isEqualTo(showtime.getShowtimeId());
-        assertThat(event.totalSeats()).isEqualTo(100);
+        assertThat(event.stadiumId()).isEqualTo(StadiumCatalog.MY_DINH);
+        assertThat(event.totalSeats()).isEqualTo(432);
         assertThat(event.basePrice()).isEqualByComparingTo(BASE_PRICE);
         assertThat(event.currency()).isEqualTo("VND");
     }

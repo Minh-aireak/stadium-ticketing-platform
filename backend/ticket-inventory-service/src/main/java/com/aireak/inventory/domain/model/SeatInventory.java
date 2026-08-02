@@ -52,11 +52,15 @@ public class SeatInventory {
      * if a seat is already SOLD to a different booking (see {@link Seat#sell}).
      */
     public void sellSeats(List<SeatCode> seatCodes, String bookingId) {
-        seatCodes.stream()
+        List<SeatCode> newlySold = seatCodes.stream()
                 .map(seats::get)
                 .filter(Objects::nonNull)
-                .forEach(seat -> seat.sell(bookingId));
-        domainEvents.add(new SeatsSoldEvent(showtimeId, seatCodes));
+                .filter(seat -> seat.sell(bookingId))
+                .map(Seat::getSeatCode)
+                .toList();
+        if (!newlySold.isEmpty()) {
+            domainEvents.add(new SeatsSoldEvent(showtimeId, newlySold));
+        }
     }
 
     public String getShowtimeId()         { return showtimeId; }

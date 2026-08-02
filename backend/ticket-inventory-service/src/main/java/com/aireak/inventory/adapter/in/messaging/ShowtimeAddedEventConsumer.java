@@ -40,6 +40,6 @@ public class ShowtimeAddedEventConsumer {
             return;
         }
 
-        generateSeatMapUseCase.generate(event.showtimeId(), event.totalSeats(), event.basePrice());
+        generateSeatMapUseCase.generate(event.showtimeId(), event.stadiumId(), event.totalSeats(), event.basePrice());
     }
 }
