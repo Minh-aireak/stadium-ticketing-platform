@@ -7,6 +7,7 @@ import com.aireak.payment.application.port.in.InitiatePaymentUseCase;
 import com.aireak.payment.application.port.in.RefundPaymentUseCase;
 import com.aireak.payment.application.port.in.RetryPaymentUseCase;
 import com.aireak.payment.application.port.out.BookingOwnershipPort;
+import com.aireak.payment.domain.exception.DuplicatePaymentException;
 import com.aireak.payment.domain.model.Payment;
 import com.aireak.payment.domain.model.PaymentStatus;
 import com.nimbusds.jose.JOSEException;
@@ -145,6 +146,24 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
                                 {"bookingId":"%s","amount":"50.00","currency":"USD"}
                                 """.formatted(BOOKING_ID)))
                 .andExpect(status().isCreated());
+
+        verify(initiatePaymentUseCase).execute(any());
+    }
+
+    @Test
+    void initiateReturnsAcceptedWhenAnIdempotentPaymentAttemptIsStillInProgress() throws Exception {
+        doNothing().when(bookingOwnershipPort).verifyCallerOwnsBooking(eq(BOOKING_ID), anyString());
+        when(initiatePaymentUseCase.execute(any())).thenThrow(
+                new DuplicatePaymentException("Payment for booking " + BOOKING_ID +
+                        " is already being processed"));
+
+        mockMvc.perform(post("/api/v1/payments")
+                        .header("Authorization", "Bearer " + validToken(CUSTOMER_A_ID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"bookingId":"%s","amount":"50.00","currency":"USD"}
+                                """.formatted(BOOKING_ID)))
+                .andExpect(status().isAccepted());
 
         verify(initiatePaymentUseCase).execute(any());
     }

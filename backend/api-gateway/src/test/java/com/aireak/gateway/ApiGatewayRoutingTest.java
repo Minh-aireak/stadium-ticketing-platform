@@ -186,6 +186,22 @@ class ApiGatewayRoutingTest {
     }
 
     @Test
+    void bookingPreflightAllowsAuthorizationAndIdempotencyHeaders() {
+        client().options().uri("/api/v1/bookings")
+                .header(HttpHeaders.ORIGIN, "http://localhost:3000")
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "POST")
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS,
+                        "authorization,content-type,idempotency-key")
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().value(HttpHeaders.ACCESS_CONTROL_ALLOW_HEADERS, value -> {
+                    assertThat(value).containsIgnoringCase("authorization");
+                    assertThat(value).containsIgnoringCase("content-type");
+                    assertThat(value).containsIgnoringCase("idempotency-key");
+                });
+    }
+
+    @Test
     void slowDownstreamTriggersGatewayTimeout() {
         String bearer = bearerFor(UUID.randomUUID().toString());
 

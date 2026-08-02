@@ -10,6 +10,7 @@ import com.aireak.payment.application.port.in.RefundPaymentUseCase;
 import com.aireak.payment.application.port.in.RetryPaymentUseCase;
 import com.aireak.payment.application.port.in.command.InitiatePaymentCommand;
 import com.aireak.payment.application.port.out.BookingOwnershipPort;
+import com.aireak.payment.domain.exception.DuplicatePaymentException;
 import com.aireak.payment.domain.model.Payment;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Digits;
@@ -42,10 +43,18 @@ public class PaymentController {
     @PostMapping
     public ResponseEntity<InitiatePaymentResponse> initiate(@Valid @RequestBody InitiatePaymentRequest request) {
         enforceBookingOwnership(request.bookingId());
-        String paymentId = initiatePaymentUseCase.execute(
-                new InitiatePaymentCommand(request.bookingId(), request.amount(), request.currency()));
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(new InitiatePaymentResponse(paymentId));
+        try {
+            String paymentId = initiatePaymentUseCase.execute(
+                    new InitiatePaymentCommand(request.bookingId(), request.amount(), request.currency()));
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(new InitiatePaymentResponse(paymentId));
+        } catch (DuplicatePaymentException exception) {
+            // The Redis idempotency owner may still be between acquiring its key and committing
+            // the Payment row. This is an accepted in-flight request, not a validation failure:
+            // returning 202 prevents an idempotent retry from cancelling the booking while the
+            // original gateway charge continues in the background.
+            return ResponseEntity.accepted().body(new InitiatePaymentResponse(null));
+        }
     }
 
     /** POST /api/v1/payments/{paymentId}/retry — re-attempts a FAILED payment on the same row. */

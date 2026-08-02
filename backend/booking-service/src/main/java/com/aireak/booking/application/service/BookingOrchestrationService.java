@@ -19,6 +19,7 @@ import org.springframework.web.client.HttpStatusCodeException;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 // Saga Orchestrator: coordinates booking creation flow and compensating transactions.
@@ -128,63 +129,71 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
         try {
             paymentPort.initiatePayment(bookingId, serverComputedAmount, currency);
         } catch (Exception e) {
-            // PaymentRestAdapter rethrows HttpStatusCodeException as-is, so it's checked directly.
-            if (e instanceof HttpStatusCodeException httpEx) {
-                // Definite HTTP response — payment never started, safe to compensate now.
+            // Compatibility guard for older payment-service instances: during the tiny window
+            // between acquiring the Redis idempotency key and committing the Payment row, a
+            // retry used to return 422 "already being processed". That response confirms that
+            // another attempt owns the payment; treating it as rejection can cancel a booking
+            // whose original Stripe charge is still running.
+            if (isPaymentAlreadyBeingProcessed(e)) {
+                log.warn("Payment is already being processed for booking {}; treating the " +
+                        "idempotent retry as accepted", bookingId);
+            } else if (e instanceof HttpStatusCodeException httpEx) {
+                // A genuine validation/authorization response rejected this request before the
+                // payment flow started, so compensating the seat reservation is safe.
                 log.error("Payment initiation rejected for booking {}: {} {}",
                         bookingId, httpEx.getStatusCode(), e.getMessage());
                 ticketInventoryPort.releaseSeats(showtimeId, bookingId, seatCodes);
                 sagaSteps.cancelBooking(bookingId, "Payment initiation rejected: " + e.getMessage());
                 releaseIdempotencyClaim(idempotencyKey);
                 throw e;
-            }
-
-            // No HTTP response (timeout/reset/circuit open) — payment may have already
-            // started. Ask payment-service directly before giving up on it: only a definite
-            // SUCCEEDED/FAILED is safe to act on here (see PaymentPort#checkOutcome — a "not
-            // found" result is indistinguishable from "still mid-flight" and must NOT be
-            // treated as safe-to-compensate).
-            Optional<PaymentPort.PaymentOutcome> outcome = paymentPort.checkOutcome(bookingId);
-            if (outcome.isPresent() && outcome.get() == PaymentPort.PaymentOutcome.SUCCEEDED) {
-                try {
-                    log.warn("Payment initiation was ambiguous for booking {} but reconciliation " +
-                            "confirmed success; confirming booking synchronously", bookingId);
-                    confirmBooking(bookingId);
-                    if (idempotencyKey != null) {
-                        idempotencyStore.complete(idempotencyKey, bookingId);
-                    }
-                    // Re-read rather than assume CONFIRMED: PaymentResultConsumer runs on its
-                    // own thread and may have already resolved (even cancelled, on a
-                    // conflicting signal) this booking concurrently with this check.
-                    return resultFor(bookingId);
-                } catch (Exception confirmEx) {
-                    // Most likely lost a race with PaymentResultConsumer resolving this
-                    // booking concurrently (confirmBooking's own guard threw because the
-                    // status was no longer PENDING_PAYMENT). Don't let a different exception
-                    // type skip releaseIdempotencyClaim below — fall through to the same
-                    // safe handling as an unresolved outcome.
-                    log.error("Failed to apply reconciled SUCCEEDED outcome for booking {}: {}",
-                            bookingId, confirmEx.getMessage());
-                }
-            } else if (outcome.isPresent() && outcome.get() == PaymentPort.PaymentOutcome.FAILED) {
-                try {
-                    log.warn("Payment initiation was ambiguous for booking {} but reconciliation " +
-                            "confirmed failure; cancelling booking synchronously", bookingId);
-                    ticketInventoryPort.releaseSeats(showtimeId, bookingId, seatCodes);
-                    sagaSteps.cancelBooking(bookingId, "Payment failed: " + e.getMessage());
-                } catch (Exception cancelEx) {
-                    log.error("Failed to apply reconciled FAILED outcome for booking {}: {}",
-                            bookingId, cancelEx.getMessage());
-                }
             } else {
-                // Still genuinely unknown — leave PENDING_PAYMENT; async PaymentResultConsumer
-                // or the scheduled reconciliation job resolves it later.
-                log.error("Payment initiation ambiguous for booking {}: {}", bookingId, e.getMessage());
+                // No HTTP response (timeout/reset/circuit open) — payment may have already
+                // started. Ask payment-service directly before giving up on it: only a definite
+                // SUCCEEDED/FAILED is safe to act on here (see PaymentPort#checkOutcome — a "not
+                // found" result is indistinguishable from "still mid-flight" and must NOT be
+                // treated as safe-to-compensate).
+                Optional<PaymentPort.PaymentOutcome> outcome = paymentPort.checkOutcome(bookingId);
+                if (outcome.isPresent() && outcome.get() == PaymentPort.PaymentOutcome.SUCCEEDED) {
+                    try {
+                        log.warn("Payment initiation was ambiguous for booking {} but reconciliation " +
+                                "confirmed success; confirming booking synchronously", bookingId);
+                        confirmBooking(bookingId);
+                        if (idempotencyKey != null) {
+                            idempotencyStore.complete(idempotencyKey, bookingId);
+                        }
+                        // Re-read rather than assume CONFIRMED: PaymentResultConsumer runs on its
+                        // own thread and may have already resolved (even cancelled, on a
+                        // conflicting signal) this booking concurrently with this check.
+                        return resultFor(bookingId);
+                    } catch (Exception confirmEx) {
+                        // Most likely lost a race with PaymentResultConsumer resolving this
+                        // booking concurrently (confirmBooking's own guard threw because the
+                        // status was no longer PENDING_PAYMENT). Don't let a different exception
+                        // type skip releaseIdempotencyClaim below — fall through to the same
+                        // safe handling as an unresolved outcome.
+                        log.error("Failed to apply reconciled SUCCEEDED outcome for booking {}: {}",
+                                bookingId, confirmEx.getMessage());
+                    }
+                } else if (outcome.isPresent() && outcome.get() == PaymentPort.PaymentOutcome.FAILED) {
+                    try {
+                        log.warn("Payment initiation was ambiguous for booking {} but reconciliation " +
+                                "confirmed failure; cancelling booking synchronously", bookingId);
+                        ticketInventoryPort.releaseSeats(showtimeId, bookingId, seatCodes);
+                        sagaSteps.cancelBooking(bookingId, "Payment failed: " + e.getMessage());
+                    } catch (Exception cancelEx) {
+                        log.error("Failed to apply reconciled FAILED outcome for booking {}: {}",
+                                bookingId, cancelEx.getMessage());
+                    }
+                } else {
+                    // Still genuinely unknown — leave PENDING_PAYMENT; async PaymentResultConsumer
+                    // or the scheduled reconciliation job resolves it later.
+                    log.error("Payment initiation ambiguous for booking {}: {}", bookingId, e.getMessage());
+                }
+                // Client got an error, not a bookingId — release the claim so a retry re-enters
+                // createBooking (the DB check above will pick up the existing row if present).
+                releaseIdempotencyClaim(idempotencyKey);
+                throw e;
             }
-            // Client got an error, not a bookingId — release the claim so a retry re-enters
-            // createBooking (the DB check above will pick up the existing row if present).
-            releaseIdempotencyClaim(idempotencyKey);
-            throw e;
         }
 
         // Step 5: publish BookingCreatedEvent
@@ -243,6 +252,19 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
         }
     }
 
+    private boolean isPaymentAlreadyBeingProcessed(Exception exception) {
+        if (!(exception instanceof HttpStatusCodeException httpException)) {
+            return false;
+        }
+        int status = httpException.getStatusCode().value();
+        if (status != 409 && status != 422) {
+            return false;
+        }
+        return httpException.getResponseBodyAsString()
+                .toLowerCase(Locale.ROOT)
+                .contains("already being processed");
+    }
+
     // For GET /api/v1/bookings/{bookingId}: lets clients poll for the terminal status of a
     // booking that was returned as PENDING_PAYMENT (including the ambiguous-payment case).
     @Override
@@ -265,6 +287,12 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
     // confirmReservation() is best-effort after.
     public void confirmBooking(String bookingId) {
         Booking booking = sagaSteps.findOrThrow(bookingId);
+        if (booking.getStatus() == BookingStatus.CANCELLED) {
+            log.error("PAYMENT_SUCCEEDED arrived after booking {} was cancelled; requesting an " +
+                    "idempotent refund", bookingId);
+            paymentPort.refundPayment(bookingId, "Payment succeeded after booking cancellation");
+            return;
+        }
         if (booking.getStatus() != BookingStatus.PENDING_PAYMENT) {
             log.warn("Ignoring PAYMENT_SUCCEEDED for booking {}: status is already {}",
                     bookingId, booking.getStatus());

@@ -23,6 +23,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.client.HttpClientErrorException;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 
@@ -84,6 +85,45 @@ class BookingOrchestrationServiceTest {
 
     private void stubReserveSeats() {
         when(ticketInventoryPort.reserveSeats(SHOWTIME_ID, BOOKING_ID, SEAT_CODES)).thenReturn(SERVER_AMOUNT);
+    }
+
+    @Test
+    void legacyAlreadyProcessingResponseIsAcceptedWithoutCancellingBooking() {
+        when(idempotencyStore.claim("idem-1")).thenReturn(new IdempotencyClaim.Claimed());
+        stubCreateDraftBooking();
+        stubReserveSeats();
+        HttpClientErrorException alreadyProcessing = HttpClientErrorException.create(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                "Unprocessable Entity",
+                HttpHeaders.EMPTY,
+                ("{\"type\":\"https://aireak.com/errors/domain-error\"," +
+                        "\"detail\":\"Payment for booking " + BOOKING_ID +
+                        " is already being processed\"}").getBytes(StandardCharsets.UTF_8),
+                StandardCharsets.UTF_8);
+        doThrow(alreadyProcessing).when(paymentPort)
+                .initiatePayment(BOOKING_ID, SERVER_AMOUNT, CURRENCY);
+
+        BookingCreationResult result = service.createBooking(
+                "idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY);
+
+        assertThat(result.bookingId()).isEqualTo(BOOKING_ID);
+        assertThat(result.status()).isEqualTo(BookingStatus.PENDING_PAYMENT);
+        verify(sagaSteps).recordCreationSucceeded(BOOKING_ID);
+        verify(idempotencyStore).complete("idem-1", BOOKING_ID);
+        verify(sagaSteps, never()).cancelBooking(anyString(), anyString());
+        verify(ticketInventoryPort, never()).releaseSeats(anyString(), anyString(), any());
+        verify(paymentPort, never()).checkOutcome(anyString());
+    }
+
+    @Test
+    void paymentSucceededAfterCancellationRequestsRefund() {
+        when(sagaSteps.findOrThrow(BOOKING_ID)).thenReturn(cancelledBooking(BOOKING_ID));
+
+        service.confirmBooking(BOOKING_ID);
+
+        verify(sagaSteps, never()).markConfirmed(anyString());
+        verify(paymentPort).refundPayment(
+                BOOKING_ID, "Payment succeeded after booking cancellation");
     }
 
     @Nested
@@ -269,6 +309,7 @@ class BookingOrchestrationServiceTest {
             // A definite HTTP response means payment never started — no need to ask checkOutcome.
             verify(paymentPort, never()).checkOutcome(anyString());
         }
+
     }
 
     @Nested
@@ -423,12 +464,14 @@ class BookingOrchestrationServiceTest {
         }
 
         @Test
-        void isNoOpWhenBookingAlreadyCancelled() {
+        void requestsRefundWhenPaymentSucceedsAfterBookingWasCancelled() {
             when(sagaSteps.findOrThrow(BOOKING_ID)).thenReturn(cancelledBooking(BOOKING_ID));
 
             service.confirmBooking(BOOKING_ID);
 
             verify(sagaSteps, never()).markConfirmed(anyString());
+            verify(paymentPort).refundPayment(
+                    BOOKING_ID, "Payment succeeded after booking cancellation");
         }
 
         @Test

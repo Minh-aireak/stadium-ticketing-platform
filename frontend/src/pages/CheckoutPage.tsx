@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useAuth } from '@/features/auth/AuthContext'
 import { createBooking } from '@/features/booking/bookingApi'
-import { initiatePayment } from '@/features/payment/paymentApi'
 import { unholdSeats } from '@/features/seats/seatsApi'
 import { formatCurrency } from '@/lib/format'
 import { getErrorMessage } from '@/lib/errors'
@@ -48,8 +47,6 @@ export function CheckoutPage() {
         idempotencyKey.current,
       )
 
-      await initiatePayment({ bookingId: booking.bookingId, amount, currency })
-
       navigate(`/checkout/${booking.bookingId}/status`, {
         state: { matchLabel, seatCodes },
       })
@@ -66,7 +63,7 @@ export function CheckoutPage() {
   // it as part of compensating the failure) before sending the user back to pick again.
   function handleBackToSeatSelection() {
     unholdSeats(showtimeId, seatCodes).catch(() => {})
-    navigate(`/matches/${matchId}/seats`, { state: { matchLabel, showtimeId } })
+    navigate(`/matches/${matchId}`)
   }
 
   return (

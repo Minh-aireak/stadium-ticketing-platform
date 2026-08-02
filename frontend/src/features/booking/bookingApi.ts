@@ -1,4 +1,4 @@
-import { api } from '@/lib/api'
+import { api, getAccessToken, refreshAccessToken } from '@/lib/api'
 import type {
   BookingListResponse,
   BookingStatusResponse,
@@ -12,8 +12,16 @@ export async function createBooking(
   payload: CreateBookingRequest,
   idempotencyKey: string,
 ): Promise<CreateBookingResponse> {
+  // Checkout is a protected transition and must never emit an anonymous first attempt. The
+  // in-memory access token can be empty immediately after a page/bundle reload, while the
+  // HttpOnly refresh session is still valid. Restore it before POST instead of relying on a
+  // rejected 401 round-trip (which also complicates the Idempotency-Key CORS preflight).
+  const accessToken = getAccessToken() ?? await refreshAccessToken()
   const { data } = await api.post<CreateBookingResponse>('/bookings', payload, {
-    headers: { 'Idempotency-Key': idempotencyKey },
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Idempotency-Key': idempotencyKey,
+    },
   })
   return data
 }
