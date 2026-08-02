@@ -24,16 +24,6 @@ import java.io.StringWriter;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Application service implementing the notification dispatch use case.
- *
- * <p><strong>Idempotency</strong>: checks {@link ProcessedEventRepository} before
- * processing. If the eventId has already been processed, the method returns immediately.
- * The {@code markProcessed} call and the actual send are wrapped in one transaction
- * to guarantee at-most-once delivery semantics (with the idempotency store).
- *
- * <p>Templates are resolved from static registry and rendered dynamically using FreeMarker.
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -45,16 +35,9 @@ public class NotificationDispatchService implements SendNotificationUseCase {
     private final NotificationRepository notificationRepository;
     private final Configuration freemarkerConfig;
 
-    // Field injection (not a constructor param): keeps the Lombok @RequiredArgsConstructor used
-    // in tests (which construct this service directly, outside Spring) working unchanged. The
-    // literal default matches application.yaml's so a plain `new` in a test still gets a usable URL.
     @Value("${app.identity-service-base-url:http://localhost:8081}")
     private String identityServiceBaseUrl = "http://localhost:8081";
 
-    /**
-     * Static template registry.
-     * Key: eventType (matches KafkaTopics constants)
-     */
     private static final Map<String, NotificationTemplate> TEMPLATES = Map.of(
             "booking.booking.confirmed",
             new NotificationTemplate("booking.booking.confirmed", NotificationChannel.EMAIL,

@@ -4,9 +4,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.List;
 
-/**
- * Gateway configuration properties including trusted proxy CIDRs/IPs for rate limit keying.
- */
 @ConfigurationProperties(prefix = "gateway")
 public record GatewayProperties(List<String> trustedProxies) {
 

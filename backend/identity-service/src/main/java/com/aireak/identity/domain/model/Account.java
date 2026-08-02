@@ -9,22 +9,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * Aggregate Root: Account — Identity & Access bounded context.
- *
- * <p>Invariants protected:
- * <ul>
- *   <li>Status transitions are strictly controlled (no arbitrary state assignment)</li>
- *   <li>Only PENDING_VERIFICATION accounts can be activated</li>
- *   <li>Only ACTIVE accounts can be suspended</li>
- *   <li>Password can only be changed when ACTIVE</li>
- * </ul>
- *
- * <p>Domain events are collected and published by the application layer
- * after successful persistence — NOT inside this class.
- *
- * <p>No JPA annotations here — this is a pure domain object.
- */
 public class Account {
 
     private final AccountId id;
@@ -35,9 +19,6 @@ public class Account {
     private final Instant registeredAt;
     private final List<Object> domainEvents = new ArrayList<>();
 
-    /**
-     * Private constructor — use factory method {@link #register}.
-     */
     private Account(AccountId id, Email email, HashedPassword password,
                     AccountStatus status, Instant registeredAt, AccountRole role) {
         this.id = id;

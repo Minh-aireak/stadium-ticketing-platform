@@ -3,13 +3,6 @@ package com.aireak.inventory.application.port.out;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
-/**
- * Outbound port: distributed lock.
- * Implemented by RedissonDistributedLockAdapter in adapter/out/lock.
- *
- * <p>Application service acquires lock BEFORE calling aggregate methods
- * to prevent concurrent seat reservation race conditions.
- */
 public interface DistributedLockPort {
 
     /**
@@ -24,6 +17,5 @@ public interface DistributedLockPort {
      * @return result of the action
      * @throws RuntimeException if the lock cannot be acquired within waitTime
      */
-    <T> T executeWithLock(String lockKey, long waitTime, long leaseTime, TimeUnit unit,
-                          Supplier<T> action);
+    <T> T executeWithLock(String lockKey, long waitTime, long leaseTime, TimeUnit unit, Supplier<T> action);
 }
