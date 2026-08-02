@@ -12,6 +12,8 @@ import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 
+import java.time.Duration;
+
 /**
  * Spring Security configuration for identity-service.
  *
@@ -37,10 +39,11 @@ import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 public class SecurityConfig {
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(
+            HttpSecurity http, RefreshTokenProperties refreshTokenProperties) throws Exception {
         http
             .csrf(csrf -> csrf
-                .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                .csrfTokenRepository(csrfTokenRepository(refreshTokenProperties))
                 .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
                 .ignoringRequestMatchers("/api/v1/auth/register", "/api/v1/auth/login")
             )
@@ -72,5 +75,17 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder(12); // strength 12 for adequate security
+    }
+
+    // Spring's default CookieCsrfTokenRepository writes XSRF-TOKEN as a session cookie (cleared
+    // when the browser closes), while the refresh_token cookie survives across browser restarts
+    // (see AuthController#refreshCookie, maxAge = time until expiresAt). Without matching the two
+    // lifetimes, a returning user with a still-valid refresh token loses the XSRF-TOKEN cookie
+    // first and gets a spurious 403 (session "expired") on the very next silent refresh.
+    private static CookieCsrfTokenRepository csrfTokenRepository(RefreshTokenProperties refreshTokenProperties) {
+        CookieCsrfTokenRepository repository = CookieCsrfTokenRepository.withHttpOnlyFalse();
+        repository.setCookieCustomizer(builder ->
+            builder.maxAge(Duration.ofSeconds(refreshTokenProperties.absoluteTtlSeconds())));
+        return repository;
     }
 }

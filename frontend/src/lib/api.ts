@@ -25,6 +25,14 @@ export function registerSessionExpiredHandler(handler: () => void) {
   onSessionExpired = handler
 }
 
+// CSRF is only required for cookie-authenticated endpoints (/auth/refresh, /auth/logout).
+// Per A2, the X-XSRF-TOKEN header is only sent when the XSRF-TOKEN cookie actually has a
+// value — if the cookie is missing, the header is omitted entirely.
+function buildCsrfHeaders(): Record<string, string> {
+  const token = getCookie('XSRF-TOKEN')
+  return token ? { 'X-XSRF-TOKEN': token } : {}
+}
+
 export const api = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true,
@@ -33,6 +41,11 @@ export const api = axios.create({
 api.interceptors.request.use((config) => {
   if (accessToken && !config.headers.Authorization) {
     config.headers.Authorization = `Bearer ${accessToken}`
+  }
+  // /auth/logout is cookie-authenticated (no bearer token), so it needs the CSRF header.
+  // Other POST/PUT/DELETE endpoints stay bearer-authenticated and must NOT get this header.
+  if (config.url?.includes('/auth/logout')) {
+    Object.assign(config.headers, buildCsrfHeaders())
   }
   return config
 })
@@ -54,7 +67,7 @@ function refreshAccessToken(): Promise<string> {
         null,
         {
           withCredentials: true,
-          headers: { 'X-XSRF-TOKEN': getCookie('XSRF-TOKEN') ?? '' },
+          headers: buildCsrfHeaders(),
         },
       )
       .then((res) => {

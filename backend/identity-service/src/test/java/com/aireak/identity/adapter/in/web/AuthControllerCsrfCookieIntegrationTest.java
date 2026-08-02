@@ -9,6 +9,7 @@ import com.aireak.identity.application.port.in.dto.AuthResult;
 import com.aireak.identity.application.port.out.dto.IssuedRefreshToken;
 import com.aireak.identity.config.AuthCookieProperties;
 import com.aireak.identity.config.CorsProperties;
+import com.aireak.identity.config.RefreshTokenProperties;
 import com.aireak.identity.config.SecurityConfig;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,7 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import java.time.Instant;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -44,7 +46,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @WebMvcTest(AuthController.class)
 @Import(SecurityConfig.class)
-@EnableConfigurationProperties({CorsProperties.class, AuthCookieProperties.class})
+@EnableConfigurationProperties({CorsProperties.class, AuthCookieProperties.class, RefreshTokenProperties.class})
 @TestPropertySource(properties = {
         "cors.allowed-origins=http://localhost:5173",
         "auth-cookie.name=refresh_token",
@@ -52,6 +54,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "auth-cookie.domain=",
         "auth-cookie.secure=false",
         "auth-cookie.same-site=Strict",
+        "refresh-token.absolute-ttl-seconds=2592000",
         // Needed to construct the real (common) JwtAuthenticationFilter, which @WebMvcTest
         // auto-detects as a Filter bean even though this controller doesn't require auth itself.
         "jwt.secret=test-secret-key-at-least-32-bytes-long-for-hs256!!",
@@ -132,5 +135,19 @@ class AuthControllerCsrfCookieIntegrationTest {
         mockMvc.perform(post("/api/v1/auth/refresh")
                         .cookie(new Cookie("refresh_token", "some-refresh-token")))
                 .andExpect(status().isForbidden());
+    }
+
+    // Guards against XSRF-TOKEN reverting to a session cookie (Spring's default): if its Max-Age
+    // is shorter than the refresh_token's, a returning user with a still-valid refresh token can
+    // lose the CSRF cookie first and get a spurious 403 on their next silent refresh.
+    @Test
+    void xsrfTokenCookieMaxAgeMatchesConfiguredRefreshTokenTtl() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(new Cookie("refresh_token", "some-refresh-token")))
+                .andExpect(status().isForbidden())
+                .andReturn();
+
+        Cookie xsrfCookie = result.getResponse().getCookie("XSRF-TOKEN");
+        assertThat(xsrfCookie.getMaxAge()).isEqualTo(2_592_000);
     }
 }

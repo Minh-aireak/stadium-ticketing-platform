@@ -1,5 +1,4 @@
 import { api, refreshAccessToken, setAccessToken } from '@/lib/api'
-import { getCookie } from '@/lib/cookies'
 import type { LoginRequest, LoginResponse, RegisterRequest, RegisterResponse } from './types'
 
 export async function login(payload: LoginRequest): Promise<LoginResponse> {
@@ -21,11 +20,9 @@ export async function silentRefresh(): Promise<LoginResponse['accessToken']> {
 
 export async function logout(): Promise<void> {
   try {
-    await api.post(
-      '/auth/logout',
-      null,
-      { headers: { 'X-XSRF-TOKEN': getCookie('XSRF-TOKEN') ?? '' } },
-    )
+    // The X-XSRF-TOKEN header is attached automatically by the shared api interceptor
+    // (only when the XSRF-TOKEN cookie has a value — A2 behavior).
+    await api.post('/auth/logout', null)
   } finally {
     setAccessToken(null)
   }
