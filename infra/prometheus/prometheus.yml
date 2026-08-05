@@ -13,6 +13,12 @@ scrape_configs:
         labels:
           service: node-exporter
 
+  - job_name: redis-exporter
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+        labels:
+          service: redis-exporter
+
   - job_name: api-gateway
     metrics_path: /actuator/prometheus
     static_configs:
@@ -68,3 +74,38 @@ scrape_configs:
         labels:
           service: booking-service
           application: booking-service
+
+  # Multi-target probe: one postgres-exporter container serves metrics for all 6
+  # Postgres instances via /probe?target=<host:port>&auth_module=aireak (see
+  # infra/postgres-exporter/config.yaml). __address__ is rewritten to the exporter
+  # itself; the real DB host:port travels in the "instance" label.
+  - job_name: postgres
+    metrics_path: /probe
+    params:
+      auth_module: [aireak]
+    static_configs:
+      - targets: ["postgres-identity:5432"]
+        labels:
+          database: identity_db
+      - targets: ["postgres-inventory:5432"]
+        labels:
+          database: inventory_db
+      - targets: ["postgres-booking:5432"]
+        labels:
+          database: booking_db
+      - targets: ["postgres-payment:5432"]
+        labels:
+          database: payment_db
+      - targets: ["postgres-catalog:5432"]
+        labels:
+          database: catalog_db
+      - targets: ["postgres-notification:5432"]
+        labels:
+          database: notification_db
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: postgres-exporter:9187
