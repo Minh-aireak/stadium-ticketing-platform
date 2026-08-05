@@ -3,9 +3,9 @@ spring:
     name: identity-service
 
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/identity_db
-    username: ${DB_USERNAME:aireak}
-    password: ${DB_PASSWORD:aireak}
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/identity_db
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -18,9 +18,9 @@ spring:
 
   data:
     redis:
-      host: ${REDIS_HOST:127.0.0.1}
-      port: ${REDIS_PORT:6319}
-      password: ${REDIS_PASSWORD:}
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+      password: ${REDIS_PASSWORD}
       connect-timeout: ${REDIS_CONNECT_TIMEOUT:30000}
       # Redisson (RedisRefreshSessionAdapter / RedisEmailVerificationTokenAdapter), not Spring
       # Data's Lettuce client, is what actually talks to Redis here — it manages its own
@@ -34,21 +34,23 @@ spring:
           max-wait: ${REDIS_LETTUCE_POOL_MAX_WAIT:-1ms}
 
 server:
-  port: 8081
+  port: ${SERVER_PORT:8081}
 
 jwt:
   # No default — must be injected via env var in every environment. A hardcoded fallback here
   # would let anyone who reads the source mint valid tokens if the env var is ever left unset.
   secret: ${JWT_SECRET}
-  # Set only during a secret rotation window — see docs/secrets_management_strategy.md.
-  previous-secret: ${JWT_PREVIOUS_SECRET:}
+  # Set only during a secret rotation window — see docs/secrets_management_strategy.md. No YAML
+  # default: must be explicitly set (blank is fine outside a rotation window) — see .env.example.
+  previous-secret: ${JWT_PREVIOUS_SECRET}
   # Distinct secret used only for service-to-service tokens (see JwtAuthProperties) — never
-  # accepted for user-issued tokens or vice versa.
-  internal-secret: ${JWT_INTERNAL_SECRET:}
+  # accepted for user-issued tokens or vice versa. No YAML default: must be explicitly set (blank
+  # falls back to jwt.secret, see InternalServiceTokenProvider) — see .env.example.
+  internal-secret: ${JWT_INTERNAL_SECRET}
   # Access token is short-lived by design — 15 min balances UX (silent refresh) vs blast radius if leaked.
   expiration-seconds: ${JWT_EXPIRATION_SECONDS:900}
-  issuer: ${JWT_ISSUER:https://auth.aireak.com}
-  audience: ${JWT_AUDIENCE:aireak-platform}
+  issuer: ${JWT_ISSUER}
+  audience: ${JWT_AUDIENCE}
   # Must mirror SecurityConfig's permitAll() requestMatchers — these are the entry points that
   # establish identity in the first place (or have no user JWT to present), so the common
   # module's stateless JwtAuthenticationFilter must not reject them for lacking a bearer token.
@@ -85,7 +87,7 @@ auth-cookie:
   same-site: ${AUTH_COOKIE_SAME_SITE:Strict}
 
 cors:
-  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  allowed-origins: ${CORS_ALLOWED_ORIGINS}
 
 outbox:
   cleanup:

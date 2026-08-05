@@ -1,0 +1,16 @@
+# postgres_exporter multi-target auth config — TEMPLATE.
+# postgres_exporter's auth_modules block has no environment-variable substitution, so the real
+# credentials cannot live in a committed file. Copy this to config.yaml (gitignored) and fill in
+# the real DB_USERNAME / DB_PASSWORD values from your .env before running docker compose up.
+#
+# All 6 Postgres containers share the same local-dev credentials (see docker-compose.yaml),
+# so one auth module covers every target probed via Prometheus (see
+# infra/prometheus/prometheus.yml, job "postgres").
+auth_modules:
+  aireak:
+    type: userpass
+    userpass:
+      username: YOUR_DB_USERNAME
+      password: YOUR_DB_PASSWORD
+    options:
+      sslmode: disable

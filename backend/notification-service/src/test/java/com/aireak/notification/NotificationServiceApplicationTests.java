@@ -9,9 +9,25 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+// jwt.issuer/audience/previous-secret/internal-secret, spring.kafka.bootstrap-servers,
+// spring.mail.* and app.identity-service-base-url back non-defaulted ${...} placeholders in
+// application.yaml — pinned here for the same reason jwt.secret already was (see
+// ApiGatewayApplicationTests).
 @SpringBootTest
 @Testcontainers
-@TestPropertySource(properties = "jwt.secret=test-secret-key-at-least-32-bytes-long-for-hs256!!")
+@TestPropertySource(properties = {
+		"jwt.secret=test-secret-key-at-least-32-bytes-long-for-hs256!!",
+		"jwt.issuer=https://auth.aireak.com",
+		"jwt.audience=aireak-platform",
+		"jwt.previous-secret=",
+		"jwt.internal-secret=",
+		"spring.kafka.bootstrap-servers=localhost:9092",
+		"spring.mail.host=localhost",
+		"spring.mail.port=1025",
+		"spring.mail.username=",
+		"spring.mail.password=",
+		"app.identity-service-base-url=http://localhost:8081"
+})
 class NotificationServiceApplicationTests {
 
 	@Container

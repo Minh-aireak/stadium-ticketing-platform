@@ -22,6 +22,7 @@ import org.testcontainers.utility.DockerImageName;
         "jwt.secret=test-secret-key-at-least-32-bytes-long-for-hs256!!",
         "jwt.issuer=identity-service",
         "jwt.audience=stadium-clients",
+        "jwt.previous-secret=",
         "IDENTITY_SERVICE_URL=http://localhost:9081",
         "MATCH_CATALOG_SERVICE_URL=http://localhost:9082",
         "TICKET_INVENTORY_SERVICE_URL=http://localhost:9083",

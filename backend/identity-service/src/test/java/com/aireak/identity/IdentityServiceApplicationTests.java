@@ -11,9 +11,22 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+// jwt.issuer/audience/previous-secret/internal-secret, cors.allowed-origins and
+// spring.data.redis.* back non-defaulted ${...} placeholders in application.yaml — pinned here
+// for the same reason jwt.secret already was (see ApiGatewayApplicationTests).
 @SpringBootTest
 @Testcontainers
-@TestPropertySource(properties = "jwt.secret=test-secret-key-at-least-32-bytes-long-for-hs256!!")
+@TestPropertySource(properties = {
+		"jwt.secret=test-secret-key-at-least-32-bytes-long-for-hs256!!",
+		"jwt.issuer=https://auth.aireak.com",
+		"jwt.audience=aireak-platform",
+		"jwt.previous-secret=",
+		"jwt.internal-secret=",
+		"cors.allowed-origins=http://localhost:5173",
+		"spring.data.redis.host=localhost",
+		"spring.data.redis.port=6379",
+		"spring.data.redis.password="
+})
 class IdentityServiceApplicationTests {
 
 	@Container

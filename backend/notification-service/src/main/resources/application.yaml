@@ -3,9 +3,9 @@ spring:
     name: notification-service
 
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5437}/notification_db
-    username: ${DB_USERNAME:aireak}
-    password: ${DB_PASSWORD:aireak}
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/notification_db
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -22,36 +22,40 @@ spring:
   # programmatically in KafkaConfig.java, which fully overrides Boot's
   # consumer autoconfiguration.
   kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
 
   mail:
-    host: ${MAIL_HOST:localhost}
-    port: ${MAIL_PORT:1025}
-    username: ${MAIL_USERNAME:}
-    password: ${MAIL_PASSWORD:}
+    host: ${MAIL_HOST}
+    port: ${MAIL_PORT}
+    # No YAML default: must be explicitly set (blank is fine — mail.smtp.auth is disabled below,
+    # so these are currently unused, but must not be silently defaulted) — see .env.example.
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
     properties:
       mail.smtp.auth: false
       mail.smtp.starttls.enable: false
 
 server:
-  port: 8085
+  port: ${SERVER_PORT:8085}
 
 app:
   # Base URL embedded in the account-welcome email's verify-email link. Must be reachable by the
   # end user's browser — not identity-service's internal container hostname in a real deployment.
-  identity-service-base-url: ${IDENTITY_SERVICE_BASE_URL:http://localhost:8081}
+  identity-service-base-url: ${IDENTITY_SERVICE_BASE_URL}
 
 # Must match identity-service's jwt.secret/issuer/audience exactly — validated independently
 # here so this service is never unauthenticated just because a caller bypassed api-gateway.
 jwt:
   secret: ${JWT_SECRET}
-  # Set only during a secret rotation window — see docs/secrets_management_strategy.md.
-  previous-secret: ${JWT_PREVIOUS_SECRET:}
+  # Set only during a secret rotation window — see docs/secrets_management_strategy.md. No YAML
+  # default: must be explicitly set (blank is fine outside a rotation window) — see .env.example.
+  previous-secret: ${JWT_PREVIOUS_SECRET}
   # Distinct secret for service-to-service tokens (see InternalServiceTokenProvider) — never
-  # accepted for user-issued tokens or vice versa.
-  internal-secret: ${JWT_INTERNAL_SECRET:}
-  issuer: ${JWT_ISSUER:https://auth.aireak.com}
-  audience: ${JWT_AUDIENCE:aireak-platform}
+  # accepted for user-issued tokens or vice versa. No YAML default: must be explicitly set (blank
+  # falls back to jwt.secret, see InternalServiceTokenProvider) — see .env.example.
+  internal-secret: ${JWT_INTERNAL_SECRET}
+  issuer: ${JWT_ISSUER}
+  audience: ${JWT_AUDIENCE}
   excluded-paths:
     - /actuator/health
     - /actuator/info

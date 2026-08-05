@@ -3,12 +3,12 @@ spring:
     name: match-catalog-service
 
   kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
 
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5436}/catalog_db
-    username: ${DB_USERNAME:aireak}
-    password: ${DB_PASSWORD:aireak}
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/catalog_db
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -20,19 +20,21 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
 
 server:
-  port: 8082
+  port: ${SERVER_PORT:8082}
 
 # Must match identity-service's jwt.secret/issuer/audience exactly — validated independently
 # here so this service is never unauthenticated just because a caller bypassed api-gateway.
 jwt:
   secret: ${JWT_SECRET}
-  # Set only during a secret rotation window — see docs/secrets_management_strategy.md.
-  previous-secret: ${JWT_PREVIOUS_SECRET:}
+  # Set only during a secret rotation window — see docs/secrets_management_strategy.md. No YAML
+  # default: must be explicitly set (blank is fine outside a rotation window) — see .env.example.
+  previous-secret: ${JWT_PREVIOUS_SECRET}
   # Distinct secret for service-to-service tokens (see InternalServiceTokenProvider) — never
-  # accepted for user-issued tokens or vice versa.
-  internal-secret: ${JWT_INTERNAL_SECRET:}
-  issuer: ${JWT_ISSUER:https://auth.aireak.com}
-  audience: ${JWT_AUDIENCE:aireak-platform}
+  # accepted for user-issued tokens or vice versa. No YAML default: must be explicitly set (blank
+  # falls back to jwt.secret, see InternalServiceTokenProvider) — see .env.example.
+  internal-secret: ${JWT_INTERNAL_SECRET}
+  issuer: ${JWT_ISSUER}
+  audience: ${JWT_AUDIENCE}
   excluded-paths:
     - /actuator/health
     - /actuator/info
@@ -49,9 +51,9 @@ jwt:
 
 # Elasticsearch connection
 elasticsearch:
-  host: ${ELASTICSEARCH_HOST:localhost}
-  port: ${ELASTICSEARCH_PORT:9200}
-  scheme: ${ELASTICSEARCH_SCHEME:http}
+  host: ${ELASTICSEARCH_HOST}
+  port: ${ELASTICSEARCH_PORT}
+  scheme: ${ELASTICSEARCH_SCHEME}
 
 outbox:
   cleanup:

@@ -12,9 +12,25 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import org.springframework.test.context.TestPropertySource;
 
+// jwt.issuer/audience/previous-secret/internal-secret, spring.kafka.bootstrap-servers and
+// elasticsearch.* back non-defaulted ${...} placeholders in application.yaml — pinned here for
+// the same reason jwt.secret already was (see ApiGatewayApplicationTests). elasticsearch.* is
+// still read eagerly by ElasticsearchClientConfig's RestClient @Bean even though
+// ElasticsearchClient itself is mocked below (mocking one bean doesn't skip a separate
+// @Bean method that feeds it).
 @SpringBootTest
 @Testcontainers
-@TestPropertySource(properties = "jwt.secret=test-secret-key-at-least-32-bytes-long-for-hs256!!")
+@TestPropertySource(properties = {
+        "jwt.secret=test-secret-key-at-least-32-bytes-long-for-hs256!!",
+        "jwt.issuer=https://auth.aireak.com",
+        "jwt.audience=aireak-platform",
+        "jwt.previous-secret=",
+        "jwt.internal-secret=",
+        "spring.kafka.bootstrap-servers=localhost:9092",
+        "elasticsearch.host=localhost",
+        "elasticsearch.port=9200",
+        "elasticsearch.scheme=http"
+})
 class MatchCatalogServiceApplicationTests {
 
     @Container

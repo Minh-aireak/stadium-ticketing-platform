@@ -3,9 +3,9 @@ spring:
     name: api-gateway
   data:
     redis:
-      host: ${REDIS_HOST:127.0.0.1}
-      port: ${REDIS_PORT:6319}
-      password: ${REDIS_PASSWORD:}
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+      password: ${REDIS_PASSWORD}
       connect-timeout: ${REDIS_CONNECT_TIMEOUT:30000}
       # Backs GatewayRedisAutoConfiguration's ReactiveRedisTemplate (see RateLimiterRegistryConfig),
       # which is built on Spring Data's reactive Lettuce client — pool settings below apply to it.
@@ -66,7 +66,7 @@ spring:
                     maxSize: 200KB
 
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
 
 # Must match identity-service's jwt.secret/issuer/audience exactly — same shared HMAC secret,
 # injected via env var in every deployment, never hard-coded.
@@ -75,7 +75,9 @@ jwt:
   # Set only during a secret rotation window — see docs/secrets_management_strategy.md. Accepted
   # as a fallback signature alongside `secret` so tokens minted before the rotation stay valid
   # until they expire, without requiring every service to restart at the exact same instant.
-  previous-secret: ${JWT_PREVIOUS_SECRET:}
+  # No YAML default: must be explicitly set (blank is fine outside a rotation window) so it's
+  # never silently defaulted — see .env.example.
+  previous-secret: ${JWT_PREVIOUS_SECRET}
   issuer: ${JWT_ISSUER}
   audience: ${JWT_AUDIENCE}
   public-paths:

@@ -67,6 +67,7 @@ yarn-error.log*
 # =========================
 .env
 .env.*
+!/.env.example
 
 *.local.properties
 *.secret.properties
@@ -79,6 +80,11 @@ application-secret.yaml
 *.pem
 *.key
 *.crt
+
+# postgres_exporter's multi-target auth module has no env-var substitution — the DB credentials
+# it needs are written here in plaintext, so this file must never be committed. Copy
+# config.yaml.example to config.yaml and fill in real values (same as .env / .env.example).
+infra/postgres-exporter/config.yaml
 
 
 # =========================
