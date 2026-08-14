@@ -48,6 +48,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "jwt.secret=test-secret-key-at-least-32-bytes-long-for-hs256!!",
         "jwt.issuer=identity-service",
         "jwt.audience=stadium-clients",
+        "jwt.previous-secret=",
+        "jwt.internal-secret=",
         "jwt.excluded-paths[0]=GET:/api/v1/matches",
         "jwt.excluded-paths[1]=GET:/api/v1/matches/*"
 })

@@ -2,14 +2,15 @@ spring:
   application:
     name: booking-service
 
+  threads:
+    virtual:
+      enabled: true
+
   datasource:
     url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/booking_db
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
-    # Explicit pool size: every step in BookingSagaSteps is a short REQUIRES_NEW transaction that
-    # never spans the outbound REST calls (see BookingOrchestrationService), so a connection is
-    # only ever held for a single insert/update — this pool no longer needs to cover network wait.
     hikari:
       pool-name: BookingHikariPool
       maximum-pool-size: 20
@@ -34,9 +35,6 @@ spring:
       port: ${REDIS_PORT}
       password: ${REDIS_PASSWORD}
       connect-timeout: ${REDIS_CONNECT_TIMEOUT:30000}
-      # Redisson (RedissonIdempotencyStore + distributed lock), not Spring Data's Lettuce client,
-      # is what actually talks to Redis here — it manages its own connection pool and does not
-      # read these lettuce.pool.* properties. Kept for consistency with the other services.
       lettuce:
         pool:
           max-active: ${REDIS_LETTUCE_POOL_MAX_ACTIVE:8}
@@ -45,38 +43,24 @@ spring:
           max-wait: ${REDIS_LETTUCE_POOL_MAX_WAIT:-1ms}
 
 server:
-  port: ${SERVER_PORT:8086}
+  port: 8086
   tomcat:
-    threads:
-      # Kept above the sum of the ticket-inventory/payment Bulkhead limits (50+50=100) so a
-      # rejected call fails fast at the Bulkhead instead of also queueing at the Tomcat level.
-      max: 200
-      min-spare: 20
     accept-count: 100
 
-# Must match identity-service's jwt.secret/issuer/audience exactly — validated independently
-# here so this service is never unauthenticated just because a caller bypassed api-gateway.
 jwt:
   secret: ${JWT_SECRET}
-  # Set only during a secret rotation window — see docs/secrets_management_strategy.md. No YAML
-  # default: must be explicitly set (blank is fine outside a rotation window) — see .env.example.
   previous-secret: ${JWT_PREVIOUS_SECRET}
-  # Distinct secret for service-to-service tokens (see InternalServiceTokenProvider) — never
-  # accepted for user-issued tokens or vice versa. No YAML default: must be explicitly set (blank
-  # falls back to jwt.secret, see InternalServiceTokenProvider) — see .env.example.
   internal-secret: ${JWT_INTERNAL_SECRET}
   issuer: ${JWT_ISSUER}
   audience: ${JWT_AUDIENCE}
   excluded-paths:
     - /actuator/health
     - /actuator/info
-    # Prometheus has no user JWT to present — public here for the same reason health/info are.
     - /actuator/prometheus
     - /v3/api-docs/**
     - /swagger-ui/**
     - /swagger-ui.html
 
-# Downstream service URLs
 services:
   ticket-inventory:
     base-url: ${TICKET_INVENTORY_SERVICE_URL}
@@ -85,29 +69,19 @@ services:
 
 booking:
   inventory-confirmation-reconciler:
-    # Only retry CONFIRMED bookings whose inventory confirm is still unresolved after this
-    # long, so the job never races the synchronous attempt in confirmBooking().
     grace-minutes: ${INVENTORY_RECONCILER_GRACE_MINUTES:5}
     fixed-delay-ms: ${INVENTORY_RECONCILER_FIXED_DELAY_MS:300000}
-    # Caps how many bookings a single run retries — a real backlog drains over several cycles.
     batch-size: ${INVENTORY_RECONCILER_BATCH_SIZE:200}
   payment-reconciliation-job:
-    # Only reconcile PENDING_PAYMENT bookings still unresolved after this long, so the job never
-    # races the normal in-flight case (payment-service simply hasn't responded to Kafka yet).
     grace-minutes: ${PAYMENT_RECONCILER_GRACE_MINUTES:5}
     fixed-delay-ms: ${PAYMENT_RECONCILER_FIXED_DELAY_MS:300000}
-    # Caps how many bookings a single run retries — a real backlog drains over several cycles.
     batch-size: ${PAYMENT_RECONCILER_BATCH_SIZE:200}
 
 outbox:
   cleanup:
-    # Debezium reads outbox_events via WAL, not the table itself — rows older than this are
-    # safe to purge regardless of whether CDC has "processed" them.
     retention-days: ${OUTBOX_CLEANUP_RETENTION_DAYS:14}
     fixed-delay-ms: ${OUTBOX_CLEANUP_FIXED_DELAY_MS:86400000}
 
-# Resilience4j: CircuitBreaker + Retry + Bulkhead on outbound REST calls to
-# ticket-inventory-service and payment-service.
 resilience4j:
   circuitbreaker:
     instances:
@@ -117,8 +91,6 @@ resilience4j:
         failureRateThreshold: 50
         waitDurationInOpenState: 10s
         permittedNumberOfCallsInHalfOpenState: 3
-        # A Bulkhead rejection reflects OUR OWN concurrency cap, not the downstream's health —
-        # must not count toward tripping this circuit open.
         ignoreExceptions:
           - io.github.resilience4j.bulkhead.BulkheadFullException
       payment:
@@ -131,9 +103,6 @@ resilience4j:
           - io.github.resilience4j.bulkhead.BulkheadFullException
   bulkhead:
     instances:
-      # Caps concurrent in-flight calls to each downstream so one slow dependency can never
-      # consume every Tomcat thread handling createBooking(); overflow fails fast instead of
-      # queueing (maxWaitDuration: 0).
       ticket-inventory:
         maxConcurrentCalls: 50
         maxWaitDuration: 0

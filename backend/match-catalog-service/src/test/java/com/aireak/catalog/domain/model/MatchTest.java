@@ -62,6 +62,7 @@ class MatchTest {
         assertThat(event.matchId()).isEqualTo(match.getMatchId());
         assertThat(event.showtimeId()).isEqualTo(showtime.getShowtimeId());
         assertThat(event.stadiumId()).isEqualTo(StadiumCatalog.MY_DINH);
+        assertThat(event.startTime()).isEqualTo(showtime.getStartTime());
         assertThat(event.totalSeats()).isEqualTo(432);
         assertThat(event.basePrice()).isEqualByComparingTo(BASE_PRICE);
         assertThat(event.currency()).isEqualTo("VND");
@@ -107,16 +108,21 @@ class MatchTest {
     }
 
     @Test
-    void completeTransitionsFromPublished() {
+    void completeTransitionsFromPublishedAndRaisesEventWithShowtimeIds() {
         Match match = matchWithShowtime();
         match.publish();
         match.pullDomainEvents();
+        String showtimeId = match.getShowtimes().get(0).getShowtimeId();
 
         match.complete();
 
         assertThat(match.getStatus()).isEqualTo(MatchStatus.COMPLETED);
         assertThat(match.pullDomainEvents()).hasSize(1)
-                .first().isInstanceOf(com.aireak.catalog.domain.event.MatchCompletedEvent.class);
+                .first().satisfies(event -> {
+                    var completed = (com.aireak.catalog.domain.event.MatchCompletedEvent) event;
+                    assertThat(completed.matchId()).isEqualTo(match.getMatchId());
+                    assertThat(completed.showtimeIds()).containsExactly(showtimeId);
+                });
     }
 
     @Test

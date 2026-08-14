@@ -60,6 +60,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "jwt.secret=test-secret-key-at-least-32-bytes-long-for-hs256!!",
         "jwt.issuer=identity-service",
         "jwt.audience=stadium-clients",
+        "jwt.previous-secret=",
+        "jwt.internal-secret=",
         // Auth endpoints are permitAll in SecurityConfig and must also be excluded from
         // JwtAuthenticationFilter's interception, otherwise this stateless filter rejects
         // them with 401 before Spring Security's filter chain ever gets to check the

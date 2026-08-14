@@ -305,6 +305,34 @@ class JwtAuthenticationFilterTest {
         assertThat(response.getStatus()).isEqualTo(200);
     }
 
+    @Test
+    void rejectsUnresolvedPlaceholderSecret() {
+        JwtAuthProperties badProps = new JwtAuthProperties(
+                "${JWT_SECRET}", null, null, ISSUER, AUDIENCE, List.of());
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new JwtAuthenticationFilter(badProps))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("unexpanded placeholder");
+    }
+
+    @Test
+    void rejectsShortSecret() {
+        JwtAuthProperties badProps = new JwtAuthProperties(
+                "too-short-secret", null, null, ISSUER, AUDIENCE, List.of());
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new JwtAuthenticationFilter(badProps))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("at least 256 bits (32 bytes)");
+    }
+
+    @Test
+    void rejectsUnresolvedPreviousSecret() {
+        JwtAuthProperties badProps = new JwtAuthProperties(
+                SECRET, "${JWT_PREVIOUS_SECRET}", null, ISSUER, AUDIENCE, List.of());
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new JwtAuthenticationFilter(badProps))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("jwt.previous-secret")
+                .hasMessageContaining("unexpanded placeholder");
+    }
+
     private FilterChain neverInvokedChain() {
         return (req, res) -> {
             throw new AssertionError("Filter chain must not be invoked when the token is rejected");

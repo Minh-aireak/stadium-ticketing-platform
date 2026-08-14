@@ -2,6 +2,10 @@ spring:
   application:
     name: ticket-inventory-service
 
+  threads:
+    virtual:
+      enabled: true
+
   datasource:
     url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/inventory_db
     username: ${DB_USERNAME}
@@ -42,40 +46,23 @@ spring:
           min-idle: ${REDIS_LETTUCE_POOL_MIN_IDLE:0}
           max-wait: ${REDIS_LETTUCE_POOL_MAX_WAIT:-1ms}
 
-  # Only bootstrap-servers is read (via @Value in KafkaConfig) — consumer
-  # factory, deserializer, group-id, and error handling are all defined
-  # programmatically in KafkaConfig.java, which fully overrides Boot's
-  # consumer autoconfiguration.
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
 
 server:
-  port: ${SERVER_PORT:8083}
+  port: 8083
   tomcat:
-    threads:
-      # Kept above the Bulkhead's maxConcurrentCalls (100) so requests rejected by the Bulkhead
-      # fail fast instead of ever forming a Tomcat-level queue.
-      max: 200
-      min-spare: 20
     accept-count: 100
 
-# Must match identity-service's jwt.secret/issuer/audience exactly — validated independently
-# here so this service is never unauthenticated just because a caller bypassed api-gateway.
 jwt:
   secret: ${JWT_SECRET}
-  # Set only during a secret rotation window — see docs/secrets_management_strategy.md. No YAML
-  # default: must be explicitly set (blank is fine outside a rotation window) — see .env.example.
   previous-secret: ${JWT_PREVIOUS_SECRET}
-  # Distinct secret for service-to-service tokens (see InternalServiceTokenProvider) — never
-  # accepted for user-issued tokens or vice versa. No YAML default: must be explicitly set (blank
-  # falls back to jwt.secret, see InternalServiceTokenProvider) — see .env.example.
   internal-secret: ${JWT_INTERNAL_SECRET}
   issuer: ${JWT_ISSUER}
   audience: ${JWT_AUDIENCE}
   excluded-paths:
     - /actuator/health
     - /actuator/info
-    # Prometheus has no user JWT to present — public here for the same reason health/info are.
     - /actuator/prometheus
     - /v3/api-docs/**
     - /swagger-ui/**
@@ -83,8 +70,6 @@ jwt:
 
 inventory:
   hold:
-    # Seat hold TTL — Redis auto-expires an abandoned reservation this long
-    # after reserveSeats(), no explicit release or cleanup job needed.
     ttl-minutes: ${INVENTORY_HOLD_TTL_MINUTES:10}
 
 services:
@@ -93,8 +78,6 @@ services:
 
 outbox:
   cleanup:
-    # Debezium reads outbox_events via WAL, not the table itself — rows older than this are
-    # safe to purge regardless of whether CDC has "processed" them.
     retention-days: ${OUTBOX_CLEANUP_RETENTION_DAYS:14}
     fixed-delay-ms: ${OUTBOX_CLEANUP_FIXED_DELAY_MS:86400000}
 

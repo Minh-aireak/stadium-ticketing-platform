@@ -2,6 +2,7 @@ package com.aireak.inventory.application.service;
 
 import com.aireak.inventory.application.port.in.GenerateSeatMapUseCase;
 import com.aireak.inventory.application.port.out.SeatInventoryRepository;
+import com.aireak.inventory.application.port.out.ShowtimeCatalogPort;
 import com.aireak.inventory.domain.model.Seat;
 import com.aireak.inventory.domain.model.SeatInventory;
 import com.aireak.inventory.domain.model.SeatMapLayout;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -27,10 +29,17 @@ import java.util.List;
 public class SeatMapGenerationService implements GenerateSeatMapUseCase {
 
     private final SeatInventoryRepository seatInventoryRepository;
+    private final ShowtimeCatalogPort showtimeCatalogPort;
 
     @Override
     @Transactional
-    public void generate(String showtimeId, String stadiumId, int expectedTotalSeats, BigDecimal basePrice) {
+    public void generate(String showtimeId, String stadiumId, Instant startTime,
+                          int expectedTotalSeats, BigDecimal basePrice) {
+        // Unconditional, even on the idempotent-replay path below: this pod's local cache may be
+        // cold (e.g. after a restart) and this is the only event carrying the showtime's start
+        // time, so a replay is the only chance to repopulate it.
+        showtimeCatalogPort.rememberStartTime(showtimeId, startTime);
+
         if (seatInventoryRepository.existsByShowtimeId(showtimeId)) {
             log.debug("Seat map already generated for showtime={}, skipping (idempotent replay)", showtimeId);
             return;

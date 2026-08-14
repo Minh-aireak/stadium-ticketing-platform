@@ -69,6 +69,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     public JwtAuthenticationFilter(JwtAuthProperties properties) {
         this.properties = properties;
+        validateSecret("jwt.secret", properties.secret(), true);
+        validateSecret("jwt.previous-secret", properties.previousSecret(), false);
+        validateSecret("jwt.internal-secret", properties.internalSecret(), false);
         try {
             this.primaryVerifier = new MACVerifier(properties.secret().getBytes(StandardCharsets.UTF_8));
             this.previousVerifier = (properties.previousSecret() != null && !properties.previousSecret().isBlank())
@@ -79,6 +82,25 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     : null;
         } catch (JOSEException e) {
             throw new IllegalStateException("Failed to initialise JWT verifier (secret too short?)", e);
+        }
+    }
+
+    private static void validateSecret(String propertyName, String secret, boolean required) {
+        if (secret == null || secret.isBlank()) {
+            if (required) {
+                throw new IllegalStateException("Required property '" + propertyName + "' is not set or blank");
+            }
+            return;
+        }
+        if (secret.startsWith("${") && secret.endsWith("}")) {
+            throw new IllegalStateException(
+                    "Property '" + propertyName + "' resolved to unexpanded placeholder '" + secret +
+                    "'. Please set the corresponding environment variable or provide an explicit test value.");
+        }
+        if (secret.getBytes(StandardCharsets.UTF_8).length < 32) {
+            throw new IllegalStateException(
+                    "Property '" + propertyName + "' must be at least 256 bits (32 bytes) for HMAC-SHA256, but was " +
+                    secret.getBytes(StandardCharsets.UTF_8).length + " bytes.");
         }
     }
 

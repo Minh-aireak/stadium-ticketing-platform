@@ -76,6 +76,7 @@ class PaymentServiceTest {
         assertThat(paymentId).isEqualTo("payment-1");
         verify(sagaSteps, never()).tryInitiate(any(), any(), any());
         verify(paymentGatewayPort, never()).charge(any(), any(), any());
+        verify(idempotencyPort).remember(anyString(), eq("payment-1"));
     }
 
     @Test
@@ -86,6 +87,21 @@ class PaymentServiceTest {
 
         assertThatThrownBy(() -> service.execute(COMMAND))
                 .isInstanceOf(DuplicatePaymentException.class);
+        verify(idempotencyPort, never()).remember(any(), any());
+    }
+
+    @Test
+    void executeReturnsCachedPaymentIdWithoutTouchingRedisOrDatabaseOrSagaSteps() {
+        newService();
+        when(idempotencyPort.cachedPaymentId(anyString())).thenReturn(Optional.of("payment-1"));
+
+        String paymentId = service.execute(COMMAND);
+
+        assertThat(paymentId).isEqualTo("payment-1");
+        verify(idempotencyPort, never()).tryAcquire(any(), any());
+        verify(paymentRepository, never()).findByBookingId(any());
+        verify(sagaSteps, never()).tryInitiate(any(), any(), any());
+        verify(paymentGatewayPort, never()).charge(any(), any(), any());
     }
 
     @Test
@@ -101,6 +117,7 @@ class PaymentServiceTest {
 
         assertThat(paymentId).isEqualTo("payment-1");
         verify(paymentGatewayPort, never()).charge(any(), any(), any());
+        verify(idempotencyPort).remember(anyString(), eq("payment-1"));
     }
 
     @Test
@@ -118,6 +135,7 @@ class PaymentServiceTest {
         verify(sagaSteps).markSucceeded("payment-1", "gw-tx-1");
         verify(sagaSteps, never()).markFailed(any(), any());
         verify(reconciliationPort, never()).recordUnpersistedSuccess(any(), any(), any(), any(), any(), any());
+        verify(idempotencyPort).remember(anyString(), eq("payment-1"));
     }
 
     @Test

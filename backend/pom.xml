@@ -27,6 +27,10 @@
         <resilience4j.version>2.4.0</resilience4j.version>
         <!-- redisson 4.6.1 published 2026-06-18; Spring Boot 4.1 support added in 4.6.0 -->
         <redisson.version>4.6.1</redisson.version>
+        <!-- guava 33.4.8-jre — latest release on repo1.maven.org as of this pin (jre flavor, not
+             android, since this platform targets Java 25 only). Backs
+             com.aireak.common.cache.LocalStringCache, a per-JVM local cache in front of Redis. -->
+        <guava.version>33.4.8-jre</guava.version>
         <!-- Testcontainers BOM -->
         <testcontainers-bom.version>1.21.0</testcontainers-bom.version>
         <!-- Elasticsearch Java client 9.2.0 — compatible with Elasticsearch 9.2.0 server & Jackson 3 -->
@@ -118,6 +122,13 @@
                 <groupId>io.github.resilience4j</groupId>
                 <artifactId>resilience4j-spring-boot4</artifactId>
                 <version>${resilience4j.version}</version>
+            </dependency>
+
+            <!-- Guava — backs com.aireak.common.cache.LocalStringCache -->
+            <dependency>
+                <groupId>com.google.guava</groupId>
+                <artifactId>guava</artifactId>
+                <version>${guava.version}</version>
             </dependency>
 
             <!-- Springdoc OpenAPI -->

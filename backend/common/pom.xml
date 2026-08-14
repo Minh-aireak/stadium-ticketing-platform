@@ -68,6 +68,14 @@
         <!-- Kafka constants only (no kafka runtime here — services pull spring-kafka themselves) -->
         <!-- KafkaTopics.java is just a class with String constants, no runtime dep needed -->
 
+        <!-- Guava — backs com.aireak.common.cache.LocalStringCache, a per-JVM local cache
+             (optional — only services consuming a Redisson idempotency adapter need it at runtime). -->
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Nimbus JOSE+JWT — replaces jjwt for JWT generation and validation.
              jjwt 0.12.x uses com.fasterxml.jackson (Jackson 2) and has no Jackson 3 support.
              Nimbus is already the JWT library used by Spring Security internally

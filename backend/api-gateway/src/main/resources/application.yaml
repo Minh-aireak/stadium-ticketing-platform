@@ -66,7 +66,7 @@ spring:
                     maxSize: 200KB
 
 server:
-  port: ${SERVER_PORT:8080}
+  port: 8080
 
 # Must match identity-service's jwt.secret/issuer/audience exactly — same shared HMAC secret,
 # injected via env var in every deployment, never hard-coded.

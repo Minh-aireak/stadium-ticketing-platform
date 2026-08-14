@@ -69,6 +69,14 @@
             <artifactId>redisson-spring-boot-starter</artifactId>
         </dependency>
 
+        <!-- Guava — runtime dep for com.aireak.common.cache.LocalStringCache, used by
+             RedissonIdempotencyStore's local completed-claim cache. common declares Guava
+             optional=true, so each consuming service redeclares it here. -->
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+        </dependency>
+
         <!-- Nimbus JOSE+JWT — used by InternalServiceTokenProvider to mint short-lived
              service-to-service JWTs and by test code to sign tokens for integration tests.
              Nimbus replaced JJWT (jjwt-jackson depended on com.fasterxml.jackson / Jackson 2,

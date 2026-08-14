@@ -47,7 +47,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @TestPropertySource(properties = {
         "jwt.secret=test-secret-key-at-least-32-bytes-long-for-hs256!!",
         "jwt.issuer=identity-service",
-        "jwt.audience=stadium-clients"
+        "jwt.audience=stadium-clients",
+        "jwt.previous-secret=",
+        "jwt.internal-secret="
 })
 class BookingControllerJwtAuthenticationIntegrationTest {
 

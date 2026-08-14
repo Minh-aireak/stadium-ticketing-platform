@@ -65,7 +65,7 @@ public class Match {
         }
         showtimes.add(showtime);
         domainEvents.add(new ShowtimeAddedEvent(matchId, showtime.getShowtimeId(), showtime.getVenueId(),
-                showtime.getTotalSeats(),
+                showtime.getStartTime(), showtime.getTotalSeats(),
                 showtime.getBasePrice(), showtime.getCurrency()));
     }
 
@@ -89,7 +89,8 @@ public class Match {
             throw new InvalidMatchStatusException("Only PUBLISHED matches can be completed, current: " + status);
         }
         this.status = MatchStatus.COMPLETED;
-        domainEvents.add(new MatchCompletedEvent(matchId, homeTeam, awayTeam));
+        List<String> showtimeIds = showtimes.stream().map(Showtime::getShowtimeId).toList();
+        domainEvents.add(new MatchCompletedEvent(matchId, homeTeam, awayTeam, showtimeIds));
     }
 
     /**

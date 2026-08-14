@@ -8,7 +8,7 @@ import lombok.*;
 import java.math.BigDecimal;
 
 /**
- * JPA entity for Seat — owned by SeatInventoryJpaEntity.
+ * JPA entity for Seat tInventoryJpaEntity.
  * Mapped as @ElementCollection equivalent via @OneToMany.
  */
 @Getter

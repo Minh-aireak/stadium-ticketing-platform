@@ -87,6 +87,7 @@ class ApiGatewayRoutingTest {
         registry.add("NOTIFICATION_SERVICE_URL", () -> stubUrl);
         registry.add("BOOKING_SERVICE_URL", () -> stubUrl);
         registry.add("JWT_SECRET", () -> SECRET);
+        registry.add("JWT_PREVIOUS_SECRET", () -> "");
         registry.add("JWT_ISSUER", () -> ISSUER);
         registry.add("JWT_AUDIENCE", () -> AUDIENCE);
         registry.add("CORS_ALLOWED_ORIGINS", () -> "http://localhost:3000");

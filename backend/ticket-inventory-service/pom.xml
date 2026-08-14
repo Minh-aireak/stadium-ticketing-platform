@@ -87,6 +87,13 @@
             <artifactId>common</artifactId>
         </dependency>
 
+        <!-- Guava — needed at runtime by common's LocalStringCache (com.aireak.common.cache). It's
+             optional=true in common's pom, so each consuming service redeclares it here. -->
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+        </dependency>
+
         <!-- Lombok -->
         <dependency>
             <groupId>org.projectlombok</groupId>

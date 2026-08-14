@@ -71,9 +71,16 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
         String bookingId = command.bookingId();
         String idempotencyKey = IDEMPOTENCY_KEY_PREFIX + bookingId;
 
+        // Local-cache fast path: this instance already resolved a paymentId for this key on a
+        // previous attempt (this request or an earlier retry) — skip Redis AND Postgres entirely.
+        Optional<String> cachedPaymentId = idempotencyPort.cachedPaymentId(idempotencyKey);
+        if (cachedPaymentId.isPresent()) {
+            return cachedPaymentId.get();
+        }
+
         // Redis-confirmed duplicate: fast path, no DB write attempted
         if (!idempotencyPort.tryAcquire(idempotencyKey, IDEMPOTENCY_TTL)) {
-            return existingPaymentIdOrThrow(bookingId);
+            return existingPaymentIdOrThrow(bookingId, idempotencyKey);
         }
 
         // Step 1: create + persist payment in INITIATED state — commits immediately.
@@ -82,9 +89,12 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
         PaymentSagaSteps.InitiateOutcome outcome =
                 sagaSteps.tryInitiate(bookingId, command.amount(), command.currency());
         if (outcome instanceof PaymentSagaSteps.InitiateOutcome.AlreadyExists) {
-            return existingPaymentIdOrThrow(bookingId);
+            return existingPaymentIdOrThrow(bookingId, idempotencyKey);
         }
         String paymentId = ((PaymentSagaSteps.InitiateOutcome.Created) outcome).paymentId();
+        // paymentId is a durable, immutable identity fact from this point on regardless of the
+        // payment's eventual SUCCEEDED/FAILED outcome — safe to cache immediately.
+        idempotencyPort.remember(idempotencyKey, paymentId);
         log.info("Payment initiated: id={}, bookingId={}", paymentId, bookingId);
 
         // Step 2: charge via the gateway (REST call, no local transaction). A failure here means
@@ -243,10 +253,10 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
         return false;
     }
 
-    private String existingPaymentIdOrThrow(String bookingId) {
-        return paymentRepository.findByBookingId(bookingId)
-                .map(Payment::getPaymentId)
-                .orElseThrow(() -> new DuplicatePaymentException(
-                        "Payment for booking " + bookingId + " is already being processed"));
+    private String existingPaymentIdOrThrow(String bookingId, String idempotencyKey) {
+        Optional<String> paymentId = paymentRepository.findByBookingId(bookingId).map(Payment::getPaymentId);
+        paymentId.ifPresent(id -> idempotencyPort.remember(idempotencyKey, id));
+        return paymentId.orElseThrow(() -> new DuplicatePaymentException(
+                "Payment for booking " + bookingId + " is already being processed"));
     }
 }
