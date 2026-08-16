@@ -4,6 +4,7 @@ import com.aireak.payment.application.port.out.PaymentReconciliationPort;
 import com.aireak.payment.domain.model.UnreconciledPayment;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -45,6 +46,7 @@ public class UnreconciledPaymentAlertJob {
     private int batchSize = 200;
 
     @Scheduled(fixedDelayString = "${payment.unreconciled-alert.fixed-delay-ms:300000}")
+    @SchedulerLock(name = "payment-unreconciledAlert", lockAtMostFor = "PT10M", lockAtLeastFor = "PT1M")
     public void scanAndAlert() {
         Instant cutoff = Instant.now().minus(graceMinutes, ChronoUnit.MINUTES);
         List<UnreconciledPayment> unresolvedList = paymentReconciliationPort.findUnresolvedOlderThan(cutoff, batchSize);

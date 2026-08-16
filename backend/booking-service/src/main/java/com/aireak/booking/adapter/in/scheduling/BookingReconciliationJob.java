@@ -6,6 +6,7 @@ import com.aireak.booking.application.service.BookingOrchestrationService;
 import com.aireak.booking.domain.model.Booking;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -51,6 +52,7 @@ public class BookingReconciliationJob {
     private int batchSize;
 
     @Scheduled(fixedDelayString = "${booking.payment-reconciliation-job.fixed-delay-ms:300000}")
+    @SchedulerLock(name = "booking-paymentReconciliation", lockAtMostFor = "PT10M", lockAtLeastFor = "PT1M")
     public void reconcile() {
         Instant cutoff = Instant.now().minus(graceMinutes, ChronoUnit.MINUTES);
         reconcileDraftBookings(cutoff);

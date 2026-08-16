@@ -76,6 +76,20 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- ShedLock — backs com.aireak.common.scheduling.SchedulerLockConfig (optional: only
+             services that actually run a @Scheduled job need it at runtime, and the config class
+             is @ConditionalOnClass so api-gateway, which has neither, ignores it entirely). -->
+        <dependency>
+            <groupId>net.javacrumbs.shedlock</groupId>
+            <artifactId>shedlock-spring</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>net.javacrumbs.shedlock</groupId>
+            <artifactId>shedlock-provider-jdbc-template</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Nimbus JOSE+JWT — replaces jjwt for JWT generation and validation.
              jjwt 0.12.x uses com.fasterxml.jackson (Jackson 2) and has no Jackson 3 support.
              Nimbus is already the JWT library used by Spring Security internally

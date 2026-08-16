@@ -30,6 +30,11 @@
              android, since this platform targets Java 25 only). Backs
              com.aireak.common.cache.LocalStringCache, a per-JVM local cache in front of Redis. -->
         <guava.version>33.4.8-jre</guava.version>
+        <!-- ShedLock 7.8.0 — built against Spring Framework 7.0.x / Spring Boot 4.0.x, so it
+             matches this reactor's Boot 4.1 line. Backs com.aireak.common.scheduling.
+             SchedulerLockConfig: every @Scheduled job here (outbox cleanup, reconciliation)
+             assumes it is the only one running, which stops being true at two replicas. -->
+        <shedlock.version>7.8.0</shedlock.version>
         <!-- Testcontainers BOM -->
         <testcontainers-bom.version>1.21.0</testcontainers-bom.version>
         <!-- Elasticsearch Java client 9.2.0 — compatible with Elasticsearch 9.2.0 server & Jackson 3 -->
@@ -95,6 +100,15 @@
                 <groupId>org.projectlombok</groupId>
                 <artifactId>lombok</artifactId>
                 <version>${lombok.version}</version>
+            </dependency>
+
+            <!-- ShedLock — distributed lock around @Scheduled methods -->
+            <dependency>
+                <groupId>net.javacrumbs.shedlock</groupId>
+                <artifactId>shedlock-bom</artifactId>
+                <version>${shedlock.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
             </dependency>
 
             <!-- Redisson Spring Boot Starter (4.6.1 supports Spring Boot 4.1) -->

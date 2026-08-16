@@ -1,6 +1,7 @@
 package com.aireak.identity.adapter.out.persistence.outbox;
 
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -30,6 +31,7 @@ public class OutboxEventCleanupScheduler {
     }
 
     @Scheduled(fixedDelayString = "${outbox.cleanup.fixed-delay-ms:86400000}")
+    @SchedulerLock(name = "identity-outboxCleanup", lockAtMostFor = "PT10M", lockAtLeastFor = "PT1M")
     @Transactional
     public void cleanup() {
         Instant cutoff = Instant.now().minus(retentionDays, ChronoUnit.DAYS);

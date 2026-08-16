@@ -83,6 +83,17 @@
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- ShedLock — needed at runtime by common's SchedulerLockConfig (optional there, so
+             every service that runs a @Scheduled job must redeclare it). -->
+        <dependency>
+            <groupId>net.javacrumbs.shedlock</groupId>
+            <artifactId>shedlock-spring</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>net.javacrumbs.shedlock</groupId>
+            <artifactId>shedlock-provider-jdbc-template</artifactId>
+        </dependency>
+
         <!-- Flyway migrations -->
         <!-- Boot 4.1 split Flyway's autoconfiguration out of the (now much slimmer)
              spring-boot-autoconfigure jar into its own module, pulled in transitively by this
