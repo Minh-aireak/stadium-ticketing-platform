@@ -54,7 +54,8 @@ class RateLimitingWebFilterTest {
     private final JwtValidationProperties jwtProperties = new JwtValidationProperties(
             SECRET, null, ISSUER, AUDIENCE,
             List.of("/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh",
-                    "/api/v1/auth/logout", "/actuator/health", "/actuator/info"));
+                    "/api/v1/auth/logout", "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password",
+                    "/actuator/health", "/actuator/info"));
     private final com.aireak.gateway.config.GatewayProperties gatewayProperties = new com.aireak.gateway.config.GatewayProperties(
             List.of("127.0.0.1", "10.0.0.0/8", "203.0.113.99"));
 
@@ -124,6 +125,40 @@ class RateLimitingWebFilterTest {
 
         verify(limiters.get(RateLimitPolicy.REFRESH_TOKEN)).isAllowed("REFRESH_TOKEN", "ip:203.0.113.99");
         verify(limiters.get(RateLimitPolicy.DEFAULT_ANONYMOUS), never()).isAllowed(anyString(), anyString());
+    }
+
+    /**
+     * Guards the reason these two paths are listed at all: both are public, so a missing entry
+     * would silently downgrade them to DEFAULT_ANONYMOUS (~30 requests straight off) instead of
+     * the email-sending allowance forgot-password needs.
+     */
+    @Test
+    void forgotPasswordIsKeyedByIpUnderItsOwnEmailSendingPolicy() {
+        allow(RateLimitPolicy.PASSWORD_RESET_REQUEST);
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/v1/auth/forgot-password")
+                        .remoteAddress(new InetSocketAddress("203.0.113.7", 5555))
+                        .build());
+
+        filter.filter(exchange, ex -> Mono.empty()).block(Duration.ofSeconds(5));
+
+        verify(limiters.get(RateLimitPolicy.PASSWORD_RESET_REQUEST))
+                .isAllowed("PASSWORD_RESET_REQUEST", "ip:203.0.113.7");
+        verify(limiters.get(RateLimitPolicy.DEFAULT_ANONYMOUS), never()).isAllowed(anyString(), anyString());
+    }
+
+    @Test
+    void resetPasswordIsKeyedByIpUnderTheLooserConfirmPolicy() {
+        allow(RateLimitPolicy.PASSWORD_RESET_CONFIRM);
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/v1/auth/reset-password")
+                        .remoteAddress(new InetSocketAddress("203.0.113.8", 5556))
+                        .build());
+
+        filter.filter(exchange, ex -> Mono.empty()).block(Duration.ofSeconds(5));
+
+        verify(limiters.get(RateLimitPolicy.PASSWORD_RESET_CONFIRM))
+                .isAllowed("PASSWORD_RESET_CONFIRM", "ip:203.0.113.8");
     }
 
     @Test

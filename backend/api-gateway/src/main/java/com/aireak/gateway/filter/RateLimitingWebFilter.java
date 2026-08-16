@@ -78,6 +78,11 @@ public class RateLimitingWebFilter implements WebFilter, Ordered {
         // verification via tryVerifySubjectFromBearer() — reuses REFRESH_TOKEN rather than
         // falling back to DEFAULT_ANONYMOUS.
         PATH_POLICIES.put("/api/v1/auth/logout", RateLimitPolicy.REFRESH_TOKEN);
+        // Both halves of password reset are public paths, so without an entry here they would fall
+        // back to DEFAULT_ANONYMOUS — far too generous for an endpoint whose whole job is to send
+        // an email to an attacker-chosen address.
+        PATH_POLICIES.put("/api/v1/auth/forgot-password", RateLimitPolicy.PASSWORD_RESET_REQUEST);
+        PATH_POLICIES.put("/api/v1/auth/reset-password", RateLimitPolicy.PASSWORD_RESET_CONFIRM);
         PATH_POLICIES.put("/api/v1/matches/**", RateLimitPolicy.READ_ANONYMOUS);
         PATH_POLICIES.put("/api/v1/inventory/**", RateLimitPolicy.READ_AUTHENTICATED);
         PATH_POLICIES.put("/api/v1/bookings/**", RateLimitPolicy.BOOKING);

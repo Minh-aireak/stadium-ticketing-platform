@@ -20,6 +20,14 @@ public enum RateLimitPolicy {
     PRE_AUTH_IP(KeyStrategy.IP, 20, 600, 3),
     LOGIN(KeyStrategy.IP, 1, 120, 12),
     REGISTER(KeyStrategy.IP, 1, 3600, 1200),
+    // Same allowance as REGISTER, for the same reason: every accepted request makes
+    // notification-service send an email, to an address the caller alone chose. What is being
+    // protected is the mail provider's quota and the sender domain's reputation, not CPU — so the
+    // limit has to be far tighter than the anonymous default this path would otherwise fall back to.
+    PASSWORD_RESET_REQUEST(KeyStrategy.IP, 1, 3600, 1200),
+    // Submitting the new password is credential-shaped, not email-shaped: sized like LOGIN so a
+    // customer who trips the password policy a few times isn't locked out of their own reset link.
+    PASSWORD_RESET_CONFIRM(KeyStrategy.IP, 1, 120, 12),
     REFRESH_TOKEN(KeyStrategy.USER_OR_IP, 1, 60, 3),
     READ_ANONYMOUS(KeyStrategy.IP, 5, 300, 3),
     READ_AUTHENTICATED(KeyStrategy.USER, 10, 600, 3),
