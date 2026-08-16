@@ -35,4 +35,14 @@ public interface RefreshSessionStorePort {
      * an unknown/malformed token is treated as "already logged out", not an error.
      */
     void revokeFamily(String rawToken);
+
+    /**
+     * Revokes every refresh session the account currently has, on every device — the caller
+     * holds no token here, only the account id. Used after a password reset: whoever forced the
+     * reset (or whoever the customer was resetting <em>because of</em>) must not keep a live
+     * session that survives the new password.
+     *
+     * <p>Idempotent, and safe for an account with no sessions at all.
+     */
+    void revokeAllForAccount(AccountId accountId);
 }

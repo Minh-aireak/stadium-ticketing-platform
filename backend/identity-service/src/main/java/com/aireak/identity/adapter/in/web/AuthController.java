@@ -1,22 +1,28 @@
 package com.aireak.identity.adapter.in.web;
 
+import com.aireak.identity.adapter.in.web.dto.ForgotPasswordRequest;
 import com.aireak.identity.adapter.in.web.dto.LoginRequest;
 import com.aireak.identity.adapter.in.web.dto.LoginResponse;
 import com.aireak.identity.adapter.in.web.dto.RegisterRequest;
 import com.aireak.identity.adapter.in.web.dto.RegisterResponse;
+import com.aireak.identity.adapter.in.web.dto.ResetPasswordRequest;
 import com.aireak.identity.application.port.in.LoginUseCase;
 import com.aireak.identity.application.port.in.LogoutUseCase;
 import com.aireak.identity.application.port.in.RefreshTokenUseCase;
 import com.aireak.identity.application.port.in.RegisterAccountUseCase;
+import com.aireak.identity.application.port.in.RequestPasswordResetUseCase;
+import com.aireak.identity.application.port.in.ResetPasswordUseCase;
 import com.aireak.identity.application.port.in.VerifyEmailUseCase;
 import com.aireak.identity.application.port.in.command.LoginCommand;
 import com.aireak.identity.application.port.in.command.RegisterAccountCommand;
+import com.aireak.identity.application.port.in.command.ResetPasswordCommand;
 import com.aireak.identity.application.port.in.dto.AuthResult;
 import com.aireak.identity.config.AuthCookieProperties;
 import com.aireak.identity.config.CorsProperties;
 import com.aireak.identity.domain.exception.InvalidCredentialsException;
 import com.aireak.identity.domain.exception.InvalidRefreshTokenException;
 import com.aireak.identity.domain.exception.InvalidVerificationTokenException;
+import com.aireak.identity.domain.exception.PasswordResetTokenStoreUnavailableException;
 import com.aireak.identity.domain.exception.RefreshSessionStoreUnavailableException;
 import com.aireak.identity.domain.exception.RefreshTokenReuseException;
 import com.aireak.identity.domain.exception.VerificationTokenStoreUnavailableException;
@@ -64,6 +70,8 @@ public class AuthController {
     private final RefreshTokenUseCase refreshTokenUseCase;
     private final LogoutUseCase logoutUseCase;
     private final VerifyEmailUseCase verifyEmailUseCase;
+    private final RequestPasswordResetUseCase requestPasswordResetUseCase;
+    private final ResetPasswordUseCase resetPasswordUseCase;
     private final AuthCookieProperties cookieProperties;
     private final CorsProperties corsProperties;
 
@@ -105,6 +113,28 @@ public class AuthController {
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_HTML)
                 .body(verificationPage("Email verified", "Your account is now active — you can log in.", true));
+    }
+
+    /**
+     * POST /api/v1/auth/forgot-password
+     * Emails a one-time reset link if the address belongs to an ACTIVE account. Always 204,
+     * whether or not it does — see {@code RequestPasswordResetService}: a different response for
+     * a registered address would turn this into an account-enumeration oracle.
+     */
+    @PostMapping("/forgot-password")
+    public ResponseEntity<Void> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        requestPasswordResetUseCase.execute(request.email());
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * POST /api/v1/auth/reset-password
+     * Consumes the one-time token from the reset email and sets the new password.
+     */
+    @PostMapping("/reset-password")
+    public ResponseEntity<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        resetPasswordUseCase.execute(new ResetPasswordCommand(request.token(), request.newPassword()));
+        return ResponseEntity.noContent().build();
     }
 
     /**
@@ -187,6 +217,16 @@ public class AuthController {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .contentType(MediaType.TEXT_HTML)
                 .body(verificationPage("Service unavailable", "Please try again shortly.", false));
+    }
+
+    @ExceptionHandler(PasswordResetTokenStoreUnavailableException.class)
+    public ResponseEntity<ProblemDetail> handleResetStoreUnavailable(PasswordResetTokenStoreUnavailableException ex) {
+        log.error("Password reset token store unavailable", ex);
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
+                "Password reset is temporarily unavailable");
+        problem.setType(URI.create(TYPE_BASE + "reset-token-store-unavailable"));
+        problem.setTitle("Service Unavailable");
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(problem);
     }
 
     @ExceptionHandler(RefreshSessionStoreUnavailableException.class)

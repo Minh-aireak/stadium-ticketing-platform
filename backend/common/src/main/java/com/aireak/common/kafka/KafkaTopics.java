@@ -13,6 +13,7 @@ public final class KafkaTopics {
     // --- Identity events ---
     public static final String ACCOUNT_REGISTERED = "identity.account.registered";
     public static final String ACCOUNT_ACTIVATED  = "identity.account.activated";
+    public static final String PASSWORD_RESET_REQUESTED = "identity.account.password-reset-requested";
 
     // --- Catalog events ---
     public static final String MATCH_PUBLISHED    = "catalog.match.published";

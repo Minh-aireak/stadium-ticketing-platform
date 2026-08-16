@@ -2,6 +2,7 @@ package com.aireak.identity.domain.model;
 
 import com.aireak.identity.domain.event.AccountActivatedEvent;
 import com.aireak.identity.domain.event.AccountRegisteredEvent;
+import com.aireak.identity.domain.event.PasswordResetRequestedEvent;
 import com.aireak.identity.domain.exception.InvalidAccountStatusException;
 import org.junit.jupiter.api.Test;
 
@@ -107,6 +108,35 @@ class AccountTest {
         account.changePassword(newPassword);
 
         assertThat(account.getPassword()).isEqualTo(newPassword);
+    }
+
+    @Test
+    void requestPasswordResetOnAnActiveAccountRaisesTheEventWithoutChangingState() {
+        Account account = Account.register(EMAIL, PASSWORD, VERIFICATION_TOKEN);
+        account.activate();
+        account.pullDomainEvents();
+
+        account.requestPasswordReset("reset-token", 30);
+
+        assertThat(account.getStatus()).isEqualTo(AccountStatus.ACTIVE);
+        assertThat(account.getPassword()).isEqualTo(PASSWORD);
+        List<Object> events = account.pullDomainEvents();
+        assertThat(events).hasSize(1);
+        PasswordResetRequestedEvent requested = (PasswordResetRequestedEvent) events.get(0);
+        assertThat(requested.accountId()).isEqualTo(account.getId());
+        assertThat(requested.email()).isEqualTo(EMAIL);
+        assertThat(requested.resetToken()).isEqualTo("reset-token");
+        assertThat(requested.expiresInMinutes()).isEqualTo(30);
+    }
+
+    @Test
+    void requestPasswordResetRequiresActiveStatus() {
+        Account account = Account.register(EMAIL, PASSWORD, VERIFICATION_TOKEN);
+
+        assertThatThrownBy(() -> account.requestPasswordReset("reset-token", 30))
+                .isInstanceOf(InvalidAccountStatusException.class);
+        assertThat(account.pullDomainEvents())
+                .noneMatch(PasswordResetRequestedEvent.class::isInstance);
     }
 
     @Test

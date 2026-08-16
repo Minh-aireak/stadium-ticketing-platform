@@ -4,6 +4,8 @@ import com.aireak.identity.application.port.in.LoginUseCase;
 import com.aireak.identity.application.port.in.LogoutUseCase;
 import com.aireak.identity.application.port.in.RefreshTokenUseCase;
 import com.aireak.identity.application.port.in.RegisterAccountUseCase;
+import com.aireak.identity.application.port.in.RequestPasswordResetUseCase;
+import com.aireak.identity.application.port.in.ResetPasswordUseCase;
 import com.aireak.identity.application.port.in.VerifyEmailUseCase;
 import com.aireak.identity.application.port.in.dto.AuthResult;
 import com.aireak.identity.application.port.out.dto.IssuedRefreshToken;
@@ -71,8 +73,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "jwt.excluded-paths[2]=/api/v1/auth/refresh",
         "jwt.excluded-paths[3]=/api/v1/auth/logout",
         "jwt.excluded-paths[4]=/api/v1/auth/verify-email",
-        "jwt.excluded-paths[5]=/actuator/health",
-        "jwt.excluded-paths[6]=/actuator/info"
+        "jwt.excluded-paths[5]=/api/v1/auth/forgot-password",
+        "jwt.excluded-paths[6]=/api/v1/auth/reset-password",
+        "jwt.excluded-paths[7]=/actuator/health",
+        "jwt.excluded-paths[8]=/actuator/info"
 })
 class AuthControllerCsrfCookieIntegrationTest {
 
@@ -89,6 +93,30 @@ class AuthControllerCsrfCookieIntegrationTest {
     private LogoutUseCase logoutUseCase;
     @MockitoBean
     private VerifyEmailUseCase verifyEmailUseCase;
+    @MockitoBean
+    private RequestPasswordResetUseCase requestPasswordResetUseCase;
+    @MockitoBean
+    private ResetPasswordUseCase resetPasswordUseCase;
+
+    /**
+     * Both reset endpoints are CSRF-exempt for the same reason register/login are: the caller has
+     * no session to be ridden yet. Without the exemption every forgot-password POST 403s.
+     */
+    @Test
+    void forgotPasswordIsCsrfExemptAndAlwaysAnswers204() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/forgot-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"forgetful@example.com\"}"))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void resetPasswordIsCsrfExempt() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"reset-tok\",\"newPassword\":\"NewPassw0rd\"}"))
+                .andExpect(status().isNoContent());
+    }
 
     @Test
     void loginThenForceResolveXsrfTokenViaRejectedRefresh_thenRetryRefreshSucceeds() throws Exception {

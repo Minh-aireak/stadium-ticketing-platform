@@ -7,6 +7,7 @@ import com.aireak.identity.domain.exception.InvalidRefreshTokenException;
 import com.aireak.identity.domain.exception.RefreshSessionStoreUnavailableException;
 import com.aireak.identity.domain.exception.RefreshTokenReuseException;
 import com.aireak.identity.domain.model.AccountId;
+import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RScript;
 import org.redisson.api.RedissonClient;
 import org.redisson.client.RedisException;
@@ -37,11 +38,20 @@ import java.util.UUID;
  * ever observe a matching {@code tokenHash} and win the rotation; every other caller (whether an
  * attacker replaying a stolen token, or a genuine duplicate request) sees a mismatch against the
  * already-rotated hash and is treated as reuse, which revokes the whole session.
+ *
+ * <p>A second key per account ({@code auth:refresh:account:{accountId}}, a Set of that account's
+ * session ids) exists solely so {@link #revokeAllForAccount} can find sessions it holds no token
+ * for. It is an index, not a source of truth: entries are never pruned on rotation or expiry, so
+ * every read re-checks each session key still exists. Both scripts that span the index and a
+ * session key assume a single-node Redis (what this platform deploys); on a cluster the two keys
+ * would need a hash tag to share a slot.
  */
+@Slf4j
 @Component
 public class RedisRefreshSessionAdapter implements RefreshSessionStorePort {
 
     private static final String KEY_PREFIX = "auth:refresh:session:";
+    private static final String ACCOUNT_INDEX_PREFIX = "auth:refresh:account:";
     private static final int SECRET_BYTES = 32;
     private static final int SESSION_ID_BYTES = 16;
 
@@ -77,7 +87,10 @@ public class RedisRefreshSessionAdapter implements RefreshSessionStorePort {
             """;
 
     // HSET + PEXPIRE in one atomic EVAL so a crash/disconnect between the two Redis calls can
-    // never leave a session hash with no TTL (HSET alone doesn't carry one).
+    // never leave a session hash with no TTL (HSET alone doesn't carry one). The account index
+    // (KEYS[2]) is written in the same EVAL for the same reason — a session missing from it would
+    // survive revokeAllForAccount invisibly. Its TTL is pushed out to match the newest session, so
+    // the index never outlives the last session it points at.
     private static final String CREATE_SCRIPT = """
             redis.call('HSET', KEYS[1],
               'userId', ARGV[1],
@@ -88,7 +101,26 @@ public class RedisRefreshSessionAdapter implements RefreshSessionStorePort {
               'revokedAt', '',
               'lastUsedAt', ARGV[4])
             redis.call('PEXPIRE', KEYS[1], ARGV[6])
+            redis.call('SADD', KEYS[2], ARGV[3])
+            redis.call('PEXPIRE', KEYS[2], ARGV[6])
             return 'OK'
+            """;
+
+    // Marks every still-live session in the account's index as revoked, then drops the index.
+    // Session keys are built inside the script from ARGV[2] rather than passed as KEYS because
+    // their number isn't known to the caller; see the single-node note in the class javadoc.
+    private static final String REVOKE_ALL_SCRIPT = """
+            local ids = redis.call('SMEMBERS', KEYS[1])
+            local revoked = 0
+            for i = 1, #ids do
+              local sessionKey = ARGV[2] .. ids[i]
+              if redis.call('EXISTS', sessionKey) == 1 then
+                redis.call('HSET', sessionKey, 'revokedAt', ARGV[1])
+                revoked = revoked + 1
+              end
+            end
+            redis.call('DEL', KEYS[1])
+            return tostring(revoked)
             """;
 
     private final RedissonClient redissonClient;
@@ -115,7 +147,7 @@ public class RedisRefreshSessionAdapter implements RefreshSessionStorePort {
                     RScript.Mode.READ_WRITE,
                     CREATE_SCRIPT,
                     RScript.ReturnType.VALUE,
-                    List.of(sessionKey(sessionId)),
+                    List.of(sessionKey(sessionId), accountIndexKey(accountId)),
                     accountId.toString(), tokenHash, sessionId.toString(),
                     String.valueOf(now.toEpochMilli()), String.valueOf(expiresAt.toEpochMilli()),
                     String.valueOf(ttlMillis));
@@ -184,6 +216,24 @@ public class RedisRefreshSessionAdapter implements RefreshSessionStorePort {
         }
     }
 
+    @Override
+    public void revokeAllForAccount(AccountId accountId) {
+        String revoked;
+        try {
+            revoked = redissonClient.getScript(StringCodec.INSTANCE).eval(
+                    RScript.Mode.READ_WRITE,
+                    REVOKE_ALL_SCRIPT,
+                    RScript.ReturnType.VALUE,
+                    List.of(accountIndexKey(accountId)),
+                    String.valueOf(Instant.now().toEpochMilli()), KEY_PREFIX);
+        } catch (RedisException ex) {
+            throw new RefreshSessionStoreUnavailableException(
+                    "Failed to revoke refresh sessions for account", ex);
+        }
+
+        log.info("Revoked all refresh sessions for account: id={}, sessions={}", accountId, revoked);
+    }
+
     // ---- token encoding ----
 
     private byte[] randomSecret() {
@@ -228,6 +278,10 @@ public class RedisRefreshSessionAdapter implements RefreshSessionStorePort {
 
     private String sessionKey(UUID sessionId) {
         return KEY_PREFIX + sessionId;
+    }
+
+    private String accountIndexKey(AccountId accountId) {
+        return ACCOUNT_INDEX_PREFIX + accountId;
     }
 
     private record DecodedToken(UUID sessionId, String tokenHash) {

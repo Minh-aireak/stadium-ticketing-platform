@@ -2,6 +2,7 @@ package com.aireak.identity.domain.model;
 
 import com.aireak.identity.domain.event.AccountActivatedEvent;
 import com.aireak.identity.domain.event.AccountRegisteredEvent;
+import com.aireak.identity.domain.event.PasswordResetRequestedEvent;
 import com.aireak.identity.domain.exception.InvalidAccountStatusException;
 
 import java.time.Instant;
@@ -104,6 +105,20 @@ public class Account {
                     "Only SUSPENDED accounts can be reactivated, current: " + status);
         }
         this.status = AccountStatus.ACTIVE;
+    }
+
+    /**
+     * Records a password-reset request. No state changes on the aggregate — the one-time token
+     * lives in Redis, not here — but the event belongs to the account, so it is raised here like
+     * every other one. Invariant: only an ACTIVE account can reset a password, matching
+     * {@link #changePassword}'s own guard on the other half of the flow.
+     */
+    public void requestPasswordReset(String resetToken, long expiresInMinutes) {
+        if (status != AccountStatus.ACTIVE) {
+            throw new InvalidAccountStatusException(
+                    "Password reset can only be requested when ACTIVE, current: " + status);
+        }
+        domainEvents.add(new PasswordResetRequestedEvent(id, email, resetToken, expiresInMinutes));
     }
 
     /**

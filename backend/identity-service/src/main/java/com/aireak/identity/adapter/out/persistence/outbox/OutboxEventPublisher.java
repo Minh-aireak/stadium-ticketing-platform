@@ -6,6 +6,7 @@ import com.aireak.common.web.filter.CorrelationIdFilter;
 import com.aireak.identity.application.port.out.DomainEventPublisher;
 import com.aireak.identity.domain.event.AccountActivatedEvent;
 import com.aireak.identity.domain.event.AccountRegisteredEvent;
+import com.aireak.identity.domain.event.PasswordResetRequestedEvent;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -65,6 +66,7 @@ public class OutboxEventPublisher implements DomainEventPublisher {
         return switch (event) {
             case AccountRegisteredEvent ignored -> KafkaTopics.ACCOUNT_REGISTERED;
             case AccountActivatedEvent ignored  -> KafkaTopics.ACCOUNT_ACTIVATED;
+            case PasswordResetRequestedEvent ignored -> KafkaTopics.PASSWORD_RESET_REQUESTED;
             default -> null;
         };
     }
@@ -73,6 +75,7 @@ public class OutboxEventPublisher implements DomainEventPublisher {
         return switch (event) {
             case AccountRegisteredEvent e -> e.accountId().toString();
             case AccountActivatedEvent e  -> e.accountId().toString();
+            case PasswordResetRequestedEvent e -> e.accountId().toString();
             default -> throw new IllegalArgumentException(
                     "No aggregate id mapping for domain event type: " + event.getClass().getSimpleName());
         };
