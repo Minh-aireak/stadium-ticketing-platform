@@ -9,25 +9,23 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
 /**
- * Kafka consumer adapter for identity-related domain events.
- * Handles AccountRegisteredEvent (welcome/verification email), AccountActivatedEvent
- * (activation confirmation email) and PasswordResetRequestedEvent (reset-link email).
+ * Kafka consumer adapter for payment-related domain events — drives the payment-success receipt
+ * email. Idempotency is handled by the application service, not here.
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class AccountEventConsumer {
+public class PaymentEventConsumer {
 
     private final SendNotificationUseCase sendNotificationUseCase;
 
     @KafkaListener(
-            topics = {KafkaTopics.ACCOUNT_REGISTERED, KafkaTopics.ACCOUNT_ACTIVATED,
-                    KafkaTopics.PASSWORD_RESET_REQUESTED},
-            groupId = "notification-service-identity",
+            topics = KafkaTopics.PAYMENT_SUCCEEDED,
+            groupId = "notification-service-payment",
             containerFactory = "kafkaListenerContainerFactory"
     )
     public void consume(EventEnvelope<?> envelope) {
-        log.debug("Received account event: eventId={}, eventType={}",
+        log.debug("Received payment event: eventId={}, eventType={}",
                 envelope.getEventId(), envelope.getEventType());
         sendNotificationUseCase.send(
                 envelope.getEventId(),

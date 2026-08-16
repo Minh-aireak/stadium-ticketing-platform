@@ -5,8 +5,10 @@ import com.aireak.booking.domain.event.BookingConfirmedEvent;
 import com.aireak.common.event.EventEnvelope;
 import com.aireak.identity.domain.event.AccountActivatedEvent;
 import com.aireak.identity.domain.event.AccountRegisteredEvent;
+import com.aireak.identity.domain.event.PasswordResetRequestedEvent;
 import com.aireak.notification.application.port.in.SendNotificationUseCase;
 import com.aireak.notification.config.KafkaConfig;
+import com.aireak.payment.domain.event.PaymentSucceededEvent;
 import tools.jackson.databind.json.JsonMapper;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -39,6 +41,8 @@ import static com.aireak.common.kafka.KafkaTopics.ACCOUNT_ACTIVATED;
 import static com.aireak.common.kafka.KafkaTopics.ACCOUNT_REGISTERED;
 import static com.aireak.common.kafka.KafkaTopics.BOOKING_CANCELLED;
 import static com.aireak.common.kafka.KafkaTopics.BOOKING_CONFIRMED;
+import static com.aireak.common.kafka.KafkaTopics.PASSWORD_RESET_REQUESTED;
+import static com.aireak.common.kafka.KafkaTopics.PAYMENT_SUCCEEDED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -72,14 +76,16 @@ import static org.mockito.Mockito.verify;
         KafkaConfig.class,
         BookingEventConsumer.class,
         AccountEventConsumer.class,
+        PaymentEventConsumer.class,
         NotificationEventConsumersEmbeddedKafkaIntegrationTest.EnableKafkaListenersConfig.class
 })
 @EmbeddedKafka(
         partitions = 1,
         topics = {
                 BOOKING_CONFIRMED, BOOKING_CANCELLED, ACCOUNT_REGISTERED, ACCOUNT_ACTIVATED,
+                PAYMENT_SUCCEEDED, PASSWORD_RESET_REQUESTED,
                 BOOKING_CONFIRMED + "-dlt", BOOKING_CANCELLED + "-dlt", ACCOUNT_REGISTERED + "-dlt",
-                ACCOUNT_ACTIVATED + "-dlt"
+                ACCOUNT_ACTIVATED + "-dlt", PAYMENT_SUCCEEDED + "-dlt", PASSWORD_RESET_REQUESTED + "-dlt"
         },
         bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
@@ -165,6 +171,34 @@ class NotificationEventConsumersEmbeddedKafkaIntegrationTest {
 
         verify(sendNotificationUseCase, timeout(10_000))
                 .send(eq(eventId), eq(ACCOUNT_ACTIVATED), any(AccountActivatedEvent.class));
+    }
+
+    /**
+     * The strongest guard on notification-service's copy of payment-service's event: the payload
+     * is resolved purely by the fully-qualified class name embedded in the JSON, so a package or
+     * field-shape drift between the two copies shows up here and nowhere else.
+     */
+    @Test
+    void consumesRealPaymentSucceededRecord_andDispatchesWithTheDeserializedPayload() {
+        PaymentSucceededEvent succeeded = new PaymentSucceededEvent(
+                "pay-1", "booking-9", "buyer@example.com",
+                new java.math.BigDecimal("450000"), "VND", "pi_test_123", Instant.now());
+        String eventId = publishAsDebeziumWouldForwardTheOutboxRow(PAYMENT_SUCCEEDED, succeeded);
+
+        verify(sendNotificationUseCase, timeout(10_000))
+                .send(eq(eventId), eq(PAYMENT_SUCCEEDED), any(PaymentSucceededEvent.class));
+    }
+
+    @Test
+    void consumesRealPasswordResetRequestedRecord_andDispatchesWithTheDeserializedPayload() {
+        PasswordResetRequestedEvent requested = new PasswordResetRequestedEvent(
+                new PasswordResetRequestedEvent.AccountId("acc-7"),
+                new PasswordResetRequestedEvent.Email("forgetful@example.com"),
+                "reset-tok-abc", 30, Instant.now());
+        String eventId = publishAsDebeziumWouldForwardTheOutboxRow(PASSWORD_RESET_REQUESTED, requested);
+
+        verify(sendNotificationUseCase, timeout(10_000))
+                .send(eq(eventId), eq(PASSWORD_RESET_REQUESTED), any(PasswordResetRequestedEvent.class));
     }
 
     @Test
