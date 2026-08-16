@@ -85,10 +85,6 @@
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
-        <dependency>
-            <groupId>org.mapstruct</groupId>
-            <artifactId>mapstruct</artifactId>
-        </dependency>
         <!-- Flyway migrations -->
         <!-- Boot 4.1 split Flyway's autoconfiguration out of the (now much slimmer)
              spring-boot-autoconfigure jar into its own module, pulled in transitively by this

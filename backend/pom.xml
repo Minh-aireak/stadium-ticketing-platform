@@ -22,7 +22,6 @@
 
         <!-- Dependencies (all verified on repo1.maven.org) -->
         <lombok.version>1.18.38</lombok.version>
-        <mapstruct.version>1.6.3</mapstruct.version>
         <!-- resilience4j-spring-boot4:2.4.0 published 2026-03-14 on repo1.maven.org -->
         <resilience4j.version>2.4.0</resilience4j.version>
         <!-- redisson 4.6.1 published 2026-06-18; Spring Boot 4.1 support added in 4.6.0 -->
@@ -98,18 +97,6 @@
                 <version>${lombok.version}</version>
             </dependency>
 
-            <!-- MapStruct -->
-            <dependency>
-                <groupId>org.mapstruct</groupId>
-                <artifactId>mapstruct</artifactId>
-                <version>${mapstruct.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.mapstruct</groupId>
-                <artifactId>mapstruct-processor</artifactId>
-                <version>${mapstruct.version}</version>
-            </dependency>
-
             <!-- Redisson Spring Boot Starter (4.6.1 supports Spring Boot 4.1) -->
             <dependency>
                 <groupId>org.redisson</groupId>
@@ -179,16 +166,6 @@
                                 <groupId>org.projectlombok</groupId>
                                 <artifactId>lombok</artifactId>
                                 <version>${lombok.version}</version>
-                            </path>
-                            <path>
-                                <groupId>org.mapstruct</groupId>
-                                <artifactId>mapstruct-processor</artifactId>
-                                <version>${mapstruct.version}</version>
-                            </path>
-                            <path>
-                                <groupId>org.projectlombok</groupId>
-                                <artifactId>lombok-mapstruct-binding</artifactId>
-                                <version>0.2.0</version>
                             </path>
                         </annotationProcessorPaths>
                     </configuration>
