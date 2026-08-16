@@ -204,7 +204,7 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
     @Test
     void getByBookingIdSucceedsWhenCustomerOwnsBooking() throws Exception {
         doNothing().when(bookingOwnershipPort).verifyCallerOwnsBooking(eq(BOOKING_ID), anyString());
-        Payment payment = Payment.reconstitute(PAYMENT_ID, BOOKING_ID, new BigDecimal("50.00"), "USD",
+        Payment payment = Payment.reconstitute(PAYMENT_ID, BOOKING_ID, "buyer@example.com", new BigDecimal("50.00"), "USD",
                 PaymentStatus.SUCCEEDED, "gw-tx-1", null, Instant.now(), 1L);
         when(getPaymentUseCase.getByBookingId(BOOKING_ID)).thenReturn(Optional.of(payment));
 
@@ -215,7 +215,7 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
 
     @Test
     void getByBookingIdBypassesOwnershipCheckForInternalServiceToken() throws Exception {
-        Payment payment = Payment.reconstitute(PAYMENT_ID, BOOKING_ID, new BigDecimal("50.00"), "USD",
+        Payment payment = Payment.reconstitute(PAYMENT_ID, BOOKING_ID, "buyer@example.com", new BigDecimal("50.00"), "USD",
                 PaymentStatus.SUCCEEDED, "gw-tx-1", null, Instant.now(), 1L);
         when(getPaymentUseCase.getByBookingId(BOOKING_ID)).thenReturn(Optional.of(payment));
 
@@ -232,7 +232,7 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
 
     @Test
     void retryReturns403WhenCustomerDoesNotOwnBooking() throws Exception {
-        Payment payment = Payment.reconstitute(PAYMENT_ID, BOOKING_ID, new BigDecimal("50.00"), "USD",
+        Payment payment = Payment.reconstitute(PAYMENT_ID, BOOKING_ID, "buyer@example.com", new BigDecimal("50.00"), "USD",
                 PaymentStatus.FAILED, null, "gateway error", Instant.now(), 1L);
         when(getPaymentUseCase.getById(PAYMENT_ID)).thenReturn(Optional.of(payment));
         doThrow(new IdentityMismatchException("Caller does not own booking " + BOOKING_ID))
@@ -258,7 +258,7 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
 
     @Test
     void retrySucceedsWhenCustomerOwnsBooking() throws Exception {
-        Payment payment = Payment.reconstitute(PAYMENT_ID, BOOKING_ID, new BigDecimal("50.00"), "USD",
+        Payment payment = Payment.reconstitute(PAYMENT_ID, BOOKING_ID, "buyer@example.com", new BigDecimal("50.00"), "USD",
                 PaymentStatus.FAILED, null, "gateway error", Instant.now(), 1L);
         when(getPaymentUseCase.getById(PAYMENT_ID)).thenReturn(Optional.of(payment));
         doNothing().when(bookingOwnershipPort).verifyCallerOwnsBooking(eq(BOOKING_ID), anyString());
@@ -273,7 +273,7 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
 
     @Test
     void retryBypassesOwnershipCheckForInternalServiceToken() throws Exception {
-        Payment payment = Payment.reconstitute(PAYMENT_ID, BOOKING_ID, new BigDecimal("50.00"), "USD",
+        Payment payment = Payment.reconstitute(PAYMENT_ID, BOOKING_ID, "buyer@example.com", new BigDecimal("50.00"), "USD",
                 PaymentStatus.FAILED, null, "gateway error", Instant.now(), 1L);
         when(getPaymentUseCase.getById(PAYMENT_ID)).thenReturn(Optional.of(payment));
         when(retryPaymentUseCase.retry(PAYMENT_ID)).thenReturn(Optional.of(PAYMENT_ID));

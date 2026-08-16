@@ -20,7 +20,7 @@ class PaymentTest {
 
     @Test
     void initiateStartsInInitiatedWithNullVersionAndRaisesEvent() {
-        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
 
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.INITIATED);
         assertThat(payment.getVersion()).isNull();
@@ -33,9 +33,36 @@ class PaymentTest {
         assertThat(((PaymentInitiatedEvent) events.get(0)).paymentId()).isEqualTo(payment.getPaymentId());
     }
 
+    /** notification-service reads this field off the event to address the receipt email. */
+    @Test
+    void markSucceededCarriesTheCustomerEmailCapturedAtInitiationOntoTheEvent() {
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
+        payment.pullDomainEvents();
+
+        payment.markSucceeded("gw-tx-1");
+
+        PaymentSucceededEvent event = (PaymentSucceededEvent) payment.pullDomainEvents().get(0);
+        assertThat(event.customerEmail()).isEqualTo("buyer@example.com");
+        assertThat(event.bookingId()).isEqualTo("booking-1");
+        assertThat(event.amount()).isEqualTo(AMOUNT);
+        assertThat(event.currency()).isEqualTo("USD");
+    }
+
+    /** Internal-service initiations have no end-user identity — the event must still be valid. */
+    @Test
+    void markSucceededWithoutACustomerEmailStillRaisesTheEvent() {
+        Payment payment = Payment.initiate("booking-1", null, AMOUNT, "USD");
+        payment.pullDomainEvents();
+
+        payment.markSucceeded("gw-tx-1");
+
+        PaymentSucceededEvent event = (PaymentSucceededEvent) payment.pullDomainEvents().get(0);
+        assertThat(event.customerEmail()).isNull();
+    }
+
     @Test
     void markSucceededTransitionsFromInitiatedAndRaisesEvent() {
-        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
         payment.pullDomainEvents(); // discard PaymentInitiatedEvent
 
         payment.markSucceeded("gw-tx-1");
@@ -50,7 +77,7 @@ class PaymentTest {
 
     @Test
     void markSucceededRejectsWhenAlreadySucceeded() {
-        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
         payment.markSucceeded("gw-tx-1");
 
         assertThatThrownBy(() -> payment.markSucceeded("gw-tx-2"))
@@ -59,7 +86,7 @@ class PaymentTest {
 
     @Test
     void markSucceededRejectsWhenAlreadyFailedWithDefiniteDecline() {
-        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
         payment.markFailed("card declined"); // non-ambiguous decline
 
         assertThat(payment.isAmbiguousFailure()).isFalse();
@@ -69,7 +96,7 @@ class PaymentTest {
 
     @Test
     void markSucceededAllowsTransitionFromGatewayAmbiguousFailedState() {
-        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
         payment.markFailedAmbiguous("connection reset by peer");
 
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.FAILED);
@@ -90,7 +117,7 @@ class PaymentTest {
 
     @Test
     void markFailedTransitionsFromInitiatedAndRaisesEvent() {
-        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
         payment.pullDomainEvents(); // discard PaymentInitiatedEvent
 
         payment.markFailed("gateway timeout");
@@ -105,7 +132,7 @@ class PaymentTest {
 
     @Test
     void markFailedRejectsWhenAlreadySucceeded() {
-        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
         payment.markSucceeded("gw-tx-1");
 
         assertThatThrownBy(() -> payment.markFailed("late failure"))
@@ -114,7 +141,7 @@ class PaymentTest {
 
     @Test
     void retryTransitionsFromFailedToInitiatedAndClearsFailureReason() {
-        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
         payment.markFailed("gateway timeout");
 
         payment.retry();
@@ -125,7 +152,7 @@ class PaymentTest {
 
     @Test
     void retryRejectsWhenNotFailed() {
-        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
 
         assertThatThrownBy(payment::retry)
                 .isInstanceOf(InvalidPaymentStatusException.class);
@@ -133,7 +160,7 @@ class PaymentTest {
 
     @Test
     void retryRejectsWhenAlreadySucceeded() {
-        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
         payment.markSucceeded("gw-tx-1");
 
         assertThatThrownBy(payment::retry)
@@ -142,7 +169,7 @@ class PaymentTest {
 
     @Test
     void refundTransitionsFromSucceededAndRaisesEvent() {
-        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
         payment.markSucceeded("gw-tx-1");
         payment.pullDomainEvents(); // discard PaymentInitiatedEvent + PaymentSucceededEvent
 
@@ -159,7 +186,7 @@ class PaymentTest {
 
     @Test
     void refundRejectsWhenNotSucceeded() {
-        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
 
         assertThatThrownBy(() -> payment.refund("gw-refund-1", "Match cancelled"))
                 .isInstanceOf(InvalidPaymentStatusException.class);
@@ -167,7 +194,7 @@ class PaymentTest {
 
     @Test
     void refundRejectsWhenAlreadyRefunded() {
-        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
         payment.markSucceeded("gw-tx-1");
         payment.refund("gw-refund-1", "first refund");
 
@@ -179,7 +206,7 @@ class PaymentTest {
     void reconstitutePreservesVersionStatusAndRaisesNoEvents() {
         Instant createdAt = Instant.parse("2024-01-01T00:00:00Z");
 
-        Payment payment = Payment.reconstitute("payment-1", "booking-1", AMOUNT, "USD",
+        Payment payment = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", AMOUNT, "USD",
                 PaymentStatus.SUCCEEDED, "gw-tx-1", null, createdAt, 3L);
 
         assertThat(payment.getVersion()).isEqualTo(3L);
@@ -193,7 +220,7 @@ class PaymentTest {
     void reconstituteWithNullVersionRepresentsAPreExistingRowLoadedBeforeFirstSave() {
         // version is only ever null for an in-memory initiate()-d payment; reconstitute() just
         // carries whatever persistence handed it through unchanged (see Payment.version javadoc).
-        Payment payment = Payment.reconstitute("payment-1", "booking-1", AMOUNT, "USD",
+        Payment payment = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", AMOUNT, "USD",
                 PaymentStatus.INITIATED, null, null, Instant.now(), 0L);
 
         assertThat(payment.getVersion()).isEqualTo(0L);
@@ -201,7 +228,7 @@ class PaymentTest {
 
     @Test
     void pullDomainEventsClearsTheList() {
-        Payment payment = Payment.initiate("booking-1", AMOUNT, "USD");
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
 
         List<Object> firstPull = payment.pullDomainEvents();
         List<Object> secondPull = payment.pullDomainEvents();

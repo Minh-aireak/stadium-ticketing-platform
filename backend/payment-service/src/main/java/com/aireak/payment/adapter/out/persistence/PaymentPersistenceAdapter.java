@@ -43,6 +43,7 @@ public class PaymentPersistenceAdapter implements PaymentRepository {
         return PaymentJpaEntity.builder()
                 .paymentId(p.getPaymentId())
                 .bookingId(p.getBookingId())
+                .customerEmail(p.getCustomerEmail())
                 .amount(p.getAmount())
                 .currency(p.getCurrency())
                 .status(p.getStatus())
@@ -54,7 +55,7 @@ public class PaymentPersistenceAdapter implements PaymentRepository {
 
     private Payment toDomain(PaymentJpaEntity e) {
         return Payment.reconstitute(
-                e.getPaymentId(), e.getBookingId(),
+                e.getPaymentId(), e.getBookingId(), e.getCustomerEmail(),
                 e.getAmount(), e.getCurrency(), e.getStatus(),
                 e.getGatewayTransactionId(), e.getFailureReason(),
                 e.getCreatedAt(), e.getVersion()

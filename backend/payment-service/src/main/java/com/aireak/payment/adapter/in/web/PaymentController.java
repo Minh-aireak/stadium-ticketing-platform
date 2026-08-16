@@ -44,8 +44,12 @@ public class PaymentController {
     public ResponseEntity<InitiatePaymentResponse> initiate(@Valid @RequestBody InitiatePaymentRequest request) {
         enforceBookingOwnership(request.bookingId());
         try {
+            // Email comes off the validated JWT, never the request body — enforceBookingOwnership
+            // above already proved this caller owns the booking, and a client-supplied address
+            // would let anyone redirect someone else's payment receipt.
             String paymentId = initiatePaymentUseCase.execute(
-                    new InitiatePaymentCommand(request.bookingId(), request.amount(), request.currency()));
+                    new InitiatePaymentCommand(request.bookingId(), currentUser().email(),
+                            request.amount(), request.currency()));
             return ResponseEntity.status(HttpStatus.CREATED)
                     .body(new InitiatePaymentResponse(paymentId));
         } catch (DuplicatePaymentException exception) {
@@ -87,10 +91,14 @@ public class PaymentController {
                 .orElseGet(() -> ResponseEntity.ok(new RefundResponse(null, false)));
     }
 
-    private void requireInternalService() {
-        AuthenticatedUser user = AuthenticatedUserContext.get()
+    private AuthenticatedUser currentUser() {
+        return AuthenticatedUserContext.get()
                 .orElseThrow(() -> new IllegalStateException(
                         "JwtAuthenticationFilter did not run for this request"));
+    }
+
+    private void requireInternalService() {
+        AuthenticatedUser user = currentUser();
         if (!user.isInternalService()) {
             throw new ForbiddenException("This operation is restricted to internal service calls");
         }
@@ -114,9 +122,7 @@ public class PaymentController {
      * non-owners), so payment-service never duplicates that logic.
      */
     private void enforceBookingOwnership(String bookingId) {
-        AuthenticatedUser user = AuthenticatedUserContext.get()
-                .orElseThrow(() -> new IllegalStateException(
-                        "JwtAuthenticationFilter did not run for this request"));
+        AuthenticatedUser user = currentUser();
         if (user.isInternalService()) {
             return;
         }

@@ -11,7 +11,7 @@ import java.time.Instant;
  * field-for-field identical to {@code payment-service}'s {@code PaymentSucceededEvent}.
  */
 public record PaymentSucceededEvent(
-        String paymentId, String bookingId,
+        String paymentId, String bookingId, String customerEmail,
         BigDecimal amount, String currency,
         String gatewayTransactionId, Instant occurredAt
 ) {}

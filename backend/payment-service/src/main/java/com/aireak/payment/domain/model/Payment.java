@@ -27,6 +27,10 @@ public class Payment {
 
     private final String paymentId;
     private final String bookingId;
+    // Recipient of the payment-success receipt email, taken from the caller's validated JWT at
+    // initiation. Null when the payment was initiated by an internal-service token, which carries
+    // no end-user identity — consumers of PaymentSucceededEvent must tolerate that.
+    private final String customerEmail;
     private final BigDecimal amount;
     private final String currency;
     private PaymentStatus status;
@@ -41,10 +45,11 @@ public class Payment {
     private final Long version;
     private final List<Object> domainEvents = new ArrayList<>();
 
-    private Payment(String paymentId, String bookingId, BigDecimal amount,
+    private Payment(String paymentId, String bookingId, String customerEmail, BigDecimal amount,
                     String currency, PaymentStatus status, Instant createdAt, Long version) {
         this.paymentId = paymentId;
         this.bookingId = bookingId;
+        this.customerEmail = customerEmail;
         this.amount = amount;
         this.currency = currency;
         this.status = status;
@@ -56,19 +61,19 @@ public class Payment {
     // Factory
     // ----------------------------------------------------------------
 
-    public static Payment initiate(String bookingId, BigDecimal amount, String currency) {
+    public static Payment initiate(String bookingId, String customerEmail, BigDecimal amount, String currency) {
         String paymentId = UUID.randomUUID().toString();
-        Payment payment = new Payment(paymentId, bookingId, amount, currency,
+        Payment payment = new Payment(paymentId, bookingId, customerEmail, amount, currency,
                 PaymentStatus.INITIATED, Instant.now(), null);
         payment.domainEvents.add(new PaymentInitiatedEvent(paymentId, bookingId, amount, currency));
         return payment;
     }
 
-    public static Payment reconstitute(String paymentId, String bookingId, BigDecimal amount,
-                                        String currency, PaymentStatus status,
+    public static Payment reconstitute(String paymentId, String bookingId, String customerEmail,
+                                        BigDecimal amount, String currency, PaymentStatus status,
                                         String gatewayTransactionId, String failureReason,
                                         Instant createdAt, Long version) {
-        Payment p = new Payment(paymentId, bookingId, amount, currency, status, createdAt, version);
+        Payment p = new Payment(paymentId, bookingId, customerEmail, amount, currency, status, createdAt, version);
         p.gatewayTransactionId = gatewayTransactionId;
         p.failureReason = failureReason;
         return p;
@@ -87,7 +92,8 @@ public class Payment {
         }
         this.status = PaymentStatus.SUCCEEDED;
         this.gatewayTransactionId = gatewayTransactionId;
-        domainEvents.add(new PaymentSucceededEvent(paymentId, bookingId, amount, currency, gatewayTransactionId));
+        domainEvents.add(new PaymentSucceededEvent(paymentId, bookingId, customerEmail, amount, currency,
+                gatewayTransactionId));
     }
 
     public void markFailed(String reason) {
@@ -144,6 +150,7 @@ public class Payment {
 
     public String getPaymentId()              { return paymentId; }
     public String getBookingId()              { return bookingId; }
+    public String getCustomerEmail()          { return customerEmail; }
     public BigDecimal getAmount()             { return amount; }
     public String getCurrency()               { return currency; }
     public PaymentStatus getStatus()          { return status; }

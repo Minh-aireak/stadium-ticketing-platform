@@ -86,7 +86,7 @@ class OutboxEventPublisherIntegrationTest {
 
     @Test
     void updatingAnAlreadyPersistedPaymentUpdatesInPlace() {
-        Payment payment = Payment.initiate("booking-2", new BigDecimal("99.00"), "USD");
+        Payment payment = Payment.initiate("booking-2", "buyer@example.com", new BigDecimal("99.00"), "USD");
         String paymentId = payment.getPaymentId();
 
         paymentRepository.save(payment);
@@ -115,7 +115,7 @@ class OutboxEventPublisherIntegrationTest {
 
     @Test
     void markingPaymentSucceededWritesOutboxRowInSameTransaction() {
-        Payment payment = Payment.initiate("booking-1", new BigDecimal("150.00"), "USD");
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", new BigDecimal("150.00"), "USD");
         payment.pullDomainEvents(); // discard PaymentInitiatedEvent, not under test here
         payment.markSucceeded("gw-tx-1");
 

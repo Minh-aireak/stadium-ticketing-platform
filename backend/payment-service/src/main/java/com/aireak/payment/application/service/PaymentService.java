@@ -87,7 +87,7 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
         // tryInsert flushes-and-commits so a unique-constraint violation (the fail-open race
         // window when Redis was down) surfaces here, before any gateway charge is attempted.
         PaymentSagaSteps.InitiateOutcome outcome =
-                sagaSteps.tryInitiate(bookingId, command.amount(), command.currency());
+                sagaSteps.tryInitiate(bookingId, command.customerEmail(), command.amount(), command.currency());
         if (outcome instanceof PaymentSagaSteps.InitiateOutcome.AlreadyExists) {
             return existingPaymentIdOrThrow(bookingId, idempotencyKey);
         }

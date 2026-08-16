@@ -46,7 +46,7 @@ class PaymentResultConsumerTest {
     @Test
     void consume_paymentSucceededAsProducedInProduction_confirmsBooking() {
         PaymentSucceededEvent succeeded = new PaymentSucceededEvent(
-                "payment-1", "booking-1", new BigDecimal("150.00"), "USD", "gw-txn-1", Instant.now());
+                "payment-1", "booking-1", "buyer@example.com", new BigDecimal("150.00"), "USD", "gw-txn-1", Instant.now());
         EventEnvelope<PaymentSucceededEvent> envelope = EventEnvelope.of(PAYMENT_SUCCEEDED, succeeded, null);
 
         consumer.consume(envelope);

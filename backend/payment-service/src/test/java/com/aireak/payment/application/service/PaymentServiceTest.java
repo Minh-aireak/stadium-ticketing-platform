@@ -39,7 +39,7 @@ import static org.mockito.Mockito.when;
 class PaymentServiceTest {
 
     private static final InitiatePaymentCommand COMMAND =
-            new InitiatePaymentCommand("booking-1", new BigDecimal("100.00"), "USD");
+            new InitiatePaymentCommand("booking-1", "buyer@example.com", new BigDecimal("100.00"), "USD");
 
     @Mock
     private PaymentSagaSteps sagaSteps;
@@ -60,7 +60,7 @@ class PaymentServiceTest {
     }
 
     private Payment existingPayment(String paymentId) {
-        return Payment.reconstitute(paymentId, "booking-1", new BigDecimal("100.00"), "USD",
+        return Payment.reconstitute(paymentId, "booking-1", "buyer@example.com", new BigDecimal("100.00"), "USD",
                 PaymentStatus.INITIATED, null, null, Instant.now(), 0L);
     }
 
@@ -74,7 +74,7 @@ class PaymentServiceTest {
         String paymentId = service.execute(COMMAND);
 
         assertThat(paymentId).isEqualTo("payment-1");
-        verify(sagaSteps, never()).tryInitiate(any(), any(), any());
+        verify(sagaSteps, never()).tryInitiate(any(), any(), any(), any());
         verify(paymentGatewayPort, never()).charge(any(), any(), any());
         verify(idempotencyPort).remember(anyString(), eq("payment-1"));
     }
@@ -100,7 +100,7 @@ class PaymentServiceTest {
         assertThat(paymentId).isEqualTo("payment-1");
         verify(idempotencyPort, never()).tryAcquire(any(), any());
         verify(paymentRepository, never()).findByBookingId(any());
-        verify(sagaSteps, never()).tryInitiate(any(), any(), any());
+        verify(sagaSteps, never()).tryInitiate(any(), any(), any(), any());
         verify(paymentGatewayPort, never()).charge(any(), any(), any());
     }
 
@@ -108,7 +108,7 @@ class PaymentServiceTest {
     void executeReturnsExistingPaymentWhenSagaStepsReportsAlreadyExists() {
         newService();
         when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(true);
-        when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.amount()), eq(COMMAND.currency())))
+        when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.customerEmail()), eq(COMMAND.amount()), eq(COMMAND.currency())))
                 .thenReturn(new PaymentSagaSteps.InitiateOutcome.AlreadyExists());
         when(paymentRepository.findByBookingId("booking-1"))
                 .thenReturn(Optional.of(existingPayment("payment-1")));
@@ -124,7 +124,7 @@ class PaymentServiceTest {
     void executeChargesGatewayAndMarksSucceededOnSuccess() {
         newService();
         when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(true);
-        when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.amount()), eq(COMMAND.currency())))
+        when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.customerEmail()), eq(COMMAND.amount()), eq(COMMAND.currency())))
                 .thenReturn(new PaymentSagaSteps.InitiateOutcome.Created("payment-1"));
         when(paymentGatewayPort.charge("booking-1", COMMAND.amount(), COMMAND.currency()))
                 .thenReturn("gw-tx-1");
@@ -142,7 +142,7 @@ class PaymentServiceTest {
     void executeRetriesPersistingSucceededOutcomeAndStopsOnceItSucceeds() {
         newService();
         when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(true);
-        when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.amount()), eq(COMMAND.currency())))
+        when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.customerEmail()), eq(COMMAND.amount()), eq(COMMAND.currency())))
                 .thenReturn(new PaymentSagaSteps.InitiateOutcome.Created("payment-1"));
         when(paymentGatewayPort.charge("booking-1", COMMAND.amount(), COMMAND.currency()))
                 .thenReturn("gw-tx-1");
@@ -162,7 +162,7 @@ class PaymentServiceTest {
     void executeRecordsForManualReconciliationInsteadOfMarkingFailedWhenPersistingSucceededOutcomeKeepsFailing() {
         newService();
         when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(true);
-        when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.amount()), eq(COMMAND.currency())))
+        when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.customerEmail()), eq(COMMAND.amount()), eq(COMMAND.currency())))
                 .thenReturn(new PaymentSagaSteps.InitiateOutcome.Created("payment-1"));
         when(paymentGatewayPort.charge("booking-1", COMMAND.amount(), COMMAND.currency()))
                 .thenReturn("gw-tx-1");
@@ -184,7 +184,7 @@ class PaymentServiceTest {
     void executeSwallowsAFailureRecordingForManualReconciliationInsteadOfThrowing() {
         newService();
         when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(true);
-        when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.amount()), eq(COMMAND.currency())))
+        when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.customerEmail()), eq(COMMAND.amount()), eq(COMMAND.currency())))
                 .thenReturn(new PaymentSagaSteps.InitiateOutcome.Created("payment-1"));
         when(paymentGatewayPort.charge("booking-1", COMMAND.amount(), COMMAND.currency()))
                 .thenReturn("gw-tx-1");
@@ -203,7 +203,7 @@ class PaymentServiceTest {
     void executeMarksFailedAmbiguousWhenGatewayThrowsGenericException() {
         newService();
         when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(true);
-        when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.amount()), eq(COMMAND.currency())))
+        when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.customerEmail()), eq(COMMAND.amount()), eq(COMMAND.currency())))
                 .thenReturn(new PaymentSagaSteps.InitiateOutcome.Created("payment-1"));
         when(paymentGatewayPort.charge(any(), any(), any()))
                 .thenThrow(new RuntimeException("gateway unreachable"));
@@ -221,7 +221,7 @@ class PaymentServiceTest {
     void executeMarksFailedWhenGatewayThrowsPaymentDeclinedException() {
         newService();
         when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(true);
-        when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.amount()), eq(COMMAND.currency())))
+        when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.customerEmail()), eq(COMMAND.amount()), eq(COMMAND.currency())))
                 .thenReturn(new PaymentSagaSteps.InitiateOutcome.Created("payment-1"));
         when(paymentGatewayPort.charge(any(), any(), any()))
                 .thenThrow(new com.aireak.payment.adapter.out.gateway.PaymentDeclinedException("Card declined"));
@@ -250,7 +250,7 @@ class PaymentServiceTest {
     @Test
     void retryChargesGatewayAndMarksSucceededOnSuccess() {
         newService();
-        Payment reopened = Payment.reconstitute("payment-1", "booking-1", new BigDecimal("100.00"), "USD",
+        Payment reopened = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"), "USD",
                 PaymentStatus.INITIATED, null, null, Instant.now(), 1L);
         when(paymentRepository.findById("payment-1")).thenReturn(Optional.of(reopened));
         when(sagaSteps.retry("payment-1")).thenReturn(reopened);
@@ -268,7 +268,7 @@ class PaymentServiceTest {
     @Test
     void retryMarksFailedAmbiguousInsteadOfPropagatingWhenGatewayThrows() {
         newService();
-        Payment reopened = Payment.reconstitute("payment-1", "booking-1", new BigDecimal("100.00"), "USD",
+        Payment reopened = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"), "USD",
                 PaymentStatus.INITIATED, null, null, Instant.now(), 1L);
         when(paymentRepository.findById("payment-1")).thenReturn(Optional.of(reopened));
         when(sagaSteps.retry("payment-1")).thenReturn(reopened);
@@ -309,7 +309,7 @@ class PaymentServiceTest {
     @Test
     void refundByBookingIdSkipsWhenAlreadyRefunded() {
         newService();
-        Payment refunded = Payment.reconstitute("payment-1", "booking-1", new BigDecimal("100.00"), "USD",
+        Payment refunded = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"), "USD",
                 PaymentStatus.REFUNDED, "gw-tx-1", null, Instant.now(), 2L);
         when(paymentRepository.findByBookingId("booking-1")).thenReturn(Optional.of(refunded));
 
@@ -322,7 +322,7 @@ class PaymentServiceTest {
     @Test
     void refundByBookingIdChargesGatewayAndMarksRefundedOnSuccess() {
         newService();
-        Payment succeeded = Payment.reconstitute("payment-1", "booking-1", new BigDecimal("100.00"), "USD",
+        Payment succeeded = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"), "USD",
                 PaymentStatus.SUCCEEDED, "gw-tx-1", null, Instant.now(), 1L);
         when(paymentRepository.findByBookingId("booking-1")).thenReturn(Optional.of(succeeded));
         when(paymentGatewayPort.refund("gw-tx-1", succeeded.getAmount(), succeeded.getCurrency()))
@@ -337,7 +337,7 @@ class PaymentServiceTest {
     @Test
     void refundByBookingIdPropagatesWhenGatewayThrows() {
         newService();
-        Payment succeeded = Payment.reconstitute("payment-1", "booking-1", new BigDecimal("100.00"), "USD",
+        Payment succeeded = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"), "USD",
                 PaymentStatus.SUCCEEDED, "gw-tx-1", null, Instant.now(), 1L);
         when(paymentRepository.findByBookingId("booking-1")).thenReturn(Optional.of(succeeded));
         when(paymentGatewayPort.refund(any(), any(), any())).thenThrow(new RuntimeException("gateway down"));

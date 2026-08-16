@@ -26,6 +26,9 @@ public class PaymentJpaEntity extends BaseAuditEntity {
     @Column(name = "booking_id", nullable = false, length = 36)
     private String bookingId;
 
+    @Column(name = "customer_email", length = 255)
+    private String customerEmail;
+
     @Column(name = "amount", nullable = false, precision = 15, scale = 2)
     private BigDecimal amount;
 

@@ -21,8 +21,8 @@ class PaymentSagaSteps {
     private final DomainEventPublisher eventPublisher;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public InitiateOutcome tryInitiate(String bookingId, BigDecimal amount, String currency) {
-        Payment payment = Payment.initiate(bookingId, amount, currency);
+    public InitiateOutcome tryInitiate(String bookingId, String customerEmail, BigDecimal amount, String currency) {
+        Payment payment = Payment.initiate(bookingId, customerEmail, amount, currency);
         if (!paymentRepository.tryInsert(payment)) {
             return new InitiateOutcome.AlreadyExists();
         }

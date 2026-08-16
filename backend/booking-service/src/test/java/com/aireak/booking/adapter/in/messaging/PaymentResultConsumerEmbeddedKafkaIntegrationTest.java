@@ -111,7 +111,7 @@ class PaymentResultConsumerEmbeddedKafkaIntegrationTest {
     void consumesRealPaymentSucceededRecord_andConfirmsTheBooking() {
         String bookingId = "booking-" + UUID.randomUUID();
         PaymentSucceededEvent succeeded = new PaymentSucceededEvent(
-                "payment-1", bookingId, new BigDecimal("150.00"), "USD", "gw-txn-1", Instant.now());
+                "payment-1", bookingId, "buyer@example.com", new BigDecimal("150.00"), "USD", "gw-txn-1", Instant.now());
         publishAsDebeziumWouldForwardTheOutboxRow(PAYMENT_SUCCEEDED, succeeded);
 
         verify(bookingOrchestrationService, timeout(10_000)).confirmBooking(bookingId);
@@ -132,7 +132,7 @@ class PaymentResultConsumerEmbeddedKafkaIntegrationTest {
         String bookingId = "booking-" + UUID.randomUUID();
         doThrow(new RuntimeException("downstream boom")).when(bookingOrchestrationService).confirmBooking(any());
         PaymentSucceededEvent succeeded = new PaymentSucceededEvent(
-                "payment-1", bookingId, new BigDecimal("150.00"), "USD", "gw-txn-1", Instant.now());
+                "payment-1", bookingId, "buyer@example.com", new BigDecimal("150.00"), "USD", "gw-txn-1", Instant.now());
         publishAsDebeziumWouldForwardTheOutboxRow(PAYMENT_SUCCEEDED, succeeded);
 
         Map<String, Object> consumerProps = KafkaTestUtils.consumerProps(

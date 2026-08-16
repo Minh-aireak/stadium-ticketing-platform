@@ -45,7 +45,7 @@ class PaymentSagaStepsTest {
         when(paymentRepository.tryInsert(any(Payment.class))).thenReturn(true);
 
         PaymentSagaSteps.InitiateOutcome outcome =
-                sagaSteps.tryInitiate("booking-1", new BigDecimal("100.00"), "USD");
+                sagaSteps.tryInitiate("booking-1", "buyer@example.com", new BigDecimal("100.00"), "USD");
 
         assertThat(outcome).isInstanceOf(PaymentSagaSteps.InitiateOutcome.Created.class);
         assertThat(((PaymentSagaSteps.InitiateOutcome.Created) outcome).paymentId()).isNotBlank();
@@ -57,7 +57,7 @@ class PaymentSagaStepsTest {
         when(paymentRepository.tryInsert(any(Payment.class))).thenReturn(false);
 
         PaymentSagaSteps.InitiateOutcome outcome =
-                sagaSteps.tryInitiate("booking-1", new BigDecimal("100.00"), "USD");
+                sagaSteps.tryInitiate("booking-1", "buyer@example.com", new BigDecimal("100.00"), "USD");
 
         assertThat(outcome).isInstanceOf(PaymentSagaSteps.InitiateOutcome.AlreadyExists.class);
     }
@@ -65,7 +65,7 @@ class PaymentSagaStepsTest {
     @Test
     void markSucceededSavesAndPublishesPaymentSucceededEvent() {
         newSagaSteps();
-        Payment existing = Payment.reconstitute("payment-1", "booking-1", new BigDecimal("100.00"),
+        Payment existing = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"),
                 "USD", PaymentStatus.INITIATED, null, null, Instant.now(), 0L);
         when(paymentRepository.findById("payment-1")).thenReturn(Optional.of(existing));
 
@@ -89,7 +89,7 @@ class PaymentSagaStepsTest {
     @Test
     void markFailedSavesAndPublishesPaymentFailedEvent() {
         newSagaSteps();
-        Payment existing = Payment.reconstitute("payment-1", "booking-1", new BigDecimal("100.00"),
+        Payment existing = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"),
                 "USD", PaymentStatus.INITIATED, null, null, Instant.now(), 0L);
         when(paymentRepository.findById("payment-1")).thenReturn(Optional.of(existing));
 
@@ -108,7 +108,7 @@ class PaymentSagaStepsTest {
     @Test
     void markFailedAmbiguousSavesAndPublishesAmbiguousPaymentFailedEvent() {
         newSagaSteps();
-        Payment existing = Payment.reconstitute("payment-1", "booking-1", new BigDecimal("100.00"),
+        Payment existing = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"),
                 "USD", PaymentStatus.INITIATED, null, null, Instant.now(), 0L);
         when(paymentRepository.findById("payment-1")).thenReturn(Optional.of(existing));
 
@@ -128,7 +128,7 @@ class PaymentSagaStepsTest {
     @Test
     void markRefundedSavesAndPublishesPaymentRefundedEvent() {
         newSagaSteps();
-        Payment existing = Payment.reconstitute("payment-1", "booking-1", new BigDecimal("100.00"),
+        Payment existing = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"),
                 "USD", PaymentStatus.SUCCEEDED, "gw-tx-1", null, Instant.now(), 1L);
         when(paymentRepository.findById("payment-1")).thenReturn(Optional.of(existing));
 
@@ -157,7 +157,7 @@ class PaymentSagaStepsTest {
     @Test
     void retryReopensAFailedPaymentAndSavesButDoesNotPublish() {
         newSagaSteps();
-        Payment existing = Payment.reconstitute("payment-1", "booking-1", new BigDecimal("100.00"),
+        Payment existing = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"),
                 "USD", PaymentStatus.FAILED, null, "gateway timeout", Instant.now(), 0L);
         when(paymentRepository.findById("payment-1")).thenReturn(Optional.of(existing));
 
