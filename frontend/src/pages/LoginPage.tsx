@@ -62,7 +62,12 @@ export function LoginPage() {
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="password">Mật khẩu</Label>
+                <div className="flex items-baseline justify-between gap-2">
+                  <Label htmlFor="password">Mật khẩu</Label>
+                  <Link to="/forgot-password" className="text-xs text-accent hover:underline">
+                    Quên mật khẩu?
+                  </Link>
+                </div>
                 <Input
                   id="password"
                   type="password"

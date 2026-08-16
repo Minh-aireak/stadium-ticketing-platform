@@ -20,6 +20,15 @@ export interface RegisterResponse {
   message: string
 }
 
+export interface ForgotPasswordRequest {
+  email: string
+}
+
+export interface ResetPasswordRequest {
+  token: string
+  newPassword: string
+}
+
 export type AccountRole = 'USER' | 'ADMIN'
 
 export interface AuthUser {

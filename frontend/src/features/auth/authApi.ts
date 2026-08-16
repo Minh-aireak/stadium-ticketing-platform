@@ -1,5 +1,12 @@
 import { api, refreshAccessToken, setAccessToken } from '@/lib/api'
-import type { LoginRequest, LoginResponse, RegisterRequest, RegisterResponse } from './types'
+import type {
+  ForgotPasswordRequest,
+  LoginRequest,
+  LoginResponse,
+  RegisterRequest,
+  RegisterResponse,
+  ResetPasswordRequest,
+} from './types'
 
 export async function login(payload: LoginRequest): Promise<LoginResponse> {
   const { data } = await api.post<LoginResponse>('/auth/login', payload)
@@ -10,6 +17,20 @@ export async function login(payload: LoginRequest): Promise<LoginResponse> {
 export async function register(payload: RegisterRequest): Promise<RegisterResponse> {
   const { data } = await api.post<RegisterResponse>('/auth/register', payload)
   return data
+}
+
+/**
+ * Requests a reset link. Resolves with 204 whether or not the address has an account —
+ * identity-service deliberately answers identically either way so this endpoint can't be used
+ * to discover which emails are registered. The UI must not imply otherwise.
+ */
+export async function forgotPassword(payload: ForgotPasswordRequest): Promise<void> {
+  await api.post('/auth/forgot-password', payload)
+}
+
+/** Consumes the one-time token from the reset email and sets the new password. */
+export async function resetPassword(payload: ResetPasswordRequest): Promise<void> {
+  await api.post('/auth/reset-password', payload)
 }
 
 // Reuses the same refresh flow the interceptor uses, so a silent session-restore on app

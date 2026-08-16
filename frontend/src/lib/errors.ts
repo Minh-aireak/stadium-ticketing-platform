@@ -45,3 +45,15 @@ export function isDuplicateEmailError(error: unknown): boolean {
   const detail = error.response?.data?.detail
   return typeof detail === 'string' && /already registered/i.test(detail)
 }
+
+/**
+ * True for the 422 raised by POST /auth/reset-password when the one-time token is missing,
+ * unknown, or expired (see identity-service InvalidPasswordResetTokenException). Distinguished
+ * from a password-policy 422 on the same endpoint, which the user can fix in place — an expired
+ * token instead needs a whole new link.
+ */
+export function isInvalidResetTokenError(error: unknown): boolean {
+  if (!isAxiosError(error) || error.response?.status !== 422) return false
+  const detail = error.response?.data?.detail
+  return typeof detail === 'string' && /reset token/i.test(detail)
+}
