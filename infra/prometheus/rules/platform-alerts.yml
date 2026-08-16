@@ -1,0 +1,138 @@
+groups:
+  # ── Availability ────────────────────────────────────────────────────
+  - name: availability
+    rules:
+      - alert: ServiceDown
+        expr: up{job!="prometheus"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} is not being scraped"
+          description: >-
+            Prometheus has failed to scrape {{ $labels.job }} ({{ $labels.instance }}) for 2
+            minutes. Either the process is down or its /actuator/prometheus endpoint stopped
+            answering. Check `docker compose ps` and the container logs.
+
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Postgres {{ $labels.database }} unreachable"
+          description: >-
+            postgres-exporter cannot connect to {{ $labels.instance }} ({{ $labels.database }}).
+            The owning service will be failing every request that touches the database.
+
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis unreachable"
+          description: >-
+            Redis is down. Seat holds, refresh sessions, password-reset tokens and the gateway's
+            rate limiter all live here; note the gateway fails OPEN on Redis errors, so rate
+            limiting is silently not being enforced while this fires.
+
+  # ── Event pipeline ──────────────────────────────────────────────────
+  # The outbox pattern means a stalled consumer is invisible from the HTTP side: writes keep
+  # succeeding while nothing downstream reacts. These are the alerts that surface that.
+  - name: messaging
+    rules:
+      - alert: KafkaConsumerLagGrowing
+        expr: sum by (job, client_id) (kafka_consumer_fetch_manager_records_lag) > 1000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} is falling behind on Kafka"
+          description: >-
+            Consumer {{ $labels.client_id }} in {{ $labels.job }} has held a backlog above 1000
+            records for 10 minutes. Bookings may be confirming without their side effects
+            (emails, inventory release) landing.
+
+      - alert: DeadLetterRecordsAppearing
+        expr: increase(spring_kafka_listener_seconds_count{result="failure"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} failed to process a Kafka record"
+          description: >-
+            A listener in {{ $labels.job }} threw and, after retries, the record goes to a
+            <topic>-dlt. Nothing replays a dead-lettered record automatically — grep the logs
+            for "ALERT:" to see which one and why.
+
+  # ── Application health ──────────────────────────────────────────────
+  - name: application
+    rules:
+      - alert: HighServerErrorRate
+        expr: >-
+          sum by (job) (rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+          /
+          sum by (job) (rate(http_server_requests_seconds_count[5m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} is serving over 5% 5xx"
+          description: >-
+            More than 5% of requests to {{ $labels.job }} have failed with a server error for 5
+            minutes.
+
+      - alert: RateLimiterFailingOpen
+        expr: increase(gateway_ratelimit_redis_unavailable_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Gateway rate limiting is failing open"
+          description: >-
+            RedisRateLimiter swallowed a Redis error and allowed the request through. While this
+            fires, login/register/forgot-password are effectively unlimited — see
+            RateLimitingWebFilter's fail-open note.
+
+      - alert: DatabaseConnectionPoolSaturated
+        expr: hikaricp_connections_active / hikaricp_connections_max > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} HikariCP pool over 90% in use"
+          description: >-
+            {{ $labels.job }} has held more than 90% of its connections active for 5 minutes.
+            Requests will start blocking on connection acquisition.
+
+      - alert: JvmHeapPressure
+        expr: >-
+          sum by (job) (jvm_memory_used_bytes{area="heap"})
+          /
+          sum by (job) (jvm_memory_max_bytes{area="heap"})
+          > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} heap above 90%"
+          description: >-
+            {{ $labels.job }} has used more than 90% of max heap for 10 minutes and is probably
+            in a GC death spiral.
+
+  # ── Business-level ──────────────────────────────────────────────────
+  - name: business
+    rules:
+      - alert: UnreconciledPaymentsAccumulating
+        expr: payment_unreconciled_count > 0
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Payments taken but not reconciled"
+          description: >-
+            UnreconciledPaymentAlertJob has been reporting unreconciled payments for 15 minutes.
+            A customer has been charged without their booking being confirmed — this needs a
+            human, not a retry.

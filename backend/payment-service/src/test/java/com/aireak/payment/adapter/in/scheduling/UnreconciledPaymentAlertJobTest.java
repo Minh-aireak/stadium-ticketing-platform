@@ -2,6 +2,8 @@ package com.aireak.payment.adapter.in.scheduling;
 
 import com.aireak.payment.application.port.out.PaymentReconciliationPort;
 import com.aireak.payment.domain.model.UnreconciledPayment;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,13 +32,19 @@ class UnreconciledPaymentAlertJobTest {
     @Mock
     private PaymentReconciliationPort paymentReconciliationPort;
 
+    private MeterRegistry meterRegistry;
     private UnreconciledPaymentAlertJob alertJob;
 
     @BeforeEach
     void setUp() throws Exception {
-        alertJob = new UnreconciledPaymentAlertJob(paymentReconciliationPort);
+        meterRegistry = new SimpleMeterRegistry();
+        alertJob = new UnreconciledPaymentAlertJob(paymentReconciliationPort, meterRegistry);
         setField(alertJob, "graceMinutes", 5L);
         setField(alertJob, "batchSize", 100);
+    }
+
+    private double gaugeValue() {
+        return meterRegistry.get("payment.unreconciled.count").gauge().value();
     }
 
     private void setField(Object target, String fieldName, Object value) throws Exception {
@@ -82,5 +90,40 @@ class UnreconciledPaymentAlertJobTest {
         Instant expectedCutoff = Instant.now().minus(5, ChronoUnit.MINUTES);
         assertThat(cutoffCaptor.getValue()).isCloseTo(expectedCutoff, within(5, ChronoUnit.SECONDS));
         assertThat(limitCaptor.getValue()).isEqualTo(100);
+    }
+
+    /**
+     * The gauge is what the UnreconciledPaymentsAccumulating alert reads — a log line alone only
+     * reaches someone already tailing logs.
+     */
+    @Test
+    void scanAndAlert_publishesTheUnresolvedCountAsAGauge() {
+        when(paymentReconciliationPort.findUnresolvedOlderThan(any(), anyInt()))
+                .thenReturn(List.of(unreconciled("pay_1"), unreconciled("pay_2")));
+
+        alertJob.scanAndAlert();
+
+        assertThat(gaugeValue()).isEqualTo(2.0);
+    }
+
+    /** A resolved backlog must clear the gauge, otherwise the alert would latch on forever. */
+    @Test
+    void scanAndAlert_resetsTheGaugeOnceNothingIsUnresolved() {
+        when(paymentReconciliationPort.findUnresolvedOlderThan(any(), anyInt()))
+                .thenReturn(List.of(unreconciled("pay_1")))
+                .thenReturn(Collections.emptyList());
+
+        alertJob.scanAndAlert();
+        assertThat(gaugeValue()).isEqualTo(1.0);
+
+        alertJob.scanAndAlert();
+        assertThat(gaugeValue()).isZero();
+    }
+
+    private UnreconciledPayment unreconciled(String paymentId) {
+        return new UnreconciledPayment(
+                UUID.randomUUID(), paymentId, "book_456", "ch_789",
+                new BigDecimal("150.00"), "USD", "DB connection failed", false,
+                Instant.now().minus(10, ChronoUnit.MINUTES));
     }
 }
