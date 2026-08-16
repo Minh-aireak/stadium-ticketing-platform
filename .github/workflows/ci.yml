@@ -43,6 +43,37 @@ jobs:
           path: backend/**/target/surefire-reports/
           retention-days: 7
 
+  # ── Stage 1b: Frontend lint + typecheck + build ───────────────────
+  # Runs alongside the backend rather than after it: the two share no build inputs, and a broken
+  # tsc should fail the PR without waiting on a nine-minute Maven reactor.
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # `npm run build` is `tsc -b && vite build`, so this is the typecheck too — the app is
+      # never type-checked anywhere else in CI.
+      - name: Typecheck & build
+        run: npm run build
+
   # ── Stage 2: Docker image build (per service) ─────────────────────
   docker-build:
     needs: build-and-test
