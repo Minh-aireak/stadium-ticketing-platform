@@ -5,11 +5,14 @@ import com.aireak.booking.domain.event.BookingConfirmedEvent;
 import com.aireak.common.event.EventEnvelope;
 import com.aireak.identity.domain.event.AccountActivatedEvent;
 import com.aireak.identity.domain.event.AccountRegisteredEvent;
+import com.aireak.identity.domain.event.PasswordResetRequestedEvent;
 import com.aireak.notification.application.port.out.EmailSenderPort;
 import com.aireak.notification.application.port.out.NotificationRepository;
 import com.aireak.notification.application.port.out.ProcessedEventRepository;
-import com.aireak.notification.application.port.out.SmsSenderPort;
+import com.aireak.notification.application.port.out.dto.EmailMessage;
+import com.aireak.notification.config.AppLinkProperties;
 import com.aireak.notification.domain.model.Notification;
+import com.aireak.payment.domain.event.PaymentSucceededEvent;
 import freemarker.template.Configuration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,26 +29,30 @@ import static com.aireak.common.kafka.KafkaTopics.ACCOUNT_ACTIVATED;
 import static com.aireak.common.kafka.KafkaTopics.ACCOUNT_REGISTERED;
 import static com.aireak.common.kafka.KafkaTopics.BOOKING_CANCELLED;
 import static com.aireak.common.kafka.KafkaTopics.BOOKING_CONFIRMED;
+import static com.aireak.common.kafka.KafkaTopics.PASSWORD_RESET_REQUESTED;
+import static com.aireak.common.kafka.KafkaTopics.PAYMENT_SUCCEEDED;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 /**
  * Exercises the notification-service Kafka consumer flow at the unit level using the same
- * {@link EventEnvelope} shape producers actually build: {@code OutboxEventPublisher} (and
- * {@code PaymentEventPublisher}/{@code CatalogEventPublisher}) now call
+ * {@link EventEnvelope} shape producers actually build: the outbox publishers call
  * {@code EventEnvelope.of(topic, domainEvent, traceId)}, so {@code eventType} is the
- * {@code KafkaTopics} routing string this service's TEMPLATES map is keyed by — not a Java
- * class name. {@code BookingEventConsumer}/{@code AccountEventConsumer} hand that value straight
- * to {@link NotificationDispatchService#send}.
+ * {@code KafkaTopics} routing string this service switches on — not a Java class name. The
+ * consumers hand that value straight to {@link NotificationDispatchService#send}.
+ *
+ * <p>Wired against the real {@link TransactionalEmailService} and the real templates, so a
+ * routing change that leaves a template variable unbound fails here.
  */
 @ExtendWith(MockitoExtension.class)
 class NotificationDispatchServiceTest {
 
     @Mock
     private EmailSenderPort emailSenderPort;
-    @Mock
-    private SmsSenderPort smsSenderPort;
     @Mock
     private ProcessedEventRepository processedEventRepository;
     @Mock
@@ -60,7 +67,9 @@ class NotificationDispatchServiceTest {
         freemarkerConfig.setDefaultEncoding("UTF-8");
 
         service = new NotificationDispatchService(
-                emailSenderPort, smsSenderPort, processedEventRepository, notificationRepository, freemarkerConfig);
+                new TransactionalEmailService(emailSenderPort, freemarkerConfig),
+                processedEventRepository, notificationRepository,
+                new AppLinkProperties("http://localhost:8081", "http://localhost:5173"));
     }
 
     @Test
@@ -70,24 +79,17 @@ class NotificationDispatchServiceTest {
                 List.of("A1", "A2"),
                 new BookingConfirmedEvent.BookingAmount(new BigDecimal("100.00"), "VND"),
                 Instant.now());
-        EventEnvelope<BookingConfirmedEvent> envelope =
-                EventEnvelope.of(BOOKING_CONFIRMED, bookingConfirmed, null);
 
-        service.send(envelope.getEventId(), envelope.getEventType(), envelope.getPayload());
+        dispatch(BOOKING_CONFIRMED, bookingConfirmed);
 
-        ArgumentCaptor<String> to = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
-        verify(emailSenderPort).send(to.capture(), anyString(), body.capture());
-        assertThat(to.getValue()).isEqualTo("customer-1@example.com");
-        assertThat(body.getValue())
-                .doesNotContain("Failed to render")
-                .contains("100")
-                .contains("VND");
+        EmailMessage sent = captureSent();
+        assertThat(sent.to()).isEqualTo("customer-1@example.com");
+        assertThat(sent.htmlBody()).contains("100").contains("VND");
+        assertThat(sent.textBody()).contains("100").contains("VND").doesNotContain("<html");
 
-        ArgumentCaptor<Notification> notification = ArgumentCaptor.forClass(Notification.class);
-        verify(notificationRepository).save(notification.capture());
-        assertThat(notification.getValue().getRecipientId()).isEqualTo("customer-1");
-        assertThat(notification.getValue().isRead()).isFalse();
+        Notification notification = captureSavedNotification();
+        assertThat(notification.getRecipientId()).isEqualTo("customer-1");
+        assertThat(notification.isRead()).isFalse();
     }
 
     @Test
@@ -95,64 +97,136 @@ class NotificationDispatchServiceTest {
         BookingCancelledEvent cancelled = new BookingCancelledEvent(
                 "booking-1", "customer-1", "customer-1@example.com", "showtime-1",
                 "customer requested refund", Instant.now());
-        EventEnvelope<BookingCancelledEvent> envelope =
-                EventEnvelope.of(BOOKING_CANCELLED, cancelled, null);
 
-        service.send(envelope.getEventId(), envelope.getEventType(), envelope.getPayload());
+        dispatch(BOOKING_CANCELLED, cancelled);
 
-        ArgumentCaptor<String> to = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
-        verify(emailSenderPort).send(to.capture(), anyString(), body.capture());
-        assertThat(to.getValue()).isEqualTo("customer-1@example.com");
-        assertThat(body.getValue())
-                .doesNotContain("Failed to render")
-                .contains("customer requested refund");
+        EmailMessage sent = captureSent();
+        assertThat(sent.to()).isEqualTo("customer-1@example.com");
+        assertThat(sent.htmlBody()).contains("customer requested refund");
+        assertThat(sent.textBody()).contains("customer requested refund");
     }
 
     @Test
-    void send_accountRegisteredAsProducedInProduction_rendersRealTemplateAndEmailsRegisteredAddress() {
+    void send_accountRegistered_sendsTheWelcomeEmailWithTheVerificationLink() {
         AccountRegisteredEvent registered = new AccountRegisteredEvent(
                 new AccountRegisteredEvent.AccountId("acc-1"),
                 new AccountRegisteredEvent.Email("new-user@example.com"),
                 "test-verification-token",
                 Instant.now());
-        EventEnvelope<AccountRegisteredEvent> envelope =
-                EventEnvelope.of(ACCOUNT_REGISTERED, registered, null);
 
-        service.send(envelope.getEventId(), envelope.getEventType(), envelope.getPayload());
+        dispatch(ACCOUNT_REGISTERED, registered);
 
-        ArgumentCaptor<String> to = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
-        verify(emailSenderPort).send(to.capture(), anyString(), body.capture());
-        assertThat(to.getValue()).isEqualTo("new-user@example.com");
-        assertThat(body.getValue()).doesNotContain("Failed to render");
-        assertThat(body.getValue())
+        EmailMessage sent = captureSent();
+        assertThat(sent.to()).isEqualTo("new-user@example.com");
+        assertThat(sent.htmlBody())
+                .contains("http://localhost:8081/api/v1/auth/verify-email?token=test-verification-token");
+        assertThat(sent.textBody())
                 .contains("http://localhost:8081/api/v1/auth/verify-email?token=test-verification-token");
 
-        ArgumentCaptor<Notification> notification = ArgumentCaptor.forClass(Notification.class);
-        verify(notificationRepository).save(notification.capture());
-        assertThat(notification.getValue().getRecipientId()).isEqualTo("acc-1");
+        assertThat(captureSavedNotification().getRecipientId()).isEqualTo("acc-1");
     }
 
     @Test
-    void send_accountActivatedAsProducedInProduction_rendersRealTemplateAndEmailsTheAccountAddress() {
+    void send_accountActivated_rendersRealTemplateAndEmailsTheAccountAddress() {
         AccountActivatedEvent activated = new AccountActivatedEvent(
                 new AccountActivatedEvent.AccountId("acc-1"),
                 new AccountActivatedEvent.Email("new-user@example.com"),
                 Instant.now());
-        EventEnvelope<AccountActivatedEvent> envelope =
-                EventEnvelope.of(ACCOUNT_ACTIVATED, activated, null);
 
+        dispatch(ACCOUNT_ACTIVATED, activated);
+
+        EmailMessage sent = captureSent();
+        assertThat(sent.to()).isEqualTo("new-user@example.com");
+        assertThat(sent.htmlBody()).contains("acc-1");
+        assertThat(captureSavedNotification().getRecipientId()).isEqualTo("acc-1");
+    }
+
+    @Test
+    void send_paymentSucceeded_emailsTheReceiptToTheAddressCapturedAtInitiation() {
+        Instant paidAt = Instant.parse("2026-08-16T09:30:00Z");
+        PaymentSucceededEvent succeeded = new PaymentSucceededEvent(
+                "pay-1", "booking-9", "buyer@example.com",
+                new BigDecimal("450000"), "VND", "pi_test_123", paidAt);
+
+        dispatch(PAYMENT_SUCCEEDED, succeeded);
+
+        EmailMessage sent = captureSent();
+        assertThat(sent.to()).isEqualTo("buyer@example.com");
+        assertThat(sent.subject()).contains("booking-9");
+        assertThat(sent.htmlBody()).contains("buyer").contains("booking-9").contains("450,000 VND");
+        assertThat(sent.textBody()).contains("450,000 VND").doesNotContain("<html");
+    }
+
+    @Test
+    void send_paymentSucceededWithoutCustomerEmail_isMarkedProcessedWithoutSendingAnything() {
+        PaymentSucceededEvent succeeded = new PaymentSucceededEvent(
+                "pay-1", "booking-9", null,
+                new BigDecimal("450000"), "VND", "pi_test_123", Instant.now());
+
+        EventEnvelope<PaymentSucceededEvent> envelope = EventEnvelope.of(PAYMENT_SUCCEEDED, succeeded, null);
+        when(processedEventRepository.existsByEventId(envelope.getEventId())).thenReturn(false);
         service.send(envelope.getEventId(), envelope.getEventType(), envelope.getPayload());
 
-        ArgumentCaptor<String> to = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
-        verify(emailSenderPort).send(to.capture(), anyString(), body.capture());
-        assertThat(to.getValue()).isEqualTo("new-user@example.com");
-        assertThat(body.getValue()).doesNotContain("Failed to render").contains("acc-1");
+        verifyNoInteractions(emailSenderPort);
+        verify(processedEventRepository).markProcessed(envelope.getEventId(), PAYMENT_SUCCEEDED);
+    }
 
-        ArgumentCaptor<Notification> notification = ArgumentCaptor.forClass(Notification.class);
-        verify(notificationRepository).save(notification.capture());
-        assertThat(notification.getValue().getRecipientId()).isEqualTo("acc-1");
+    @Test
+    void send_passwordResetRequested_emailsTheFrontendResetLinkAndItsExpiry() {
+        PasswordResetRequestedEvent requested = new PasswordResetRequestedEvent(
+                new PasswordResetRequestedEvent.AccountId("acc-7"),
+                new PasswordResetRequestedEvent.Email("forgetful@example.com"),
+                "reset-tok-abc", 30, Instant.now());
+
+        dispatch(PASSWORD_RESET_REQUESTED, requested);
+
+        EmailMessage sent = captureSent();
+        assertThat(sent.to()).isEqualTo("forgetful@example.com");
+        assertThat(sent.htmlBody())
+                .contains("http://localhost:5173/reset-password?token=reset-tok-abc")
+                .contains("30");
+        assertThat(sent.textBody()).contains("http://localhost:5173/reset-password?token=reset-tok-abc");
+    }
+
+    /** A live reset link must never be persisted into a feed that outlives the token. */
+    @Test
+    void send_passwordResetRequested_neverWritesAnInAppNotificationRecord() {
+        PasswordResetRequestedEvent requested = new PasswordResetRequestedEvent(
+                new PasswordResetRequestedEvent.AccountId("acc-7"),
+                new PasswordResetRequestedEvent.Email("forgetful@example.com"),
+                "reset-tok-abc", 30, Instant.now());
+
+        dispatch(PASSWORD_RESET_REQUESTED, requested);
+
+        verify(notificationRepository, never()).save(any());
+    }
+
+    @Test
+    void send_alreadyProcessedEvent_sendsNothingAndDoesNotReMarkIt() {
+        when(processedEventRepository.existsByEventId("evt-1")).thenReturn(true);
+
+        service.send("evt-1", PAYMENT_SUCCEEDED, null);
+
+        verifyNoInteractions(emailSenderPort);
+        verify(processedEventRepository, never()).markProcessed(any(), any());
+    }
+
+    private void dispatch(String topic, Object payload) {
+        EventEnvelope<Object> envelope = EventEnvelope.of(topic, payload, null);
+        when(processedEventRepository.existsByEventId(envelope.getEventId())).thenReturn(false);
+        service.send(envelope.getEventId(), envelope.getEventType(), envelope.getPayload());
+        verify(processedEventRepository).markProcessed(envelope.getEventId(), topic);
+    }
+
+    private EmailMessage captureSent() {
+        ArgumentCaptor<EmailMessage> captor = ArgumentCaptor.forClass(EmailMessage.class);
+        verify(emailSenderPort).send(captor.capture());
+        return captor.getValue();
+    }
+
+    private Notification captureSavedNotification() {
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).save(captor.capture());
+        return captor.getValue();
     }
 }

@@ -334,17 +334,6 @@ services:
       timeout: 10s
       retries: 10
 
-  # ---- Mailpit (SMTP catcher for notification-service's outgoing emails) -----
-  # Web UI at http://localhost:8025 shows every email sent by notification-service —
-  # nothing is actually delivered to a real inbox in local dev.
-  mailpit:
-    image: axllent/mailpit:v1.24
-    container_name: mailpit_stadium_booking
-    networks: [stadium-net]
-    ports:
-      - "1025:1025"
-      - "8025:8025"
-
   # ---- identity-service (auth, JWT issuance, admin bootstrap) ----------
   identity-service:
     build:
@@ -492,8 +481,6 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
-      mailpit:
-        condition: service_started
     ports:
       - "8085:8085"
     environment:
@@ -502,13 +489,14 @@ services:
       DB_USERNAME: ${DB_USERNAME}
       DB_PASSWORD: ${DB_PASSWORD}
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      MAIL_HOST: mailpit
-      MAIL_PORT: 1025
-      MAIL_USERNAME: ${MAIL_USERNAME}
-      MAIL_PASSWORD: ${MAIL_PASSWORD}
       # The verify-email link is opened by the end user's browser, so it must point at the
       # host-mapped port, not identity-service's container DNS name.
       IDENTITY_SERVICE_BASE_URL: http://localhost:8081
+      # Same reasoning for the reset-password link, which lands on a frontend page.
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL}
+      BREVO_API_KEY: ${BREVO_API_KEY}
+      BREVO_SENDER_EMAIL: ${BREVO_SENDER_EMAIL}
+      BREVO_SENDER_NAME: ${BREVO_SENDER_NAME}
       JWT_SECRET: ${JWT_SECRET}
       JWT_PREVIOUS_SECRET: ${JWT_PREVIOUS_SECRET}
       JWT_INTERNAL_SECRET: ${JWT_INTERNAL_SECRET}

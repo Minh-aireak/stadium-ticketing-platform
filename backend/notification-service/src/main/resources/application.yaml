@@ -24,20 +24,24 @@ spring:
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
 
-  mail:
-    host: ${MAIL_HOST}
-    port: ${MAIL_PORT}
-    username: ${MAIL_USERNAME}
-    password: ${MAIL_PASSWORD}
-    properties:
-      mail.smtp.auth: false
-      mail.smtp.starttls.enable: false
-
 server:
   port: 8085
 
 app:
   identity-service-base-url: ${IDENTITY_SERVICE_BASE_URL}
+  # Base URL the reset-password email links to — a frontend page, since submitting a new password
+  # is a POST. Must be browser-reachable, not a docker-internal hostname.
+  frontend-base-url: ${FRONTEND_BASE_URL}
+
+brevo:
+  # No defaults: a missing key or an unverified sender must fail at startup, not silently at the
+  # first send. Sender must be verified in Brevo Dashboard > Senders, Domains & Dedicated IPs.
+  api-key: ${BREVO_API_KEY}
+  sender-email: ${BREVO_SENDER_EMAIL}
+  sender-name: ${BREVO_SENDER_NAME}
+  base-url: ${BREVO_BASE_URL:https://api.brevo.com}
+  connect-timeout-ms: ${BREVO_CONNECT_TIMEOUT_MS:5000}
+  read-timeout-ms: ${BREVO_READ_TIMEOUT_MS:10000}
 
 jwt:
   secret: ${JWT_SECRET}

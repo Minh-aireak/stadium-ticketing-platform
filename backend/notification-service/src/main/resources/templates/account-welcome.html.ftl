@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="utf-8"/>
     <title>Welcome to Stadium Ticketing Platform</title>
     <style>
         body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
@@ -16,7 +17,7 @@
             <h2>Welcome to Stadium Ticketing!</h2>
         </div>
         <div class="content">
-            <p>Hi there,</p>
+            <p>Hi ${customerName},</p>
             <p>Thank you for registering on our platform. Your account (ID: <strong>${accountId}</strong>) is currently pending verification.</p>
             <p>Please confirm <strong>${email}</strong> is your email address by clicking the button below to activate your account:</p>
             <p style="text-align: center;">

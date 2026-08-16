@@ -37,10 +37,10 @@ import java.util.Map;
  *   <li>Trusted packages set to {@code com.aireak.*} for safe polymorphic deserialization.</li>
  *   <li>{@code kafkaErrorHandler} (same shape as booking-service's): retries a failing record
  *       with exponential backoff, then republishes it to a {@code <topic>.DLT} topic instead of
- *       either looping forever or silently dropping it — see {@code EmailSenderPort}/
- *       {@code SmsSenderPort} failures in {@code NotificationDispatchService#dispatch}, which
- *       propagate out of the {@code @KafkaListener} method and previously hit Spring Kafka's
- *       default handler (log-and-skip after a fixed retry count, no DLQ trail).</li>
+ *       either looping forever or silently dropping it. Note that an email <em>delivery</em>
+ *       failure no longer reaches this handler — {@code TransactionalEmailService#sendEmail}
+ *       logs and swallows it deliberately — so what lands on a DLT is a genuine processing fault
+ *       (malformed payload, persistence failure), not a bounced email.</li>
  * </ul>
  *
  * <p>{@code @EnableKafka} is required here: defining {@code kafkaListenerContainerFactory} as a

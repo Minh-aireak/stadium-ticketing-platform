@@ -10,9 +10,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 // jwt.issuer/audience/previous-secret/internal-secret, spring.kafka.bootstrap-servers,
-// spring.mail.* and app.identity-service-base-url back non-defaulted ${...} placeholders in
-// application.yaml — pinned here for the same reason jwt.secret already was (see
-// ApiGatewayApplicationTests).
+// app.*-base-url and brevo.* back non-defaulted ${...} placeholders in application.yaml — pinned
+// here for the same reason jwt.secret already was (see ApiGatewayApplicationTests). The brevo.*
+// values are dummies: this only asserts the context wires up, and no email is sent during it.
 @SpringBootTest
 @Testcontainers
 @TestPropertySource(properties = {
@@ -22,11 +22,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 		"jwt.previous-secret=",
 		"jwt.internal-secret=",
 		"spring.kafka.bootstrap-servers=localhost:9092",
-		"spring.mail.host=localhost",
-		"spring.mail.port=1025",
-		"spring.mail.username=",
-		"spring.mail.password=",
-		"app.identity-service-base-url=http://localhost:8081"
+		"app.identity-service-base-url=http://localhost:8081",
+		"app.frontend-base-url=http://localhost:5173",
+		"brevo.api-key=test-brevo-api-key",
+		"brevo.sender-email=no-reply@stadium.test",
+		"brevo.sender-name=Stadium Ticketing"
 })
 class NotificationServiceApplicationTests {
 
