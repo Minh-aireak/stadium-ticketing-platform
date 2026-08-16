@@ -2,6 +2,11 @@
 # Registers all Debezium outbox connectors against kafka-connect's REST API.
 # Idempotent: a 409 (connector already exists) counts as success, so
 # re-running `docker compose up -d` is always safe.
+#
+# The connector JSONs carry no credentials: they reference
+# ${file:/kafka/connect-secrets/postgres.properties:...}, which Kafka Connect's FileConfigProvider
+# resolves inside the kafka-connect container (see its entrypoint in docker-compose.yaml). This
+# script therefore POSTs each file exactly as it is committed.
 set -e
 
 for f in /connectors/*.json; do

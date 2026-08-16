@@ -278,6 +278,33 @@ services:
       VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
       CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
       CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      # Lets a connector config say ${file:<path>:<key>} instead of embedding a credential.
+      # The connector JSONs in backend/*/infra/debezium/ use it for the Postgres login, so the
+      # only place those live is .env — they used to be hardcoded to aireak/aireak, which meant
+      # changing DB_USERNAME/DB_PASSWORD silently broke CDC for every service.
+      CONNECT_CONFIG_PROVIDERS: file
+      CONNECT_CONFIG_PROVIDERS_FILE_CLASS: org.apache.kafka.common.config.provider.FileConfigProvider
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+    # Writes the secrets file the provider above reads, then hands over to the image's own
+    # entrypoint. It has to happen here rather than in kafka-connect-init because Connect
+    # re-resolves ${file:...} every time it instantiates a connector, including on restart --
+    # so the file must exist for the container's whole life, not just at registration time.
+    # printf writes the values verbatim; only a backslash needs escaping, because
+    # java.util.Properties would otherwise read it as the start of an escape sequence.
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -e
+        umask 077
+        mkdir -p /kafka/connect-secrets
+        esc() { printf '%s' "$$1" | sed 's/\\/\\\\/g'; }
+        {
+          printf 'username=%s\n' "$$(esc "$$DB_USERNAME")"
+          printf 'password=%s\n' "$$(esc "$$DB_PASSWORD")"
+        } > /kafka/connect-secrets/postgres.properties
+        exec /docker-entrypoint.sh start
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8083/connectors"]
       interval: 15s
