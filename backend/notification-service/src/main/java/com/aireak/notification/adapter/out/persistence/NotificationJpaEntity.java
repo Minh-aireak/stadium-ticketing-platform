@@ -30,7 +30,9 @@ public class NotificationJpaEntity extends BaseAuditEntity {
     @Column(name = "title", nullable = false, length = 255)
     private String title;
 
-    @Column(name = "body", nullable = false, length = 2000)
+    // TEXT, not a bounded VARCHAR: this holds the rendered plain-text email body, whose length
+    // follows the event payload (a booking's seat list is not capped anywhere). See V4.
+    @Column(name = "body", nullable = false, columnDefinition = "TEXT")
     private String body;
 
     @Column(name = "read", nullable = false)
