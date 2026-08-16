@@ -101,9 +101,13 @@ ready to serve, not merely that containers launched.
 
 ```bash
 cd backend
-./mvnw verify                       # full reactor: build + all tests
-./mvnw verify -pl booking-service   # a single module
+./mvnw verify                          # full reactor: build + all tests
+./mvnw verify -pl booking-service -am  # a single module (-am matters, see below)
 ```
+
+Always pass `-am` when building one module. Without it Maven resolves `common` from your local
+`~/.m2` copy, which is whatever was last `install`ed — `verify` never installs, so that copy goes
+stale and a service silently builds against an old `common`.
 
 Integration tests use Testcontainers, so a running Docker daemon is required. Infrastructure
 (Postgres, Redis, Kafka) can be brought up on its own with
