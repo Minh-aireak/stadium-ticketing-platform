@@ -27,6 +27,12 @@ WORKDIR /app
 
 COPY --from=build /workspace/booking-service/target/*.jar app.jar
 
+# curl is here only so the container can answer its own docker-compose healthcheck against
+# /actuator/health: eclipse-temurin's JRE image ships neither curl nor wget, and without a
+# healthcheck the only condition other services can depend on is service_started, which says
+# nothing about whether this app can serve a request yet.
+RUN apt-get update  && apt-get install -y --no-install-recommends curl  && rm -rf /var/lib/apt/lists/*
+
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 USER appuser
 

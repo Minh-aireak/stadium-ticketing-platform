@@ -375,6 +375,12 @@ services:
         condition: service_healthy
     ports:
       - "8081:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8081/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
     environment:
       DB_HOST: postgres-identity
       DB_PORT: 5432
@@ -422,6 +428,12 @@ services:
         condition: service_healthy
     ports:
       - "8082:8082"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8082/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
     environment:
       DB_HOST: postgres-catalog
       DB_PORT: 5432
@@ -455,6 +467,13 @@ services:
       # Host 8087 avoids clashing with kafka-connect's 8083; container-internal port and
       # inter-service URLs (ticket-inventory-service:8083) are unchanged.
       - "8087:8083"
+    healthcheck:
+      # Container-internal port (8083), not the 8087 host mapping.
+      test: ["CMD-SHELL", "curl -sf http://localhost:8083/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
     environment:
       DB_HOST: postgres-inventory
       DB_PORT: 5432
@@ -485,6 +504,12 @@ services:
         condition: service_healthy
     ports:
       - "8084:8084"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8084/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
     environment:
       DB_HOST: postgres-payment
       DB_PORT: 5432
@@ -517,6 +542,12 @@ services:
         condition: service_healthy
     ports:
       - "8085:8085"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8085/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
     environment:
       DB_HOST: postgres-notification
       DB_PORT: 5432
@@ -552,11 +583,17 @@ services:
       kafka:
         condition: service_healthy
       ticket-inventory-service:
-        condition: service_started
+        condition: service_healthy
       payment-service:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "8086:8086"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8086/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
     environment:
       DB_HOST: postgres-booking
       DB_PORT: 5432
@@ -585,19 +622,25 @@ services:
       redis:
         condition: service_healthy
       identity-service:
-        condition: service_started
+        condition: service_healthy
       match-catalog-service:
-        condition: service_started
+        condition: service_healthy
       ticket-inventory-service:
-        condition: service_started
+        condition: service_healthy
       payment-service:
-        condition: service_started
+        condition: service_healthy
       notification-service:
-        condition: service_started
+        condition: service_healthy
       booking-service:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
