@@ -9,6 +9,7 @@ import com.aireak.payment.application.port.in.command.InitiatePaymentCommand;
 import com.aireak.payment.domain.model.PaymentStatus;
 import com.aireak.payment.application.port.out.PaymentGatewayPort;
 import com.aireak.payment.application.port.out.PaymentIdempotencyPort;
+import com.aireak.payment.application.port.out.PaymentIdempotencyResult;
 import com.aireak.payment.application.port.out.PaymentReconciliationPort;
 import com.aireak.payment.application.port.out.PaymentRepository;
 import com.aireak.payment.domain.exception.DuplicatePaymentException;
@@ -53,7 +54,6 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
         RefundPaymentUseCase {
 
     private static final String IDEMPOTENCY_KEY_PREFIX = "payment:idempotency:booking:";
-    private static final Duration IDEMPOTENCY_TTL = Duration.ofMinutes(5);
 
     // Short backoff for persisting an already-successful charge — this is retrying our own DB
     // write, not the gateway call, so attempts stay few and fast.
@@ -71,15 +71,14 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
         String bookingId = command.bookingId();
         String idempotencyKey = IDEMPOTENCY_KEY_PREFIX + bookingId;
 
-        // Local-cache fast path: this instance already resolved a paymentId for this key on a
-        // previous attempt (this request or an earlier retry) — skip Redis AND Postgres entirely.
-        Optional<String> cachedPaymentId = idempotencyPort.cachedPaymentId(idempotencyKey);
-        if (cachedPaymentId.isPresent()) {
-            return cachedPaymentId.get();
+        // acquire() checks this instance's local cache before Redis — a Cached result skips
+        // Redis AND Postgres entirely; AlreadyHeld means Redis confirms a duplicate but this
+        // instance doesn't yet know the paymentId, so no DB write is attempted either way.
+        PaymentIdempotencyResult idempotencyResult = idempotencyPort.acquire(idempotencyKey);
+        if (idempotencyResult instanceof PaymentIdempotencyResult.Cached cached) {
+            return cached.paymentId();
         }
-
-        // Redis-confirmed duplicate: fast path, no DB write attempted
-        if (!idempotencyPort.tryAcquire(idempotencyKey, IDEMPOTENCY_TTL)) {
+        if (idempotencyResult instanceof PaymentIdempotencyResult.AlreadyHeld) {
             return existingPaymentIdOrThrow(bookingId, idempotencyKey);
         }
 

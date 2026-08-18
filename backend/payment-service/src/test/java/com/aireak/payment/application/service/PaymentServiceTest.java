@@ -3,6 +3,7 @@ package com.aireak.payment.application.service;
 import com.aireak.payment.application.port.in.command.InitiatePaymentCommand;
 import com.aireak.payment.application.port.out.PaymentGatewayPort;
 import com.aireak.payment.application.port.out.PaymentIdempotencyPort;
+import com.aireak.payment.application.port.out.PaymentIdempotencyResult;
 import com.aireak.payment.application.port.out.PaymentReconciliationPort;
 import com.aireak.payment.application.port.out.PaymentRepository;
 import com.aireak.payment.domain.exception.DuplicatePaymentException;
@@ -14,7 +15,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 
@@ -67,7 +67,7 @@ class PaymentServiceTest {
     @Test
     void executeReturnsExistingPaymentWithoutTouchingSagaStepsWhenIdempotencyGuardAlreadyHeld() {
         newService();
-        when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(false);
+        when(idempotencyPort.acquire(anyString())).thenReturn(new PaymentIdempotencyResult.AlreadyHeld());
         when(paymentRepository.findByBookingId("booking-1"))
                 .thenReturn(Optional.of(existingPayment("payment-1")));
 
@@ -82,7 +82,7 @@ class PaymentServiceTest {
     @Test
     void executeThrowsWhenIdempotencyGuardHeldButNoExistingPaymentFound() {
         newService();
-        when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(false);
+        when(idempotencyPort.acquire(anyString())).thenReturn(new PaymentIdempotencyResult.AlreadyHeld());
         when(paymentRepository.findByBookingId("booking-1")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.execute(COMMAND))
@@ -93,12 +93,11 @@ class PaymentServiceTest {
     @Test
     void executeReturnsCachedPaymentIdWithoutTouchingRedisOrDatabaseOrSagaSteps() {
         newService();
-        when(idempotencyPort.cachedPaymentId(anyString())).thenReturn(Optional.of("payment-1"));
+        when(idempotencyPort.acquire(anyString())).thenReturn(new PaymentIdempotencyResult.Cached("payment-1"));
 
         String paymentId = service.execute(COMMAND);
 
         assertThat(paymentId).isEqualTo("payment-1");
-        verify(idempotencyPort, never()).tryAcquire(any(), any());
         verify(paymentRepository, never()).findByBookingId(any());
         verify(sagaSteps, never()).tryInitiate(any(), any(), any(), any());
         verify(paymentGatewayPort, never()).charge(any(), any(), any());
@@ -107,7 +106,7 @@ class PaymentServiceTest {
     @Test
     void executeReturnsExistingPaymentWhenSagaStepsReportsAlreadyExists() {
         newService();
-        when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(true);
+        when(idempotencyPort.acquire(anyString())).thenReturn(new PaymentIdempotencyResult.Acquired());
         when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.customerEmail()), eq(COMMAND.amount()), eq(COMMAND.currency())))
                 .thenReturn(new PaymentSagaSteps.InitiateOutcome.AlreadyExists());
         when(paymentRepository.findByBookingId("booking-1"))
@@ -123,7 +122,7 @@ class PaymentServiceTest {
     @Test
     void executeChargesGatewayAndMarksSucceededOnSuccess() {
         newService();
-        when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(true);
+        when(idempotencyPort.acquire(anyString())).thenReturn(new PaymentIdempotencyResult.Acquired());
         when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.customerEmail()), eq(COMMAND.amount()), eq(COMMAND.currency())))
                 .thenReturn(new PaymentSagaSteps.InitiateOutcome.Created("payment-1"));
         when(paymentGatewayPort.charge("booking-1", COMMAND.amount(), COMMAND.currency()))
@@ -141,7 +140,7 @@ class PaymentServiceTest {
     @Test
     void executeRetriesPersistingSucceededOutcomeAndStopsOnceItSucceeds() {
         newService();
-        when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(true);
+        when(idempotencyPort.acquire(anyString())).thenReturn(new PaymentIdempotencyResult.Acquired());
         when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.customerEmail()), eq(COMMAND.amount()), eq(COMMAND.currency())))
                 .thenReturn(new PaymentSagaSteps.InitiateOutcome.Created("payment-1"));
         when(paymentGatewayPort.charge("booking-1", COMMAND.amount(), COMMAND.currency()))
@@ -161,7 +160,7 @@ class PaymentServiceTest {
     @Test
     void executeRecordsForManualReconciliationInsteadOfMarkingFailedWhenPersistingSucceededOutcomeKeepsFailing() {
         newService();
-        when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(true);
+        when(idempotencyPort.acquire(anyString())).thenReturn(new PaymentIdempotencyResult.Acquired());
         when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.customerEmail()), eq(COMMAND.amount()), eq(COMMAND.currency())))
                 .thenReturn(new PaymentSagaSteps.InitiateOutcome.Created("payment-1"));
         when(paymentGatewayPort.charge("booking-1", COMMAND.amount(), COMMAND.currency()))
@@ -183,7 +182,7 @@ class PaymentServiceTest {
     @Test
     void executeSwallowsAFailureRecordingForManualReconciliationInsteadOfThrowing() {
         newService();
-        when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(true);
+        when(idempotencyPort.acquire(anyString())).thenReturn(new PaymentIdempotencyResult.Acquired());
         when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.customerEmail()), eq(COMMAND.amount()), eq(COMMAND.currency())))
                 .thenReturn(new PaymentSagaSteps.InitiateOutcome.Created("payment-1"));
         when(paymentGatewayPort.charge("booking-1", COMMAND.amount(), COMMAND.currency()))
@@ -202,7 +201,7 @@ class PaymentServiceTest {
     @Test
     void executeMarksFailedAmbiguousWhenGatewayThrowsGenericException() {
         newService();
-        when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(true);
+        when(idempotencyPort.acquire(anyString())).thenReturn(new PaymentIdempotencyResult.Acquired());
         when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.customerEmail()), eq(COMMAND.amount()), eq(COMMAND.currency())))
                 .thenReturn(new PaymentSagaSteps.InitiateOutcome.Created("payment-1"));
         when(paymentGatewayPort.charge(any(), any(), any()))
@@ -220,7 +219,7 @@ class PaymentServiceTest {
     @Test
     void executeMarksFailedWhenGatewayThrowsPaymentDeclinedException() {
         newService();
-        when(idempotencyPort.tryAcquire(anyString(), any(Duration.class))).thenReturn(true);
+        when(idempotencyPort.acquire(anyString())).thenReturn(new PaymentIdempotencyResult.Acquired());
         when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.customerEmail()), eq(COMMAND.amount()), eq(COMMAND.currency())))
                 .thenReturn(new PaymentSagaSteps.InitiateOutcome.Created("payment-1"));
         when(paymentGatewayPort.charge(any(), any(), any()))
