@@ -13,12 +13,12 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.springframework.test.context.TestPropertySource;
 
 // jwt.issuer/audience/previous-secret/internal-secret, spring.kafka.bootstrap-servers,
-// elasticsearch.* and spring.data.redis.* back non-defaulted ${...} placeholders in application.yaml — pinned here for
-// the same reason jwt.secret already was (see ApiGatewayApplicationTests). elasticsearch.* is
-// still read eagerly by ElasticsearchClientConfig's RestClient @Bean even though
-// ElasticsearchClient itself is mocked below (mocking one bean doesn't skip a separate
-// @Bean method that feeds it); same reasoning for pinning spring.data.redis.* alongside mocking
-// RedissonClient (see BookingServiceApplicationTests).
+// elasticsearch.* and spring.data.redis.* back non-defaulted ${...} placeholders in
+// application.yaml — pinned here for the same reason jwt.secret already was (see
+// ApiGatewayApplicationTests). elasticsearch.* is still read eagerly by
+// ElasticsearchClientConfig's RestClient @Bean even though ElasticsearchClient itself is mocked
+// below (mocking one bean doesn't skip a separate @Bean method that feeds it); same reasoning for
+// pinning spring.data.redis.* alongside mocking RedissonClient (see BookingServiceApplicationTests).
 @SpringBootTest
 @Testcontainers
 @TestPropertySource(properties = {
@@ -31,6 +31,8 @@ import org.springframework.test.context.TestPropertySource;
         "elasticsearch.host=localhost",
         "elasticsearch.port=9200",
         "elasticsearch.scheme=http",
+        "elasticsearch.username=test",
+        "elasticsearch.password=test",
         "spring.data.redis.host=localhost",
         "spring.data.redis.port=6379",
         "spring.data.redis.password="

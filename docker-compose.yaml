@@ -19,8 +19,10 @@ volumes:
   redis_data:
   kafka_data:
   elasticsearch_data:
+  logstash_data:
   prometheus_data:
   grafana_data:
+  app_logs:
 
 x-ticket-inventory-service: &ticket-inventory-service
   build:
@@ -34,6 +36,8 @@ x-ticket-inventory-service: &ticket-inventory-service
       condition: service_healthy
     kafka:
       condition: service_healthy
+  volumes:
+    - app_logs:/var/log/app
   healthcheck:
     test: ["CMD-SHELL", "curl -sf http://localhost:8083/actuator/health"]
     interval: 15s
@@ -73,6 +77,8 @@ x-booking-service: &booking-service
       condition: service_healthy
     payment-service:
       condition: service_healthy
+  volumes:
+    - app_logs:/var/log/app
   healthcheck:
     test: ["CMD-SHELL", "curl -sf http://localhost:8086/actuator/health"]
     interval: 15s
@@ -419,24 +425,129 @@ services:
       - ./backend/match-catalog-service/infra/debezium/catalog-outbox-connector.json:/connectors/catalog-outbox-connector.json:ro
     entrypoint: ["/bin/sh", "/register-connectors.sh"]
 
-  # ---- Elasticsearch (match catalog read model) ------------------------
+  # ---- Elasticsearch (match catalog read model + log store) ------------
+  # 9.5.1 is the current release of the Elastic Stack, and kibana/logstash below are pinned to
+  # the exact same version deliberately: Kibana refuses to start against an Elasticsearch on a
+  # different minor. Bumping this means bumping elasticsearch-java in backend/pom.xml and the
+  # Testcontainers image in ElasticsearchMatchSearchAdapterIntegrationTest too.
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:9.5.1
     container_name: elasticsearch_stadium_booking
     networks: [stadium-net]
     environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
+      # Cluster settings live in infra/elasticsearch/elasticsearch.yml. These two stay here: heap
+      # is a JVM flag, and ELASTIC_PASSWORD is a secret that must not sit in a committed file.
       - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      # Bootstraps the built-in elastic superuser on first start. It is used by nothing except
+      # elasticsearch-init below — the three real clients each get their own scoped account.
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
     ports:
       - "9200:9200"
     volumes:
+      - ./infra/elasticsearch/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
       - elasticsearch_data:/usr/share/elasticsearch/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q 'green\\|yellow'"]
+      # $$ELASTIC_PASSWORD, not ${ELASTIC_PASSWORD}: the single $ form is interpolated by Compose
+      # and would bake the password into the container's inspectable config a second time. The
+      # double $ leaves it for the container's own shell, which reads it from the env above.
+      test: ["CMD-SHELL", "curl -s -u elastic:$$ELASTIC_PASSWORD http://localhost:9200/_cluster/health | grep -q 'green\\|yellow'"]
       interval: 20s
       timeout: 10s
       retries: 10
+
+  # ---- Elasticsearch security init (creates the per-client accounts) ---------
+  # Runs once against a healthy cluster, provisions users/roles, exits. Everything that talks to
+  # Elasticsearch waits on service_completed_successfully rather than merely on the cluster being
+  # healthy, because a healthy cluster with no accounts yet would reject them all with a 401.
+  # See infra/elasticsearch/init-security.sh for why this cannot be done with env vars alone.
+  elasticsearch-init:
+    image: curlimages/curl:8.11.0
+    container_name: elasticsearch-init_stadium_booking
+    networks: [stadium-net]
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+      KIBANA_SYSTEM_PASSWORD: ${KIBANA_SYSTEM_PASSWORD}
+      LOGSTASH_PASSWORD: ${LOGSTASH_PASSWORD}
+      CATALOG_ES_PASSWORD: ${CATALOG_ES_PASSWORD}
+    volumes:
+      - ./infra/elasticsearch/init-security.sh:/init-security.sh:ro
+    entrypoint: ["/bin/sh", "/init-security.sh"]
+
+  # ---- Logstash (ships service logs into Elasticsearch) ----------------
+  # Tails the ECS JSON files the backend services write onto app_logs; pipeline and rationale
+  # live in infra/logstash/pipeline/logstash.conf. Nothing depends on this container: logs are
+  # files, so whatever is written while Logstash is down is picked up when it comes back.
+  logstash:
+    image: docker.elastic.co/logstash/logstash:9.5.1
+    container_name: logstash_stadium_booking
+    networks: [stadium-net]
+    depends_on:
+      elasticsearch-init:
+        condition: service_completed_successfully
+    environment:
+      # Default is 1g, which is more than a single file-to-Elasticsearch pipeline needs and real
+      # money on a machine already running ~20 containers.
+      LS_JAVA_OPTS: "-Xms256m -Xmx256m"
+      # Read by ${...} substitution in the pipeline's elasticsearch output, so the credentials
+      # stay out of the committed logstash.conf. logstash_internal can only append documents to
+      # logs-stadium-* — see infra/elasticsearch/init-security.sh.
+      LOGSTASH_USERNAME: logstash_internal
+      LOGSTASH_PASSWORD: ${LOGSTASH_PASSWORD}
+    ports:
+      # Monitoring API — `curl localhost:9600/_node/stats/pipelines` is how you check whether the
+      # pipeline is running and how many events it has actually shipped.
+      - "9600:9600"
+    volumes:
+      - ./infra/logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+      - ./infra/logstash/pipeline:/usr/share/logstash/pipeline:ro
+      # Read-only: this pipeline consumes the services' logs, it must never write to them.
+      - app_logs:/var/log/app:ro
+      # Holds sincedb (per-file read offsets), so a restart resumes instead of re-indexing
+      # everything on disk.
+      - logstash_data:/usr/share/logstash/data
+    healthcheck:
+      # /_health_report aggregates the pipeline indicators. Two details this has to get right:
+      # the result is captured first, because a bare `curl | grep` reports success whenever grep
+      # matches even if curl itself failed; and it greps for the ABSENCE of red rather than the
+      # presence of green, because a red report still contains green sub-indicators.
+      test: ["CMD-SHELL", "r=$$(curl -sf http://localhost:9600/_health_report) && printf '%s' \"$$r\" | grep -q '\"pipelines\"' && ! printf '%s' \"$$r\" | grep -q '\"status\":\"red\"'"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # ---- Kibana (log search / dashboards over Elasticsearch) -------------
+  # Must stay on the exact same version as elasticsearch above — Kibana validates the cluster
+  # version on startup and refuses to run against a different minor.
+  kibana:
+    image: docker.elastic.co/kibana/kibana:9.5.1
+    container_name: kibana_stadium_booking
+    networks: [stadium-net]
+    depends_on:
+      elasticsearch-init:
+        condition: service_completed_successfully
+    ports:
+      - "5601:5601"
+    environment:
+      # Kibana settings live in infra/kibana/kibana.yml. These stay here: NODE_OPTIONS is a Node
+      # runtime flag (Kibana's heap defaults high for a container only serving log search), and
+      # the password is a secret that must not sit in a committed file.
+      NODE_OPTIONS: --max-old-space-size=768
+      # kibana_system, never elastic: Kibana rejects the superuser at config-validation time,
+      # because a superuser cannot write the system indices Kibana depends on.
+      ELASTICSEARCH_USERNAME: kibana_system
+      ELASTICSEARCH_PASSWORD: ${KIBANA_SYSTEM_PASSWORD}
+    volumes:
+      - ./infra/kibana/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5601/api/status | grep -q '\"level\":\"available\"'"]
+      interval: 20s
+      timeout: 10s
+      retries: 15
+      start_period: 90s
 
   # ---- identity-service (auth, JWT issuance, admin bootstrap) ----------
   identity-service:
@@ -452,6 +563,8 @@ services:
         condition: service_healthy
     ports:
       - "8081:8081"
+    volumes:
+      - app_logs:/var/log/app
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8081/actuator/health"]
       interval: 15s
@@ -459,6 +572,9 @@ services:
       retries: 20
       start_period: 60s
     environment:
+      # Turns on the ECS JSON log file Logstash tails; see the logging block in
+      # this service's application.yaml for why it is set here and not there.
+      LOGGING_FILE_NAME: /var/log/app/identity-service.log
       DB_HOST: postgres-identity
       DB_PORT: 5432
       DB_USERNAME: ${DB_USERNAME}
@@ -499,14 +615,18 @@ services:
     depends_on:
       postgres-catalog:
         condition: service_healthy
-      elasticsearch:
-        condition: service_healthy
+      # Waits for the accounts, not just for a healthy cluster: catalog_service does not exist
+      # until elasticsearch-init has run, and every request would 401 until it does.
+      elasticsearch-init:
+        condition: service_completed_successfully
       kafka:
         condition: service_healthy
       redis:
         condition: service_healthy
     ports:
       - "8082:8082"
+    volumes:
+      - app_logs:/var/log/app
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8082/actuator/health"]
       interval: 15s
@@ -514,6 +634,9 @@ services:
       retries: 20
       start_period: 60s
     environment:
+      # Turns on the ECS JSON log file Logstash tails; see the logging block in
+      # this service's application.yaml for why it is set here and not there.
+      LOGGING_FILE_NAME: /var/log/app/match-catalog-service.log
       DB_HOST: postgres-catalog
       DB_PORT: 5432
       DB_USERNAME: ${DB_USERNAME}
@@ -521,6 +644,9 @@ services:
       ELASTICSEARCH_HOST: elasticsearch
       ELASTICSEARCH_PORT: 9200
       ELASTICSEARCH_SCHEME: http
+      # Scoped to the "matches" index only — this service has no access to the platform's logs.
+      ELASTICSEARCH_USERNAME: catalog_service
+      ELASTICSEARCH_PASSWORD: ${CATALOG_ES_PASSWORD}
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -541,6 +667,11 @@ services:
       - "18083:8083"
     environment:
       <<: *ticket-inventory-service-env
+      # Turns on the ECS JSON log file Logstash tails; see the logging block in
+      # this service's application.yaml for why it is set here and not there.
+      # Per instance, never shared: two JVMs appending to one file interleave half-written
+      # JSON lines and both apply their own rolling policy to it.
+      LOGGING_FILE_NAME: /var/log/app/ticket-inventory-service-1.log
 
   # ---- ticket-inventory-service, instance 2 ----------------------------
   ticket-inventory-service-2:
@@ -550,6 +681,7 @@ services:
       - "28083:8083"
     environment:
       <<: *ticket-inventory-service-env
+      LOGGING_FILE_NAME: /var/log/app/ticket-inventory-service-2.log
 
   # ---- ticket-inventory load balancer ----------------------------------
   # nginx resolves every hostname in an `upstream` block when it loads its config and exits with
@@ -594,6 +726,8 @@ services:
         condition: service_healthy
     ports:
       - "8084:8084"
+    volumes:
+      - app_logs:/var/log/app
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8084/actuator/health"]
       interval: 15s
@@ -601,6 +735,9 @@ services:
       retries: 20
       start_period: 60s
     environment:
+      # Turns on the ECS JSON log file Logstash tails; see the logging block in
+      # this service's application.yaml for why it is set here and not there.
+      LOGGING_FILE_NAME: /var/log/app/payment-service.log
       DB_HOST: postgres-payment
       DB_PORT: 5432
       DB_USERNAME: ${DB_USERNAME}
@@ -634,6 +771,8 @@ services:
         condition: service_healthy
     ports:
       - "8085:8085"
+    volumes:
+      - app_logs:/var/log/app
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8085/actuator/health"]
       interval: 15s
@@ -641,6 +780,9 @@ services:
       retries: 20
       start_period: 60s
     environment:
+      # Turns on the ECS JSON log file Logstash tails; see the logging block in
+      # this service's application.yaml for why it is set here and not there.
+      LOGGING_FILE_NAME: /var/log/app/notification-service.log
       DB_HOST: postgres-notification
       DB_PORT: 5432
       DB_USERNAME: ${DB_USERNAME}
@@ -679,6 +821,9 @@ services:
       - "8086:8086"
     environment:
       <<: *booking-service-env
+      # Turns on the ECS JSON log file Logstash tails; see the logging block in
+      # this service's application.yaml for why it is set here and not there.
+      LOGGING_FILE_NAME: /var/log/app/booking-service.log
 
   # ---- api-gateway (single entrypoint, JWT validation, rate limiting) --
   api-gateway:
@@ -706,6 +851,8 @@ services:
         condition: service_healthy
     ports:
       - "8080:8080"
+    volumes:
+      - app_logs:/var/log/app
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/actuator/health"]
       interval: 15s
@@ -713,6 +860,9 @@ services:
       retries: 20
       start_period: 60s
     environment:
+      # Turns on the ECS JSON log file Logstash tails; see the logging block in
+      # this service's application.yaml for why it is set here and not there.
+      LOGGING_FILE_NAME: /var/log/app/api-gateway.log
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}

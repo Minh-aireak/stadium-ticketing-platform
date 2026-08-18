@@ -1,0 +1,5 @@
+api.http.host: "0.0.0.0"
+  
+pipeline.workers: 2
+pipeline.batch.size: 500
+pipeline.batch.delay: 100

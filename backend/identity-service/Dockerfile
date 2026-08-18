@@ -33,7 +33,16 @@ COPY --from=build /workspace/identity-service/target/*.jar app.jar
 # nothing about whether this app can serve a request yet.
 RUN apt-get update  && apt-get install -y --no-install-recommends curl  && rm -rf /var/lib/apt/lists/*
 
-RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+# UID/GID pinned: all 7 services share the app_logs volume (docker-compose.yaml), and a named
+# volume inherits ownership from whichever image mounts it first — so every image has to agree
+# on appuser's numeric id, or the other six lose write access to their own log file.
+RUN addgroup --system --gid 10001 appgroup && adduser --system --uid 10001 --ingroup appgroup appuser
+
+# Destination of logging.file.name (ECS JSON, tailed by Logstash). The directory has to exist in
+# the image AND be owned by appuser: Docker seeds a fresh named volume from the image path, and
+# a path missing from the image is seeded root-owned — unwritable for a non-root app.
+RUN mkdir -p /var/log/app && chown appuser:appgroup /var/log/app
+
 USER appuser
 
 EXPOSE 8081

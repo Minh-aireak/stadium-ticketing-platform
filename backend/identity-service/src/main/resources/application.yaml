@@ -98,3 +98,22 @@ management:
 logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%X{correlationId}] %-5level %logger{36} - %msg%n"
+  # Console stays human-readable for `docker compose logs`. ECS is Spring Boot's own built-in
+  # structured format (logging.structured.*), so shipping logs to Elasticsearch needs no logging
+  # appender library here — service.name defaults to spring.application.name and the correlationId
+  # MDC entry rides along as a top-level field.
+  #
+  # It applies to the log FILE only, and the file itself is opt-in: docker-compose.yaml sets
+  # LOGGING_FILE_NAME to a path on the shared app_logs volume, which is what Logstash tails
+  # (infra/logstash/pipeline/logstash.conf). Left unset outside Docker on purpose, so local runs
+  # and tests keep logging to the console instead of littering the working directory.
+  structured:
+    format:
+      file: ecs
+  logback:
+    rollingpolicy:
+      # app_logs is shared by all 7 services, so cap each one's footprint. Rolled files are named
+      # *.log.<date>.<i>.gz and deliberately fall outside Logstash's *.log glob.
+      max-file-size: 10MB
+      total-size-cap: 200MB
+      max-history: 3

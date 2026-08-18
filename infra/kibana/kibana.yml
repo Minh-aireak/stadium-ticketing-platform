@@ -1,0 +1,13 @@
+server.host: "0.0.0.0"
+server.shutdownTimeout: "5s"
+monitoring.ui.container.elasticsearch.enabled: true
+
+elasticsearch.hosts: ["http://elasticsearch:9200"]
+
+server.publicBaseUrl: "http://localhost:5601"
+
+# This stack has no Fleet Server / Elastic Agent container -- logs are shipped by Logstash
+# instead (see infra/logstash/). Left enabled, Fleet retries its setup forever and floods the
+# log with "FleetEncryptedSavedObjectEncryptionKeyRequired" warnings because no
+# xpack.encryptedSavedObjects.encryptionKey is configured for a feature nothing here uses.
+xpack.fleet.enabled: false
