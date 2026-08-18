@@ -4,6 +4,7 @@ import com.aireak.common.cache.LocalStringCache;
 import com.aireak.inventory.application.port.out.ShowtimeCatalogPort;
 import com.aireak.inventory.domain.exception.ShowtimeBookingClosedException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -42,6 +43,7 @@ import java.util.Optional;
  * still correctly falls through to the REST call above, which is the same behavior as before this
  * cache existed.
  */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class ShowtimeCatalogRestAdapter implements ShowtimeCatalogPort {
@@ -82,6 +84,11 @@ public class ShowtimeCatalogRestAdapter implements ShowtimeCatalogPort {
         } catch (ShowtimeBookingClosedException exception) {
             throw exception;
         } catch (RestClientException exception) {
+            // Surfaced to the caller as the same domain exception as a real closure (see class
+            // javadoc), so without logging here the two are indistinguishable in ELK — an outage
+            // in catalog-service would look identical to a legitimate "booking closed" rejection.
+            log.error("Failed to verify booking window with match-catalog-service for showtimeId={}: {}",
+                    showtimeId, exception.getMessage(), exception);
             throw new ShowtimeBookingClosedException(showtimeId, exception);
         }
     }

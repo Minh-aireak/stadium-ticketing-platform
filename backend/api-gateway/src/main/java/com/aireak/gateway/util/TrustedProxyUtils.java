@@ -1,5 +1,7 @@
 package com.aireak.gateway.util;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.web.server.ServerWebExchange;
 
@@ -8,6 +10,8 @@ import java.net.InetSocketAddress;
 import java.util.List;
 
 public class TrustedProxyUtils {
+
+    private static final Logger log = LoggerFactory.getLogger(TrustedProxyUtils.class);
 
     private TrustedProxyUtils() {
     }
@@ -114,6 +118,10 @@ public class TrustedProxyUtils {
             }
             return true;
         } catch (Exception e) {
+            // Most likely a malformed entry in gateway.trusted-proxies (bad CIDR syntax or an
+            // unresolvable host) — surfaced here rather than left silent, since a broken entry
+            // otherwise just looks like "never trusted" with no clue as to why.
+            log.warn("Failed to match IP {} against trusted-proxy entry '{}': {}", ip, cidr, e.getMessage());
             return false;
         }
     }

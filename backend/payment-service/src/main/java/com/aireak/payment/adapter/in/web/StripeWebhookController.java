@@ -91,6 +91,9 @@ public class StripeWebhookController {
                 try {
                     return deserializer.deserializeUnsafe();
                 } catch (EventDataObjectDeserializationException e) {
+                    log.warn("Could not deserialize Stripe webhook event payload (unsafe fallback also failed): "
+                                    + "eventId={}, type={}, error={}",
+                            event.getId(), event.getType(), e.getMessage());
                     return null;
                 }
             });

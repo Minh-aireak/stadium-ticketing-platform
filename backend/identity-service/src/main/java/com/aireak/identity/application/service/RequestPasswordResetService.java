@@ -65,6 +65,7 @@ public class RequestPasswordResetService implements RequestPasswordResetUseCase 
         try {
             return accountRepository.findByEmail(new Email(email));
         } catch (InvalidEmailException ex) {
+            log.info("Password reset requested for a malformed email address — nothing sent");
             return Optional.empty();
         }
     }

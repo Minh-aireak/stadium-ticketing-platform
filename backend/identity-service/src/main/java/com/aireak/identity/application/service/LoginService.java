@@ -62,8 +62,11 @@ public class LoginService implements LoginUseCase {
         HashedPassword passwordToCheck = accountOpt.map(Account::getPassword).orElse(dummyHash);
         boolean passwordMatches = passwordHashPort.matches(rawPassword, passwordToCheck);
 
-        var account = accountOpt.orElseThrow(() -> new InvalidCredentialsException(
-                "Invalid credentials")); // intentionally vague — no user enumeration
+        if (accountOpt.isEmpty()) {
+            log.warn("Login rejected: no account for supplied email");
+            throw new InvalidCredentialsException("Invalid credentials"); // intentionally vague — no user enumeration
+        }
+        var account = accountOpt.get();
 
         if (account.getStatus() != AccountStatus.ACTIVE) {
             log.warn("Login rejected: accountId={}, status={}", account.getId(), account.getStatus());
@@ -71,6 +74,7 @@ public class LoginService implements LoginUseCase {
         }
 
         if (!passwordMatches) {
+            log.warn("Login rejected: accountId={}, reason=bad-password", account.getId());
             throw new InvalidCredentialsException("Invalid credentials");
         }
 
