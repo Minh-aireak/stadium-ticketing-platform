@@ -1,5 +1,6 @@
 package com.aireak.booking.config;
 
+import com.aireak.common.web.client.CorrelationIdRequestInitializer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -31,6 +32,9 @@ public class InfraConfig {
         return RestClient.builder()
                 .requestFactory(requestFactory)
                 .defaultHeader("Content-Type", "application/json")
+                // Forwards X-Correlation-Id from the MDC, so the callee logs under the
+                // caller's correlation ID instead of minting a new one.
+                .requestInitializer(new CorrelationIdRequestInitializer())
                 .build();
     }
 
@@ -47,6 +51,9 @@ public class InfraConfig {
         return RestClient.builder()
                 .requestFactory(requestFactory)
                 .defaultHeader("Content-Type", "application/json")
+                // Forwards X-Correlation-Id from the MDC, so the callee logs under the
+                // caller's correlation ID instead of minting a new one.
+                .requestInitializer(new CorrelationIdRequestInitializer())
                 .build();
     }
 }

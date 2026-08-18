@@ -45,6 +45,14 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Kafka concern: CorrelationIdRecordInterceptor (optional — only services with a
+             @KafkaListener pull this; each one already declares spring-kafka itself) -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- JPA concern: BaseAuditEntity (optional — only JPA services pull this) -->
         <dependency>
             <groupId>jakarta.persistence</groupId>

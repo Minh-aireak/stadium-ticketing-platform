@@ -1,6 +1,7 @@
 package com.aireak.notification.config;
 
 import com.aireak.common.event.EventEnvelope;
+import com.aireak.common.kafka.CorrelationIdRecordInterceptor;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -148,6 +149,11 @@ public class KafkaConfig {
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
         factory.setConcurrency(3);
         factory.setCommonErrorHandler(kafkaErrorHandler);
+        // Puts the event's traceId into the MDC for the duration of each record, so the
+        // consumer's log lines carry the same correlationId as the HTTP request that
+        // originally triggered the event.
+        factory.setRecordInterceptor(new CorrelationIdRecordInterceptor());
+
         return factory;
     }
 }
