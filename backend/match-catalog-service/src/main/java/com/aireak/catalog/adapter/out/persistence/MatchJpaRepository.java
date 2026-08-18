@@ -51,4 +51,8 @@ interface MatchJpaRepository extends JpaRepository<MatchJpaEntity, String> {
     @Query(value = "UPDATE showtimes SET available_seats = GREATEST(available_seats - :count, 0) " +
             "WHERE showtime_id = :showtimeId", nativeQuery = true)
     int decrementAvailableSeats(@Param("showtimeId") String showtimeId, @Param("count") int count);
+
+    /** Fresh available_seats value right after {@link #decrementAvailableSeats}, for write-through into Redis. */
+    @Query("SELECT s.availableSeats FROM ShowtimeJpaEntity s WHERE s.showtimeId = :showtimeId")
+    Optional<Integer> findAvailableSeats(@Param("showtimeId") String showtimeId);
 }

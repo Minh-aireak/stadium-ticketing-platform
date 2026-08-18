@@ -52,6 +52,16 @@
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson-spring-boot-starter</artifactId>
+        </dependency>
+        <!-- Guava — backs the local (per-JVM) tier of CachingMatchRepository's match/list cache.
+             common declares Guava optional=true, so each consuming service redeclares it here. -->
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+        </dependency>
         <!-- Elasticsearch Java client for search read model.
              elasticsearch-java 8.18.0 (managed by root pom) — pinned to 8.x to match the
              Elasticsearch server 8.18.3. Uses JacksonJsonpMapper (Jackson 2) with a dedicated
