@@ -24,15 +24,18 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Integration test for ElasticsearchMatchSearchAdapter running elasticsearch-java 9.2.0
- * client against an Elasticsearch 9.2.0 server container using Jackson 3 (tools.jackson.*).
+ * Integration test for ElasticsearchMatchSearchAdapter running elasticsearch-java 9.5.1
+ * client against an Elasticsearch 9.5.1 server container using Jackson 3 (tools.jackson.*).
+ *
+ * <p>Keep this image tag in step with the elasticsearch service in docker-compose.yaml — the
+ * point of the test is to exercise the client against the server version actually deployed.</p>
  */
 @Testcontainers
 class ElasticsearchMatchSearchAdapterIntegrationTest {
 
     @Container
     static final ElasticsearchContainer ELASTICSEARCH =
-            new ElasticsearchContainer("docker.elastic.co/elasticsearch/elasticsearch:9.2.0")
+            new ElasticsearchContainer("docker.elastic.co/elasticsearch/elasticsearch:9.5.1")
                     .withEnv("xpack.security.enabled", "false")
                     .withStartupTimeout(Duration.ofMinutes(3));
 

@@ -12,7 +12,7 @@ import org.springframework.context.annotation.Configuration;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Elasticsearch client configuration using elasticsearch-java 9.2.0.
+ * Elasticsearch client configuration using elasticsearch-java 9.5.1.
  *
  * <p>Uses {@link Jackson3JsonpMapper} aligned with Spring Boot 4.1's Jackson 3
  * ({@code tools.jackson.*}) ecosystem.

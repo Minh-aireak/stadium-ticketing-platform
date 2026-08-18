@@ -37,8 +37,13 @@
         <shedlock.version>7.8.0</shedlock.version>
         <!-- Testcontainers BOM -->
         <testcontainers-bom.version>1.21.0</testcontainers-bom.version>
-        <!-- Elasticsearch Java client 9.2.0 — compatible with Elasticsearch 9.2.0 server & Jackson 3 -->
-        <elasticsearch-java.version>9.2.0</elasticsearch-java.version>
+        <!-- Elasticsearch Java client 9.5.1 — matches the Elasticsearch 9.5.1 server in
+             docker-compose.yaml, and is the newest version published for BOTH co.elastic.clients:
+             elasticsearch-java AND org.elasticsearch.client:elasticsearch-rest-client. That second
+             half is the real constraint: both artifacts below share this one property, and their
+             release sets differ (e.g. elasticsearch-java 9.4.6 exists, elasticsearch-rest-client
+             9.4.6 does not), so a version that only the client publishes breaks resolution. -->
+        <elasticsearch-java.version>9.5.1</elasticsearch-java.version>
 
         <!-- Springdoc OpenAPI 2.8.5 -->
         <springdoc-openapi.version>2.8.5</springdoc-openapi.version>
@@ -144,16 +149,31 @@
                 <version>${springdoc-openapi.version}</version>
             </dependency>
 
-            <!-- Elasticsearch Java client 9.2.0 — standalone read model adapter with Jackson 3. -->
+            <!-- Elasticsearch Java client — standalone read model adapter with Jackson 3. -->
             <dependency>
                 <groupId>co.elastic.clients</groupId>
                 <artifactId>elasticsearch-java</artifactId>
                 <version>${elasticsearch-java.version}</version>
+                <exclusions>
+                    <!-- 9.x made elasticsearch-rest5-client (Apache HttpClient 5) the default
+                         transport, but ElasticsearchClientConfig builds a RestClientTransport,
+                         which runs on the HttpClient 4 based elasticsearch-rest-client declared
+                         below. Without this exclusion both HTTP stacks ship in every image while
+                         only one is ever used. The only class outside the transport.rest5_client
+                         package that touches it is ElasticsearchTransportConfig$Builder — the
+                         ElasticsearchClient.of(...) fluent API, which this codebase does not use,
+                         so nothing ever triggers loading it. Drop this exclusion if a service
+                         switches to Rest5ClientTransport. -->
+                    <exclusion>
+                        <groupId>co.elastic.clients</groupId>
+                        <artifactId>elasticsearch-rest5-client</artifactId>
+                    </exclusion>
+                </exclusions>
             </dependency>
 
             <!-- Low-level REST client required by RestClientTransport (used by ElasticsearchClientConfig).
-                 In 8.x this is a transitive dependency of elasticsearch-java, but declared explicitly
-                 to ensure the version is locked to the same release. -->
+                 It has to be declared explicitly: as of 9.x elasticsearch-java no longer brings a
+                 HttpClient 4 based transport of its own (see the exclusion above). -->
             <dependency>
                 <groupId>org.elasticsearch.client</groupId>
                 <artifactId>elasticsearch-rest-client</artifactId>
