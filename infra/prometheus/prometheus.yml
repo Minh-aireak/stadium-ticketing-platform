@@ -52,7 +52,9 @@ scrape_configs:
   - job_name: ticket-inventory-service
     metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ["ticket-inventory-service:8083"]
+      - targets:
+          - "ticket-inventory-service-1:8083"
+          - "ticket-inventory-service-2:8083"
         labels:
           service: ticket-inventory-service
           application: ticket-inventory-service

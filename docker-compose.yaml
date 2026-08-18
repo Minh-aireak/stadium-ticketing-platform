@@ -22,6 +22,83 @@ volumes:
   prometheus_data:
   grafana_data:
 
+x-ticket-inventory-service: &ticket-inventory-service
+  build:
+    context: ./backend
+    dockerfile: ticket-inventory-service/Dockerfile
+  networks: [stadium-net]
+  depends_on:
+    postgres-inventory:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    kafka:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD-SHELL", "curl -sf http://localhost:8083/actuator/health"]
+    interval: 15s
+    timeout: 5s
+    retries: 20
+    start_period: 60s
+
+x-ticket-inventory-service-env: &ticket-inventory-service-env
+  DB_HOST: postgres-inventory
+  DB_PORT: 5432
+  DB_USERNAME: ${DB_USERNAME}
+  DB_PASSWORD: ${DB_PASSWORD}
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  REDIS_PASSWORD: ${REDIS_PASSWORD}
+  KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  MATCH_CATALOG_SERVICE_URL: http://match-catalog-service:8082
+  JWT_SECRET: ${JWT_SECRET}
+  JWT_PREVIOUS_SECRET: ${JWT_PREVIOUS_SECRET}
+  JWT_INTERNAL_SECRET: ${JWT_INTERNAL_SECRET}
+  JWT_ISSUER: ${JWT_ISSUER}
+  JWT_AUDIENCE: ${JWT_AUDIENCE}
+
+x-booking-service: &booking-service
+  build:
+    context: ./backend
+    dockerfile: booking-service/Dockerfile
+  networks: [stadium-net]
+  depends_on:
+    postgres-booking:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    kafka:
+      condition: service_healthy
+    ticket-inventory-lb:
+      condition: service_healthy
+    payment-service:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD-SHELL", "curl -sf http://localhost:8086/actuator/health"]
+    interval: 15s
+    timeout: 5s
+    retries: 20
+    start_period: 60s
+
+x-booking-service-env: &booking-service-env
+  DB_HOST: postgres-booking
+  DB_PORT: 5432
+  DB_USERNAME: ${DB_USERNAME}
+  DB_PASSWORD: ${DB_PASSWORD}
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  REDIS_PASSWORD: ${REDIS_PASSWORD}
+  KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  # The load balancer, not an instance: booking's saga calls must spread across both
+  # inventory replicas the same way the gateway's do.
+  TICKET_INVENTORY_SERVICE_URL: http://ticket-inventory-lb:8083
+  PAYMENT_SERVICE_URL: http://payment-service:8084
+  JWT_SECRET: ${JWT_SECRET}
+  JWT_PREVIOUS_SECRET: ${JWT_PREVIOUS_SECRET}
+  JWT_INTERNAL_SECRET: ${JWT_INTERNAL_SECRET}
+  JWT_ISSUER: ${JWT_ISSUER}
+  JWT_AUDIENCE: ${JWT_AUDIENCE}
+
 services:
 
   # ---- PostgreSQL — identity-service -----------------------------------
@@ -426,6 +503,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "8082:8082"
     healthcheck:
@@ -443,52 +522,63 @@ services:
       ELASTICSEARCH_PORT: 9200
       ELASTICSEARCH_SCHEME: http
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       JWT_PREVIOUS_SECRET: ${JWT_PREVIOUS_SECRET}
       JWT_INTERNAL_SECRET: ${JWT_INTERNAL_SECRET}
       JWT_ISSUER: ${JWT_ISSUER}
       JWT_AUDIENCE: ${JWT_AUDIENCE}
 
-  # ---- ticket-inventory-service (seat holds, Redisson locks) -----------
-  ticket-inventory-service:
-    build:
-      context: ./backend
-      dockerfile: ticket-inventory-service/Dockerfile
-    container_name: ticket-inventory-service_stadium_booking
+  ticket-inventory-service-1:
+    <<: *ticket-inventory-service
+    container_name: ticket-inventory-service-1_stadium_booking
+    ports:
+      # Direct access, bypassing the load balancer -- for hitting one specific instance while
+      # debugging ("did instance 2 get any of that load?"). Normal traffic goes to 8087.
+      # Host port is <instance number><the service's own port>, so a third instance would be 38083.
+      - "18083:8083"
+    environment:
+      <<: *ticket-inventory-service-env
+
+  # ---- ticket-inventory-service, instance 2 ----------------------------
+  ticket-inventory-service-2:
+    <<: *ticket-inventory-service
+    container_name: ticket-inventory-service-2_stadium_booking
+    ports:
+      - "28083:8083"
+    environment:
+      <<: *ticket-inventory-service-env
+
+  # ---- ticket-inventory load balancer ----------------------------------
+  # nginx resolves every hostname in an `upstream` block when it loads its config and exits with
+  # "host not found in upstream" if one is missing, so it must not start before the instances
+  # exist. Waiting for service_healthy rather than service_started also avoids a window of 502s
+  # while the JVMs boot, and costs nothing: nothing depends on this container that did not
+  # already wait for inventory to be healthy.
+  ticket-inventory-lb:
+    image: nginx:1.27-alpine
+    container_name: ticket-inventory-lb_stadium_booking
     networks: [stadium-net]
     depends_on:
-      postgres-inventory:
+      ticket-inventory-service-1:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-      kafka:
+      ticket-inventory-service-2:
         condition: service_healthy
     ports:
-      # Host 8087 avoids clashing with kafka-connect's 8083; container-internal port and
-      # inter-service URLs (ticket-inventory-service:8083) are unchanged.
+      # Host 8087 avoids clashing with kafka-connect's 8083, and is the same host port the single
+      # ticket-inventory-service container used to publish, so nothing outside compose changes.
       - "8087:8083"
+    volumes:
+      - ./infra/nginx/ticket-inventory-lb.conf:/etc/nginx/conf.d/default.conf:ro
     healthcheck:
-      # Container-internal port (8083), not the 8087 host mapping.
-      test: ["CMD-SHELL", "curl -sf http://localhost:8083/actuator/health"]
+      # nginx:alpine has BusyBox wget but no curl, unlike the service images.
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8083/nginx-health"]
       interval: 15s
       timeout: 5s
-      retries: 20
-      start_period: 60s
-    environment:
-      DB_HOST: postgres-inventory
-      DB_PORT: 5432
-      DB_USERNAME: ${DB_USERNAME}
-      DB_PASSWORD: ${DB_PASSWORD}
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      MATCH_CATALOG_SERVICE_URL: http://match-catalog-service:8082
-      JWT_SECRET: ${JWT_SECRET}
-      JWT_PREVIOUS_SECRET: ${JWT_PREVIOUS_SECRET}
-      JWT_INTERNAL_SECRET: ${JWT_INTERNAL_SECRET}
-      JWT_ISSUER: ${JWT_ISSUER}
-      JWT_AUDIENCE: ${JWT_AUDIENCE}
+      retries: 5
+      start_period: 10s
 
   # ---- payment-service (Stripe charges, refunds) -----------------------
   payment-service:
@@ -518,7 +608,9 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
-      # booking-service is reachable inside stadium-net by its container DNS name.
+      # payment-service is deliberately NOT in booking-service's depends_on -- booking-service
+      # waits on payment-service being healthy, and the reverse edge would be a cycle. This URL
+      # only has to resolve at request time, not at boot.
       BOOKING_SERVICE_URL: http://booking-service:8086
       JWT_SECRET: ${JWT_SECRET}
       JWT_PREVIOUS_SECRET: ${JWT_PREVIOUS_SECRET}
@@ -568,48 +660,25 @@ services:
       JWT_ISSUER: ${JWT_ISSUER}
       JWT_AUDIENCE: ${JWT_AUDIENCE}
 
-  # ---- booking-service (saga orchestration across inventory/payment) --
+  # ---- booking-service (saga orchestration) ----------------------------
+  # A single instance, unlike ticket-inventory-service above. booking has the same ShedLock and
+  # consumer-group machinery, but its contested path -- the Redis idempotency claim on
+  # POST /bookings -- sits behind the bookings.idempotency_key unique index, which rejects a
+  # duplicate however many instances are running. A second booking instance would verify a
+  # guarantee that already holds; a second inventory instance is the only thing standing between a
+  # JVM-local lock and a seat sold twice. Only the second is worth the memory here.
+  #
+  # ShedLock (BookingReconciliationJob, InventoryConfirmationReconciler, OutboxEventCleanupScheduler)
+  # and the three Kafka consumer groups still behave exactly as designed; they are simply
+  # uncontended, so their guards go unexercised at runtime -- see SchedulerLockIntegrationTest for
+  # the unit-level proof.
   booking-service:
-    build:
-      context: ./backend
-      dockerfile: booking-service/Dockerfile
+    <<: *booking-service
     container_name: booking-service_stadium_booking
-    networks: [stadium-net]
-    depends_on:
-      postgres-booking:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      kafka:
-        condition: service_healthy
-      ticket-inventory-service:
-        condition: service_healthy
-      payment-service:
-        condition: service_healthy
     ports:
       - "8086:8086"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8086/actuator/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 20
-      start_period: 60s
     environment:
-      DB_HOST: postgres-booking
-      DB_PORT: 5432
-      DB_USERNAME: ${DB_USERNAME}
-      DB_PASSWORD: ${DB_PASSWORD}
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      TICKET_INVENTORY_SERVICE_URL: http://ticket-inventory-service:8083
-      PAYMENT_SERVICE_URL: http://payment-service:8084
-      JWT_SECRET: ${JWT_SECRET}
-      JWT_PREVIOUS_SECRET: ${JWT_PREVIOUS_SECRET}
-      JWT_INTERNAL_SECRET: ${JWT_INTERNAL_SECRET}
-      JWT_ISSUER: ${JWT_ISSUER}
-      JWT_AUDIENCE: ${JWT_AUDIENCE}
+      <<: *booking-service-env
 
   # ---- api-gateway (single entrypoint, JWT validation, rate limiting) --
   api-gateway:
@@ -625,7 +694,9 @@ services:
         condition: service_healthy
       match-catalog-service:
         condition: service_healthy
-      ticket-inventory-service:
+      # The load balancers, not the instances behind them: a healthy LB already implies both of
+      # its instances passed their healthcheck (that is its own depends_on condition).
+      ticket-inventory-lb:
         condition: service_healthy
       payment-service:
         condition: service_healthy
@@ -647,7 +718,11 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       IDENTITY_SERVICE_URL: http://identity-service:8081
       MATCH_CATALOG_SERVICE_URL: http://match-catalog-service:8082
-      TICKET_INVENTORY_SERVICE_URL: http://ticket-inventory-service:8083
+      # These two are load balancers fronting two instances each (infra/nginx/*.conf); the rest
+      # are single containers addressed by their own DNS name. Spring Cloud Gateway has no
+      # service discovery configured, so it only ever knows the one URI it is given -- which is
+      # exactly why the nginx hop exists.
+      TICKET_INVENTORY_SERVICE_URL: http://ticket-inventory-lb:8083
       PAYMENT_SERVICE_URL: http://payment-service:8084
       NOTIFICATION_SERVICE_URL: http://notification-service:8085
       BOOKING_SERVICE_URL: http://booking-service:8086
