@@ -94,7 +94,11 @@ public class KafkaConfig {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, EventEnvelope<?>>();
         factory.setConsumerFactory(consumerFactory());
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
-        factory.setConcurrency(3);
+        // Tracks the partition count: every topic has 1 partition (docker-compose sets no
+        // KAFKA_NUM_PARTITIONS), and Kafka never hands one partition to two consumers in the
+        // same group, so anything higher only adds idle consumers. Raise this in lockstep with
+        // the partition count, never on its own.
+        factory.setConcurrency(1);
         factory.setCommonErrorHandler(kafkaErrorHandler);
         // Puts the event's traceId into the MDC for the duration of each record, so the
         // consumer's log lines carry the same correlationId as the HTTP request that

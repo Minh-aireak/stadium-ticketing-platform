@@ -134,6 +134,34 @@ Services declare healthchecks against `/actuator/health`, and dependants wait on
 `condition: service_healthy` — so `docker compose up` finishing means the platform is actually
 ready to serve, not merely that containers launched.
 
+### Metrics
+
+Prometheus scrapes `/actuator/prometheus` on every service (both instances of
+`ticket-inventory-service`, each under its own container name) plus four exporters — node, Redis, Postgres and Kafka. Grafana
+auto-loads whatever dashboard JSON sits in `infra/grafana/provisioning/dashboards/`.
+
+Kafka is the one thing measured from outside the application. `kafka-exporter` asks the broker for
+each consumer group's committed offset and each partition's end offset, so **lag stays visible
+while a consumer is down** — precisely when it matters most. The services cannot report this
+themselves: each hand-rolls its `consumerFactory` (for the polymorphic `EventEnvelope`
+deserializer), which makes Spring Boot's Kafka metrics autoconfiguration back off, since it only
+instruments the factory it builds itself.
+
+The *Kafka — Consumer Lag & Partitions* dashboard exists to answer one question: is consumption
+keeping up, and if not, is the partition count what's holding it back? Read "Consumers vs lag by
+group" against "Partitions per topic" — members above the partition count means consumers are
+idling and partitions are the binding constraint; members at or below it with lag still climbing
+means the listener itself is the constraint and more partitions would only multiply pressure on
+the same bottleneck.
+
+Every topic currently runs at **one partition** (the broker default — `KAFKA_NUM_PARTITIONS` is
+deliberately unset), so each service sets `setConcurrency(1)` on its listener factory to match.
+Kafka never assigns one partition to two consumers in the same group, so a higher number would
+only allocate idle consumers, each holding a broker connection and heartbeating for no work. The
+two settings are one decision: raise them together or not at all. Note this caps *consumer*
+parallelism only — HTTP traffic still spreads across both instances of `ticket-inventory-service`,
+and both write to their outbox freely.
+
 ### Logs
 
 Every service logs twice: a human-readable line to stdout (so `docker compose logs` still reads

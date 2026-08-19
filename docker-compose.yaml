@@ -425,6 +425,24 @@ services:
       - ./backend/match-catalog-service/infra/debezium/catalog-outbox-connector.json:/connectors/catalog-outbox-connector.json:ro
     entrypoint: ["/bin/sh", "/register-connectors.sh"]
 
+  # ---- Kafka Exporter (consumer group lag / partition metrics) ---------
+  # Broker-side, not client-side: it asks Kafka itself for each group's committed offset and
+  # each partition's end offset, so lag stays visible even while a consumer is down -- exactly
+  # when you most want to see it. The services' own Micrometer registries cannot report this,
+  # because every service hand-rolls its consumerFactory and Boot's Kafka metrics
+  # autoconfiguration only instruments the factory it builds itself.
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.9.0
+    container_name: kafka-exporter_stadium_booking
+    networks: [stadium-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command:
+      - --kafka.server=kafka:29092
+    ports:
+      - "9308:9308"
+
   # ---- Elasticsearch (match catalog read model + log store) ------------
   # 9.5.1 is the current release of the Elastic Stack, and kibana/logstash below are pinned to
   # the exact same version deliberately: Kibana refuses to start against an Elasticsearch on a

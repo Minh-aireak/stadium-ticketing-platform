@@ -25,6 +25,12 @@ scrape_configs:
         labels:
           service: redis-exporter
 
+  - job_name: kafka-exporter
+    static_configs:
+      - targets: ["kafka-exporter:9308"]
+        labels:
+          service: kafka-exporter
+
   - job_name: api-gateway
     metrics_path: /actuator/prometheus
     static_configs:
