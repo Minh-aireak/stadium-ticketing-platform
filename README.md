@@ -173,7 +173,7 @@ is what to point a Kibana data view at.
 (`ticket-inventory-service-1.log`, `ticket-inventory-service-2.log`) — two JVMs appending to one file
 would interleave half-written JSON lines and each apply its own rolling policy to it. Both files
 carry the same `service.name`, so a Kibana query for the service returns both instances as one
-stream.
+stream; `log.file.path` is the field that tells them apart.
 
 The JSON side is Spring Boot's own `logging.structured.format.file=ecs` — no logging appender
 library is involved — so `service.name` and the `correlationId` MDC entry are already fields you can
