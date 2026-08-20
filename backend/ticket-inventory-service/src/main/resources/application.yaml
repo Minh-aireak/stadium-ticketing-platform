@@ -6,6 +6,13 @@ spring:
     virtual:
       enabled: true
 
+  lifecycle:
+    # Bounds the graceful shutdown configured under server: below. Spring waits this long for
+    # in-flight work -- HTTP requests and the Kafka listener containers alike -- before forcing the
+    # rest down. Comfortably clear of anything holding the 10s seat lock, and deliberately below
+    # docker-compose's stop_grace_period, which has to outlast it or SIGKILL lands mid-drain.
+    timeout-per-shutdown-phase: 30s
+
   datasource:
     url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/inventory_db
     username: ${DB_USERNAME}
@@ -51,6 +58,11 @@ spring:
 
 server:
   port: 8083
+  # Finish in-flight requests instead of dropping them when the container stops. This matters more
+  # on a replicated service than a single one: behind nginx a severed request surfaces as a bare
+  # 502 that says nothing about which side cut it, and restarting one instance at a time is most of
+  # the reason for running two.
+  shutdown: graceful
   tomcat:
     accept-count: 100
 

@@ -44,6 +44,9 @@ x-ticket-inventory-service: &ticket-inventory-service
     timeout: 5s
     retries: 20
     start_period: 60s
+  # Longer than spring.lifecycle.timeout-per-shutdown-phase (30s), so SIGKILL never
+  # arrives while the JVM is still draining. Docker's default is 10s.
+  stop_grace_period: 40s
 
 x-ticket-inventory-service-env: &ticket-inventory-service-env
   DB_HOST: postgres-inventory
@@ -85,6 +88,9 @@ x-booking-service: &booking-service
     timeout: 5s
     retries: 20
     start_period: 60s
+  # Longer than spring.lifecycle.timeout-per-shutdown-phase (30s), so SIGKILL never
+  # arrives while the JVM is still draining. Docker's default is 10s.
+  stop_grace_period: 40s
 
 x-booking-service-env: &booking-service-env
   DB_HOST: postgres-booking
