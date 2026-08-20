@@ -23,7 +23,15 @@ public class RedissonDistributedLockAdapter implements DistributedLockPort {
         RLock lock = redissonClient.getLock(lockKey);
         boolean acquired = false;
         try {
-            acquired = lock.tryLock(waitTime, unit);
+            // Three-arg tryLock, so leaseTime is actually honoured. The two-arg form silently
+            // ignores it and hands the lock to the Redisson watchdog instead, which renews every
+            // ~10s for as long as the JVM lives: an instance that stalls while holding a lock would
+            // block the other one indefinitely, and one that is SIGKILLed would hold it until the
+            // watchdog timeout (~30s) rather than for leaseTime. Releasing early is the safer
+            // failure here -- every path under this lock has a second guard (@Version on the
+            // aggregate, putIfAbsent per key in RedissonSeatHoldAdapter), so a lease that expires
+            // mid-action cannot double-sell a seat.
+            acquired = lock.tryLock(waitTime, leaseTime, unit);
             if (!acquired) {
                 throw new IllegalStateException(
                         "Could not acquire distributed lock for key: " + lockKey +
