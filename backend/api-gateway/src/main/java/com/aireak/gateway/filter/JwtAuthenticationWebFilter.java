@@ -152,7 +152,8 @@ public class JwtAuthenticationWebFilter implements WebFilter, Ordered {
     }
 
     private Mono<Void> unauthorized(ServerWebExchange exchange, String reason) {
-        log.debug("Rejected request to {}: {}", exchange.getRequest().getURI().getPath(), reason);
+        CorrelationIdWebFilter.withCorrelationId(exchange, () ->
+                log.debug("Rejected request to {}: {}", exchange.getRequest().getURI().getPath(), reason));
         org.springframework.http.server.reactive.ServerHttpResponse response = exchange.getResponse();
         response.setStatusCode(HttpStatus.UNAUTHORIZED);
         response.getHeaders().setContentType(org.springframework.http.MediaType.APPLICATION_PROBLEM_JSON);

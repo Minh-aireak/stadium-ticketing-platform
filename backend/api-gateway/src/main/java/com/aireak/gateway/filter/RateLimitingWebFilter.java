@@ -142,7 +142,8 @@ public class RateLimitingWebFilter implements WebFilter, Ordered {
         return limiter.isAllowed(policy.name(), key).flatMap(response -> {
             String remaining = response.getHeaders().get(RedisRateLimiter.REMAINING_HEADER);
             if ("-1".equals(remaining)) {
-                log.warn("Redis unavailable for rate limiter (policy={}, key={}); failing open", policy, key);
+                CorrelationIdWebFilter.withCorrelationId(exchange, () ->
+                        log.warn("Redis unavailable for rate limiter (policy={}, key={}); failing open", policy, key));
                 meterRegistry.counter("gateway.ratelimit.redis.unavailable", "policy", policy.name()).increment();
             }
 

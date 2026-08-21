@@ -61,6 +61,38 @@ public class CorrelationIdWebFilter implements WebFilter, Ordered {
                 .contextWrite(ctx -> ctx.put(MDC_KEY, correlationId));
     }
 
+    /**
+     * Runs {@code logging} with this exchange's correlation ID in the MDC, so a gateway log line
+     * carries the same {@code correlationId} field every downstream service logs — a field Kibana
+     * can filter on, rather than an ID spelled out inside the message text that it cannot.
+     *
+     * <p>Needed because {@link #filter} can only put the ID in the Reactor context: the gateway is
+     * reactive, and a log statement inside a {@code flatMap} (both rate-limit filters log from
+     * Redis's callback thread) runs on a thread that never saw this filter's MDC. Bridging the
+     * Reactor context to the MDC automatically would need {@code io.micrometer:context-propagation}
+     * plus a global {@code Hooks.enableAutomaticContextPropagation()}; with only a handful of log
+     * sites in this service, each one setting and clearing the MDC around its own synchronous call
+     * costs nothing at runtime and adds no dependency.
+     */
+    public static void withCorrelationId(ServerWebExchange exchange, Runnable logging) {
+        String correlationId = exchange.getRequest().getHeaders().getFirst(HEADER_NAME);
+        if (correlationId == null) {
+            // Only reachable when the failure happened before this filter ran: @Order(-100) puts it
+            // ahead of every other gateway filter, but not ahead of an error thrown while the
+            // request itself is being decoded. Log the line untagged rather than dropping it.
+            logging.run();
+            return;
+        }
+        MDC.put(MDC_KEY, correlationId);
+        try {
+            logging.run();
+        } finally {
+            // Netty event-loop and Redisson callback threads are shared across requests, so a
+            // leaked entry would stamp the next request's log lines with this request's ID.
+            MDC.remove(MDC_KEY);
+        }
+    }
+
     private static boolean isValid(String candidate) {
         return candidate != null
                 && candidate.length() <= MAX_INBOUND_LENGTH

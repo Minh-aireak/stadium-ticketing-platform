@@ -53,13 +53,17 @@ public class GatewayExceptionHandler implements ErrorWebExceptionHandler {
         String detail = resolveDetail(status);
         String correlationId = exchange.getRequest().getHeaders().getFirst(CorrelationIdWebFilter.HEADER_NAME);
 
-        if (status.is5xxServerError()) {
-            log.error("Gateway error: path={}, correlationId={}", exchange.getRequest().getURI().getPath(),
-                    correlationId, ex);
-        } else {
-            log.warn("Gateway error: path={}, correlationId={}, reason={}",
-                    exchange.getRequest().getURI().getPath(), correlationId, ex.getMessage());
-        }
+        // The ID goes in the MDC rather than into the message text: the console pattern prints
+        // %X{correlationId} and the ECS file appender promotes it to a top-level field, which is
+        // what makes a Kibana filter join these lines to the downstream service's.
+        CorrelationIdWebFilter.withCorrelationId(exchange, () -> {
+            if (status.is5xxServerError()) {
+                log.error("Gateway error: path={}", exchange.getRequest().getURI().getPath(), ex);
+            } else {
+                log.warn("Gateway error: path={}, reason={}",
+                        exchange.getRequest().getURI().getPath(), ex.getMessage());
+            }
+        });
 
         response.setStatusCode(status);
         response.getHeaders().setContentType(MediaType.APPLICATION_PROBLEM_JSON);

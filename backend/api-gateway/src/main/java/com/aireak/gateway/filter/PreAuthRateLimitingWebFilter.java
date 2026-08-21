@@ -81,7 +81,8 @@ public class PreAuthRateLimitingWebFilter implements WebFilter, Ordered {
         return limiter.isAllowed(RateLimitPolicy.PRE_AUTH_IP.name(), key).flatMap(response -> {
             String remaining = response.getHeaders().get(RedisRateLimiter.REMAINING_HEADER);
             if ("-1".equals(remaining)) {
-                log.warn("Redis unavailable for pre-auth rate limiter (key={}); failing open", key);
+                CorrelationIdWebFilter.withCorrelationId(exchange, () ->
+                        log.warn("Redis unavailable for pre-auth rate limiter (key={}); failing open", key));
                 meterRegistry.counter("gateway.ratelimit.redis.unavailable", "policy",
                         RateLimitPolicy.PRE_AUTH_IP.name()).increment();
             }
