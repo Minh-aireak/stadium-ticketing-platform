@@ -1,5 +1,7 @@
 import { isAxiosError } from 'axios'
 
+import { CORRELATION_ID_HEADER } from '@/lib/api'
+
 // Backend errors follow RFC 7807 ProblemDetail (see common/GlobalExceptionHandler):
 // { type, title, status, detail, timestamp }. `detail` is the human-readable message.
 //
@@ -17,9 +19,33 @@ export function getErrorMessage(
       return formatRateLimitMessage(error.response)
     }
     const detail = error.response?.data?.detail
-    if (typeof detail === 'string' && detail.length > 0) return detail
+    if (typeof detail === 'string' && detail.length > 0) return appendCorrelationId(error, detail)
   }
-  return fallback
+  return appendCorrelationId(error, fallback)
+}
+
+/**
+ * The correlation ID this request was logged under, from the response header the gateway always
+ * sets, falling back to the ID the request itself carried (present even on a response the browser
+ * refuses to expose headers for).
+ */
+export function getCorrelationId(error: unknown): string | undefined {
+  if (!isAxiosError(error)) return undefined
+  const fromResponse = error.response?.headers?.['x-correlation-id']
+  if (typeof fromResponse === 'string' && fromResponse.length > 0) return fromResponse
+  const fromRequest = error.config?.headers?.get?.(CORRELATION_ID_HEADER)
+  return typeof fromRequest === 'string' && fromRequest.length > 0 ? fromRequest : undefined
+}
+
+// Only on 5xx: the failure is then on the server side and someone has to go and read the logs,
+// which the ID turns into a single Kibana filter across every service the request touched. A 4xx
+// is a domain answer the user can act on themselves, and a code next to it is just noise. Absent
+// entirely on a network error, where the request may never have reached a server that logged it.
+function appendCorrelationId(error: unknown, message: string): string {
+  const status = isAxiosError(error) ? error.response?.status : undefined
+  if (status === undefined || status < 500) return message
+  const correlationId = getCorrelationId(error)
+  return correlationId ? `${message} (Mã lỗi: ${correlationId})` : message
 }
 
 function formatRateLimitMessage(response: { data?: unknown; headers?: Record<string, unknown> }): string {

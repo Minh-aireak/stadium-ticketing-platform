@@ -39,9 +39,14 @@ public class CorsConfig {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(corsProperties.allowedOrigins());
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        // X-Correlation-Id has to be listed on both sides: allowed so the browser's preflight lets
+        // the frontend send its own ID (CorrelationIdWebFilter keeps it when it is a valid UUID v4),
+        // exposed so the frontend can read the ID back off an error response and show it to the
+        // user. Without the expose entry the browser hides the header from JavaScript even though
+        // the gateway always sets it.
         configuration.setAllowedHeaders(List.of(
-                "Authorization", "Content-Type", "X-XSRF-TOKEN", "Idempotency-Key"));
-        configuration.setExposedHeaders(List.of("X-XSRF-TOKEN"));
+                "Authorization", "Content-Type", "X-XSRF-TOKEN", "Idempotency-Key", "X-Correlation-Id"));
+        configuration.setExposedHeaders(List.of("X-XSRF-TOKEN", "X-Correlation-Id"));
         configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
