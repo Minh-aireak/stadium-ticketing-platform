@@ -1,7 +1,6 @@
 package com.aireak.catalog.adapter.out.persistence;
 
 import com.aireak.catalog.domain.model.MatchStatus;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -9,37 +8,63 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
+/**
+ * Read strategy here follows one rule: <b>JOIN FETCH for a single root, IN for many roots.</b>
+ *
+ * <p>A collection fetch join costs two things that both scale with the number of roots. It repeats
+ * every root column once per child row on the wire, and — worse — it makes SQL pagination
+ * impossible: Hibernate cannot apply {@code LIMIT}/{@code OFFSET} without truncating some root's
+ * collection, so it falls back to loading the entire result set and paginating in memory
+ * ({@code HHH000104}). With one root neither cost exists, so {@link #findByIdWithShowtimes} keeps
+ * its fetch join; the multi-root reads below load roots and showtimes as two queries instead.
+ *
+ * <p>No {@code DISTINCT} anywhere: since Hibernate 6 root entities are de-duplicated in memory
+ * automatically, so writing {@code DISTINCT} in JPQL only pushes a real {@code SELECT DISTINCT}
+ * down to Postgres, making it sort/hash-unique the very rows the join just widened.
+ */
 interface MatchJpaRepository extends JpaRepository<MatchJpaEntity, String> {
 
-    /**
-     * JOIN FETCH avoids the N+1 that a plain {@code findById} + lazy {@code getShowtimes()}
-     * would cause (one extra showtimes query per match hydrated) — moot for a single match here,
-     * but keeps this repository's two read paths consistent with {@link #findByStatus}.
-     */
+    /** Single root — the fetch join costs one extra copy of a ~110-byte row per showtime, and no pagination is involved. */
     @Query("SELECT m FROM MatchJpaEntity m LEFT JOIN FETCH m.showtimes WHERE m.matchId = :matchId")
     Optional<MatchJpaEntity> findByIdWithShowtimes(@Param("matchId") String matchId);
 
-    @Query("SELECT DISTINCT m FROM MatchJpaEntity m JOIN FETCH m.showtimes s " +
-            "WHERE s.showtimeId = :showtimeId")
+    @Query("SELECT m FROM MatchJpaEntity m JOIN FETCH m.showtimes s WHERE s.showtimeId = :showtimeId")
     Optional<MatchJpaEntity> findByShowtimeId(@Param("showtimeId") String showtimeId);
 
     /**
-     * JOIN FETCH loads every match's showtimes in this one query instead of one lazy-load query
-     * per match on the page (the N+1 {@code toDomain()} used to trigger). DISTINCT drops the
-     * row-per-showtime duplication the join introduces; {@code countQuery} avoids counting once
-     * per showtime instead of once per match.
+     * Roots only, so {@code LIMIT}/{@code OFFSET} actually reaches SQL and a page request reads
+     * one page instead of the whole status set. Showtimes arrive via
+     * {@link #findShowtimesByMatchIdIn}.
      *
-     * <p>Hibernate applies pagination in-memory for a collection fetch join (it can't do
-     * {@code LIMIT}/{@code OFFSET} in SQL against a one-to-many join), so this loads every match
-     * in the given status before paginating in Java. Acceptable at the catalog sizes this service
-     * expects (single-digit thousands of matches); revisit with a two-query
-     * (paginate-ids-then-fetch) approach if that stops being true.
+     * <p>Returns {@code List}, not {@code Page}, on purpose: a {@code Page} return type makes
+     * Spring Data run a COUNT alongside the content query, and nothing here consumes it — the
+     * caller wants the rows, and a total comes from {@link #countByStatus} when it is actually
+     * asked for. {@code Pageable} still applies the limit/offset either way.
      */
-    @Query(value = "SELECT DISTINCT m FROM MatchJpaEntity m LEFT JOIN FETCH m.showtimes WHERE m.status = :status",
-            countQuery = "SELECT COUNT(m) FROM MatchJpaEntity m WHERE m.status = :status")
-    Page<MatchJpaEntity> findByStatusWithShowtimes(@Param("status") MatchStatus status, Pageable pageable);
+    List<MatchJpaEntity> findByStatus(MatchStatus status, Pageable pageable);
+
+    /** Roots for an explicit id set — the batch form of {@link #findByIdWithShowtimes}. */
+    List<MatchJpaEntity> findByMatchIdIn(Collection<String> matchIds);
+
+    /**
+     * Second half of every multi-root read: all showtimes for a page of matches in one
+     * {@code WHERE match_id IN (...)}, index-backed by {@code idx_showtimes_match}. Ordered so a
+     * match's showtimes come out chronologically instead of in whatever order Postgres returns.
+     */
+    @Query("SELECT s FROM ShowtimeJpaEntity s WHERE s.matchId IN :matchIds ORDER BY s.startTime ASC")
+    List<ShowtimeJpaEntity> findShowtimesByMatchIdIn(@Param("matchIds") Collection<String> matchIds);
+
+    /**
+     * Ids only — no join, no entity hydration. The id-list cache in {@code CachingMatchRepository}
+     * needs nothing else, and used to obtain these by fetch-joining every match of the status
+     * together with all its showtimes and then discarding everything but the id.
+     */
+    @Query("SELECT m.matchId FROM MatchJpaEntity m WHERE m.status = :status ORDER BY m.createdAt DESC")
+    List<String> findIdsByStatus(@Param("status") MatchStatus status);
 
     long countByStatus(MatchStatus status);
 

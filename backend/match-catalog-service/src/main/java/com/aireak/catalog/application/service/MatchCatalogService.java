@@ -25,7 +25,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -130,10 +129,13 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
             // MatchSearchPort) and can go stale after a match completes/cancels (the index is
             // only ever written on publish()), so every hit is re-read from the write-side JPA
             // repository for full showtime data and re-filtered to currently-PUBLISHED.
+            //
+            // Re-read as ONE batch, not one findById per hit: findAllByIds keeps the hits in
+            // relevance order and drops ids that no longer resolve, so the only thing lost versus
+            // the old per-hit loop is the query-per-hit.
             MatchSearchPort.SearchResult searchResult = matchSearchPort.search(query, page, size);
-            List<Match> items = searchResult.matches().stream()
-                    .map(hit -> matchRepository.findById(hit.getMatchId()).orElse(null))
-                    .filter(Objects::nonNull)
+            List<String> hitIds = searchResult.matches().stream().map(Match::getMatchId).toList();
+            List<Match> items = matchRepository.findAllByIds(hitIds).stream()
                     .filter(m -> m.getStatus() == MatchStatus.PUBLISHED)
                     .toList();
             return new MatchPage(items, searchResult.totalHits(), page, size);

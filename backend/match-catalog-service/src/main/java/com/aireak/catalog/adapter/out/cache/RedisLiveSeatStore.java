@@ -8,6 +8,9 @@ import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -29,18 +32,43 @@ public class RedisLiveSeatStore implements LiveSeatAvailabilityPort {
 
     @Override
     public void publish(String showtimeId, int availableSeats) {
-        redissonClient.<String>getBucket(KEY_PREFIX + showtimeId).set(String.valueOf(availableSeats), TTL);
+        RBucket<String> bucket = redissonClient.getBucket(KEY_PREFIX + showtimeId);
+        bucket.set(String.valueOf(availableSeats), TTL);
     }
 
-    /** Fails open (empty) on any Redis error — callers fall back to whatever seat count they already have. */
+    /**
+     * One MGET for the whole batch. Fails open (empty map) on any Redis error — callers fall back
+     * to the seat counts they already have.
+     */
     @Override
-    public Optional<Integer> get(String showtimeId) {
+    public Map<String, Integer> getAll(Collection<String> showtimeIds) {
+        if (showtimeIds.isEmpty()) {
+            return Map.of();
+        }
+        String[] keys = showtimeIds.stream().distinct().map(id -> KEY_PREFIX + id).toArray(String[]::new);
         try {
-            RBucket<String> bucket = redissonClient.getBucket(KEY_PREFIX + showtimeId);
-            return Optional.ofNullable(bucket.get()).map(Integer::parseInt);
+            Map<String, String> raw = redissonClient.getBuckets().get(keys);
+            Map<String, Integer> counts = HashMap.newHashMap(raw.size());
+            raw.forEach((key, value) -> parseSeatCount(key, value)
+                    .ifPresent(seats -> counts.put(key.substring(KEY_PREFIX.length()), seats)));
+            return counts;
         } catch (Exception e) {
-            log.warn("Redis read failed for live seat count, falling back to cached/DB value: showtimeId={}, error={}",
-                    showtimeId, e.getMessage());
+            log.warn("Redis read failed for live seat counts, falling back to cached/DB values: count={}, error={}",
+                    keys.length, e.getMessage());
+            return Map.of();
+        }
+    }
+
+    // Parsed per key rather than letting one unparseable value abort the batch: a single corrupt
+    // key should cost that one showtime its live count, not the whole page's.
+    private Optional<Integer> parseSeatCount(String key, String value) {
+        if (value == null) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(Integer.parseInt(value));
+        } catch (NumberFormatException e) {
+            log.warn("Discarding unparseable live seat count: key={}, value={}", key, value);
             return Optional.empty();
         }
     }

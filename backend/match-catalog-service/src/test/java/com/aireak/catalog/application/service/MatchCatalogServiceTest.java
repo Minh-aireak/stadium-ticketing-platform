@@ -247,7 +247,7 @@ class MatchCatalogServiceTest {
                 MatchStatus.PUBLISHED, hydrated.getCreatedAt(), hydrated.getShowtimes());
         when(matchSearchPort.search("Home", 0, 20))
                 .thenReturn(new MatchSearchPort.SearchResult(List.of(stub), 1));
-        when(matchRepository.findById("match-1")).thenReturn(Optional.of(hydratedPublished));
+        when(matchRepository.findAllByIds(List.of("match-1"))).thenReturn(List.of(hydratedPublished));
 
         ListMatchesUseCase.MatchPage page = service.listMatches("Home", 0, 20);
 
@@ -262,7 +262,7 @@ class MatchCatalogServiceTest {
         Match match2 = publishedStub("match-2");
         when(matchSearchPort.search("Home", 1, 1))
                 .thenReturn(new MatchSearchPort.SearchResult(List.of(match2), 3));
-        when(matchRepository.findById("match-2")).thenReturn(Optional.of(match2));
+        when(matchRepository.findAllByIds(List.of("match-2"))).thenReturn(List.of(match2));
 
         ListMatchesUseCase.MatchPage page = service.listMatches("Home", 1, 1);
 
@@ -285,11 +285,27 @@ class MatchCatalogServiceTest {
                 MatchStatus.CANCELLED, Instant.now(), List.of());
         when(matchSearchPort.search("Home", 0, 20))
                 .thenReturn(new MatchSearchPort.SearchResult(List.of(stub), 1));
-        when(matchRepository.findById("match-1")).thenReturn(Optional.of(nowCancelled));
+        when(matchRepository.findAllByIds(List.of("match-1"))).thenReturn(List.of(nowCancelled));
 
         ListMatchesUseCase.MatchPage page = service.listMatches("Home", 0, 20);
 
         assertThat(page.items()).isEmpty();
+    }
+
+    @Test
+    void listMatchesWithQueryRehydratesEveryHitInOneRepositoryCall() {
+        List<Match> hits = List.of(publishedStub("match-1"), publishedStub("match-2"), publishedStub("match-3"));
+        when(matchSearchPort.search("Home", 0, 20))
+                .thenReturn(new MatchSearchPort.SearchResult(hits, 3));
+        when(matchRepository.findAllByIds(List.of("match-1", "match-2", "match-3"))).thenReturn(hits);
+
+        ListMatchesUseCase.MatchPage page = service.listMatches("Home", 0, 20);
+
+        // Relevance order from Elasticsearch survives the re-read.
+        assertThat(page.items()).extracting(Match::getMatchId)
+                .containsExactly("match-1", "match-2", "match-3");
+        // The N+1 guard: three hits, one re-read — not one findById per hit.
+        verify(matchRepository, never()).findById(any());
     }
 
     @Test
