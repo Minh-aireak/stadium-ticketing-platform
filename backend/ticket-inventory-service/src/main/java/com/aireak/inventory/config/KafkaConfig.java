@@ -1,6 +1,8 @@
 package com.aireak.inventory.config;
 
 import com.aireak.common.event.EventEnvelope;
+import com.aireak.common.kafka.CorrelationIdRecordInterceptor;
+import com.aireak.common.kafka.DeadLetterCorrelationIdRecordInterceptor;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -102,6 +104,11 @@ public class KafkaConfig {
         // the partition count, never on its own.
         factory.setConcurrency(1);
         factory.setCommonErrorHandler(kafkaErrorHandler);
+        // Restores the publishing request's correlation ID from EventEnvelope.traceId into the MDC
+        // for the duration of each record, so the consumers below log under the same ID as the HTTP
+        // request that caused the event. Without it this service is the one asynchronous hop with
+        // no correlation ID at all — exactly the catalog -> inventory seat-generation path.
+        factory.setRecordInterceptor(new CorrelationIdRecordInterceptor());
         return factory;
     }
 
@@ -130,6 +137,10 @@ public class KafkaConfig {
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(deadLetterConsumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        // Reads the correlation ID straight out of the raw JSON, since this factory is String-typed
+        // on purpose: the line a dead-letter listener logs is the one that says a message died for
+        // good, and the one most worth tracing back to the request that produced it.
+        factory.setRecordInterceptor(new DeadLetterCorrelationIdRecordInterceptor());
         return factory;
     }
 }

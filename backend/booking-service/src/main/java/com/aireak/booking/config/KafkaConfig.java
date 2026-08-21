@@ -2,6 +2,7 @@ package com.aireak.booking.config;
 
 import com.aireak.common.event.EventEnvelope;
 import com.aireak.common.kafka.CorrelationIdRecordInterceptor;
+import com.aireak.common.kafka.DeadLetterCorrelationIdRecordInterceptor;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -132,6 +133,10 @@ public class KafkaConfig {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, String>();
         factory.setConsumerFactory(deadLetterConsumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        // Reads the correlation ID straight out of the raw JSON, since this factory is String-typed
+        // on purpose: the line a dead-letter listener logs is the one that says a message died for
+        // good, and the one most worth tracing back to the request that produced it.
+        factory.setRecordInterceptor(new DeadLetterCorrelationIdRecordInterceptor());
         return factory;
     }
 }
