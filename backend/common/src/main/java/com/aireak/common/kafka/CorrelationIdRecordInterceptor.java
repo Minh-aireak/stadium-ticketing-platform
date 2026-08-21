@@ -32,10 +32,10 @@ public class CorrelationIdRecordInterceptor implements RecordInterceptor<String,
         EventEnvelope<?> envelope = record.value();
         String traceId = envelope != null ? envelope.getTraceId() : null;
 
-        // A blank traceId is normal rather than exceptional: events published by @Scheduled work
-        // (the reconcilers, outbox cleanup) never had an HTTP request to inherit one from. Minting
-        // one keeps every consumed record traceable as a unit, instead of leaving those log lines
-        // with no correlation ID at all.
+        // Rare now that CorrelationIdSchedulingConfig gives each @Scheduled run its own ID, which
+        // the outbox picks up: an event published by a reconciler carries one just as a request-born
+        // event does. Minting one for whatever is left keeps every consumed record traceable as a
+        // unit, instead of leaving those log lines with no correlation ID at all.
         if (traceId == null || traceId.isBlank()) {
             traceId = UUID.randomUUID().toString();
         }

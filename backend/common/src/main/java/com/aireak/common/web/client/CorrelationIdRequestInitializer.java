@@ -23,9 +23,10 @@ public class CorrelationIdRequestInitializer implements ClientHttpRequestInitial
     @Override
     public void initialize(ClientHttpRequest request) {
         String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
-        // Absent on calls made off a @Scheduled thread (reconcilers), which never had a request to
-        // inherit from. Send nothing rather than a placeholder: the callee then mints its own ID,
-        // which is the honest representation of a chain that genuinely started there.
+        // Absent only where nothing put an ID in the MDC — no longer the case for @Scheduled work,
+        // which CorrelationIdSchedulingConfig now covers. Send nothing rather than a placeholder:
+        // the callee then mints its own ID, which is the honest representation of a chain that
+        // genuinely started there.
         if (correlationId != null && !correlationId.isBlank()) {
             request.getHeaders().set(CorrelationIdFilter.CORRELATION_ID_HEADER, correlationId);
         }
