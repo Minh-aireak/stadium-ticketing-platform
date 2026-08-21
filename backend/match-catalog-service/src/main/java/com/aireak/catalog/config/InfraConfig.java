@@ -1,5 +1,6 @@
 package com.aireak.catalog.config;
 
+import com.aireak.common.concurrent.MdcPropagatingTaskDecorator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
@@ -23,6 +24,10 @@ public class InfraConfig {
         executor.setMaxPoolSize(4);
         executor.setQueueCapacity(100);
         executor.setThreadNamePrefix("match-search-index-");
+        // Keeps the publishing request's correlation ID on the indexing thread. The index write has
+        // no retry, so its failure log is the only record that a match never reached Elasticsearch —
+        // untagged, that line cannot be tied back to the publish that should have produced it.
+        executor.setTaskDecorator(new MdcPropagatingTaskDecorator());
         executor.initialize();
         return executor;
     }
