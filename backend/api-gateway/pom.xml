@@ -69,6 +69,13 @@
         </dependency>
 
         <!-- Lombok -->
+        <!-- Guava — backs LocalIpTokenBucketLimiter's bounded per-IP bucket map (size cap plus
+             idle expiry, and an injectable Ticker so tests advance time instead of sleeping).
+             common declares Guava optional=true, so each consuming service redeclares it here. -->
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>

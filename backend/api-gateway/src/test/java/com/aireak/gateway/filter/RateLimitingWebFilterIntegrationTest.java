@@ -18,6 +18,7 @@ import reactor.core.publisher.Mono;
 
 import java.net.InetSocketAddress;
 import java.time.Duration;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -26,6 +27,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * the same "test against real infra, not a mock" pattern this project already uses for
  * Postgres. Downstream service URLs are dummy values: this test never reaches the routing
  * layer, only the filter.
+ *
+ * <p>Also the place where the split between the two rate limiters is checked against real Redis:
+ * {@link PreAuthRateLimitingWebFilter} must reach it zero times, this filter must still reach it
+ * every time.
  */
 // Deliberately not WebEnvironment.NONE: Spring Cloud Gateway's NettyConfiguration unconditionally
 // needs a ServerProperties bean, which Boot only registers when a reactive web app context
@@ -62,6 +67,9 @@ class RateLimitingWebFilterIntegrationTest {
 
     @Autowired
     private RateLimitingWebFilter filter;
+
+    @Autowired
+    private PreAuthRateLimitingWebFilter preAuthFilter;
 
     @Test
     void healthEndpointIsNeverRateLimited() {
@@ -143,6 +151,64 @@ class RateLimitingWebFilterIntegrationTest {
                         .build());
         filter.filter(denied, ex -> Mono.empty()).block(Duration.ofSeconds(5));
         assertThat(denied.getResponse().getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    /**
+     * The pre-auth guard runs on every inbound request, so its Redis cost was paid on every
+     * request too. It now keeps its bucket in-process; this pins that there is nothing left to
+     * roll back to, measured at Redis itself rather than by trusting the wiring.
+     */
+    @Test
+    void preAuthFilterReachesRedisZeroTimesWhilePostAuthFilterStillDoes() throws Exception {
+        InetSocketAddress client = new InetSocketAddress("203.0.113.40", 44345);
+        resetRedisCommandStats();
+
+        for (int i = 0; i < 5; i++) {
+            MockServerWebExchange exchange = bookingRequest(client);
+            preAuthFilter.filter(exchange, ex -> Mono.empty()).block(Duration.ofSeconds(5));
+            assertThat(exchange.getResponse().getStatusCode()).isNull();
+        }
+
+        assertThat(redisScriptCalls()).isZero();
+
+        // Control, so a zero above means "the pre-auth bucket is local" and not "the probe is
+        // broken": the post-auth filter on the same path still runs its token bucket in Redis.
+        filter.filter(bookingRequest(client), ex -> Mono.empty()).block(Duration.ofSeconds(5));
+
+        assertThat(redisScriptCalls()).isPositive();
+    }
+
+    private static MockServerWebExchange bookingRequest(InetSocketAddress remote) {
+        return MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/bookings/1")
+                        .remoteAddress(remote)
+                        .build());
+    }
+
+    private static void resetRedisCommandStats() throws Exception {
+        redis.execInContainer("redis-cli", "-a", "test-redis-password", "CONFIG", "RESETSTAT");
+    }
+
+    /**
+     * Both rate limiters run their token bucket as a Lua script, so EVAL/EVALSHA call counts are
+     * the exact signal wanted here — and they ignore the connection keepalive traffic Redisson
+     * and Lettuce generate in the background regardless of what the filters do.
+     *
+     * <p>The pattern is anchored on the leading {@code calls=}: an INFO line also carries
+     * {@code rejected_calls} and {@code failed_calls}, which an unanchored match happily reads
+     * instead.
+     */
+    private static final Pattern EVAL_CALLS =
+            Pattern.compile("^cmdstat_eval[^:]*:calls=(\\d+)");
+
+    private static long redisScriptCalls() throws Exception {
+        String info = redis.execInContainer(
+                "redis-cli", "-a", "test-redis-password", "INFO", "commandstats").getStdout();
+        return info.lines()
+                .map(EVAL_CALLS::matcher)
+                .filter(java.util.regex.Matcher::find)
+                .mapToLong(matcher -> Long.parseLong(matcher.group(1)))
+                .sum();
     }
 
     private static MockServerWebExchange loginRequest(InetSocketAddress remote, String userId) {

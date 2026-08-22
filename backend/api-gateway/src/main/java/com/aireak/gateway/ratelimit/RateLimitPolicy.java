@@ -16,7 +16,9 @@ public enum RateLimitPolicy {
     // hammering a protected route with garbage/expired bearer tokens, since such requests are
     // rejected with 401 before they ever reach the per-route/per-user policies below. Sized well
     // above any single route's allowance (a legitimate session fans out across several routes
-    // from one IP) so it only trips under actual flooding.
+    // from one IP) so it only trips under actual flooding. Because it is that coarse, it is the
+    // one policy enforced in-process rather than in Redis (see LocalIpTokenBucketLimiter): these
+    // numbers are the cluster-wide intent, divided across gateway instances at runtime.
     PRE_AUTH_IP(KeyStrategy.IP, 20, 600, 3),
     LOGIN(KeyStrategy.IP, 1, 120, 12),
     REGISTER(KeyStrategy.IP, 1, 3600, 1200),
