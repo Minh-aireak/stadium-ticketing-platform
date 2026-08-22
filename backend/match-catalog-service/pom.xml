@@ -56,6 +56,15 @@
             <groupId>org.redisson</groupId>
             <artifactId>redisson-spring-boot-starter</artifactId>
         </dependency>
+
+        <!-- Resilience4j: Bulkhead + RateLimiter on the public browse/search use cases. The read
+             path is the most-hammered surface when a flash sale opens, and nothing upstream of it
+             bounds concurrency — without this, Tomcat threads pile up, CatalogHikariPool queues
+             and the JVM dies long before Redis does. -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot4</artifactId>
+        </dependency>
         <!-- Guava — backs the local (per-JVM) tier of CachingMatchRepository's match/list cache.
              common declares Guava optional=true, so each consuming service redeclares it here. -->
         <dependency>

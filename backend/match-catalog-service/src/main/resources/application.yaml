@@ -73,11 +73,37 @@ outbox:
     retention-days: ${OUTBOX_CLEANUP_RETENTION_DAYS:14}
     fixed-delay-ms: ${OUTBOX_CLEANUP_FIXED_DELAY_MS:86400000}
 
+# Resilience4j: Bulkhead/RateLimiter on the public browse/search use cases in
+# MatchCatalogService. Both are sized well above inventory's reserve path (100 concurrent, 200/s)
+# because a catalog read is a different animal: no distributed lock, no write, and normally served
+# from the Guava tier plus a single Redis MGET, so a call occupies its permit for a millisecond or
+# two rather than up to the 5s a contended reserve can take.
+#
+# maxConcurrentCalls 200: the backstop for the SLOW reads, not the fast ones -- a cache miss falls
+# through to CatalogHikariPool (10 connections) or Elasticsearch, and 200 in flight against that
+# pool drains in ~100ms instead of parking an unbounded number of Tomcat threads on it.
+# limitForPeriod 600/s per instance (x2 instances = 1200/s of browse) is the arrival shaper: high
+# enough that real browse traffic never sees it, low enough that a flood is cut off here rather
+# than in the JVM's heap. Both wait durations are 0 for the same reason as inventory's -- shed the
+# excess as a 503 immediately instead of turning the limiter into a second queue.
+resilience4j:
+  bulkhead:
+    instances:
+      catalog-read:
+        maxConcurrentCalls: 200
+        maxWaitDuration: 0
+  ratelimiter:
+    instances:
+      catalog-read:
+        limitForPeriod: 600
+        limitRefreshPeriod: 1s
+        timeoutDuration: 0
+
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info,metrics,bulkheads,ratelimiters,prometheus
   endpoint:
     health:
       show-details: when-authorized

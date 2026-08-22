@@ -17,6 +17,8 @@ import com.aireak.catalog.domain.model.Match;
 import com.aireak.catalog.domain.model.MatchStatus;
 import com.aireak.catalog.domain.model.Showtime;
 import com.aireak.catalog.domain.model.StadiumCatalog;
+import io.github.resilience4j.bulkhead.annotation.Bulkhead;
+import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -122,7 +124,15 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
     // Public catalog browse/search (read side)
     // ----------------------------------------------------------------
 
+    // Bulkhead + RateLimiter guard only this read side, never the admin writes above: browse is
+    // what a flash sale actually floods, and it is the only path here with no other bound on it
+    // (the writes are rare, authenticated and already serialized by their transaction). Once the
+    // permits or the per-second budget are gone, calls are rejected immediately
+    // (BulkheadFullException / RequestNotPermitted, mapped to 503 by
+    // CatalogOverloadExceptionHandler) rather than queueing Tomcat threads on CatalogHikariPool.
     @Override
+    @Bulkhead(name = "catalog-read", type = Bulkhead.Type.SEMAPHORE)
+    @RateLimiter(name = "catalog-read")
     public MatchPage listMatches(String query, int page, int size) {
         if (query != null && !query.isBlank()) {
             // Elasticsearch documents carry summary fields only (no showtimes — see
@@ -147,12 +157,16 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
     }
 
     @Override
+    @Bulkhead(name = "catalog-read", type = Bulkhead.Type.SEMAPHORE)
+    @RateLimiter(name = "catalog-read")
     public Optional<Match> getMatch(String matchId) {
         return matchRepository.findById(matchId)
                 .filter(m -> m.getStatus() != MatchStatus.DRAFT);
     }
 
     @Override
+    @Bulkhead(name = "catalog-read", type = Bulkhead.Type.SEMAPHORE)
+    @RateLimiter(name = "catalog-read")
     public Optional<ShowtimeDetails> getShowtime(String showtimeId) {
         return matchRepository.findByShowtimeId(showtimeId)
                 .flatMap(match -> match.getShowtimes().stream()
