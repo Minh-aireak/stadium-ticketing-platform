@@ -73,6 +73,17 @@ outbox:
     retention-days: ${OUTBOX_CLEANUP_RETENTION_DAYS:14}
     fixed-delay-ms: ${OUTBOX_CLEANUP_FIXED_DELAY_MS:86400000}
 
+catalog:
+  # AdaptiveTtlLiveSeatStore -- a per-pod cache in front of the Redis seat counts, whose TTL is a
+  # deliberate second of staleness traded for collapsing a hot page's thousands of reads per second
+  # into one MGET per second per pod. scarcity-threshold is where that trade stops being worth it:
+  # below this many seats left, the count is never cached and every read goes to Redis. Roughly 5%
+  # of the stadiums in StadiumCatalog (320-540 seats) -- raise it alongside any larger venue.
+  live-seats:
+    local-ttl-millis: ${CATALOG_LIVE_SEATS_LOCAL_TTL_MILLIS:1000}
+    scarcity-threshold: ${CATALOG_LIVE_SEATS_SCARCITY_THRESHOLD:25}
+    max-cached-showtimes: ${CATALOG_LIVE_SEATS_MAX_CACHED_SHOWTIMES:10000}
+
 # Resilience4j: Bulkhead/RateLimiter on the public browse/search use cases in
 # MatchCatalogService. Both are sized well above inventory's reserve path (100 concurrent, 200/s)
 # because a catalog read is a different animal: no distributed lock, no write, and normally served
