@@ -1,5 +1,6 @@
 package com.aireak.payment.adapter.out.gateway;
 
+import com.aireak.payment.application.port.out.PaymentDeclinedException;
 import com.aireak.payment.application.port.out.PaymentGatewayPort;
 import com.stripe.Stripe;
 import com.stripe.exception.CardException;

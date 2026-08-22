@@ -90,7 +90,7 @@ resilience4j:
           - io.github.resilience4j.bulkhead.BulkheadFullException
           # A card decline is a business outcome, not a gateway fault — many declines in a row
           # (e.g. a fraud wave) must not trip the breaker and block unrelated bookings.
-          - com.aireak.payment.adapter.out.gateway.PaymentDeclinedException
+          - com.aireak.payment.application.port.out.PaymentDeclinedException
   bulkhead:
     instances:
       # Caps concurrent in-flight gateway calls so a slow gateway can't consume every Tomcat
@@ -106,7 +106,7 @@ resilience4j:
         ignoreExceptions:
           # Card declined / bad request: a business outcome, not a transient gateway fault —
           # retrying would just replay the identical Stripe-cached decline for this Idempotency-Key.
-          - com.aireak.payment.adapter.out.gateway.PaymentDeclinedException
+          - com.aireak.payment.application.port.out.PaymentDeclinedException
           # Bulkhead already full locally — an immediate retry has zero chance of a free slot.
           - io.github.resilience4j.bulkhead.BulkheadFullException
 

@@ -223,7 +223,7 @@ class PaymentServiceTest {
         when(sagaSteps.tryInitiate(eq("booking-1"), eq(COMMAND.customerEmail()), eq(COMMAND.amount()), eq(COMMAND.currency())))
                 .thenReturn(new PaymentSagaSteps.InitiateOutcome.Created("payment-1"));
         when(paymentGatewayPort.charge(any(), any(), any()))
-                .thenThrow(new com.aireak.payment.adapter.out.gateway.PaymentDeclinedException("Card declined"));
+                .thenThrow(new com.aireak.payment.application.port.out.PaymentDeclinedException("Card declined"));
 
         // PaymentDeclinedException must call standard markFailed (non-ambiguous decline)
         String paymentId = service.execute(COMMAND);

@@ -1,6 +1,6 @@
 package com.aireak.payment.application.service;
 
-import com.aireak.payment.adapter.out.gateway.PaymentDeclinedException;
+import com.aireak.payment.application.port.out.PaymentDeclinedException;
 import com.aireak.payment.application.port.in.GetPaymentUseCase;
 import com.aireak.payment.application.port.in.InitiatePaymentUseCase;
 import com.aireak.payment.application.port.in.RefundPaymentUseCase;
