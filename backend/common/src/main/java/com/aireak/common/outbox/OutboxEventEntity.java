@@ -1,4 +1,4 @@
-package com.aireak.booking.adapter.out.persistence.outbox;
+package com.aireak.common.outbox;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -14,6 +14,19 @@ import org.hibernate.type.SqlTypes;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * JPA entity for the {@code outbox_events} table, whose schema is identical in every service that
+ * publishes domain events (see each service's {@code V*__create_outbox_events.sql}).
+ *
+ * <p>Rows written here are picked up by Debezium's CDC connector and routed to Kafka via the
+ * outbox event router SMT. A service never talks to Kafka directly; writing this row in the same
+ * transaction as the aggregate save is what makes publication atomic.
+ *
+ * <p>Deliberately carries no stereotype and is NOT under any service's default entity scan — a
+ * service opts in with {@code @EntityScan}. notification-service shares this module but has no
+ * outbox table, so registration has to be a choice rather than a side effect of being on the
+ * classpath.
+ */
 @Getter
 @Entity
 @Table(name = "outbox_events")
@@ -25,15 +38,15 @@ public class OutboxEventEntity {
     @GeneratedValue
     private UUID id;
 
-    /** Target Kafka topic, e.g. {@code booking.booking.confirmed}. */
+    /** Target Kafka topic, e.g. {@code catalog.match.published}. */
     @Column(name = "aggregate_type", nullable = false)
     private String aggregateType;
 
-    /** Business aggregate id (bookingId) — used as the Kafka message key. */
+    /** Business aggregate id (matchId, paymentId, ...) — used as the Kafka message key. */
     @Column(name = "aggregate_id", nullable = false)
     private String aggregateId;
 
-    /** Simple domain event class name, e.g. {@code BookingConfirmedEvent}. */
+    /** Simple domain event class name, e.g. {@code MatchPublishedEvent}. */
     @Column(name = "event_type", nullable = false)
     private String eventType;
 
@@ -42,6 +55,7 @@ public class OutboxEventEntity {
     @Column(name = "payload", nullable = false, columnDefinition = "jsonb")
     private String payload;
 
+    /** Correlation id of the request that produced the event; see {@link AbstractOutboxEventPublisher}. */
     @Column(name = "trace_id")
     private String traceId;
 

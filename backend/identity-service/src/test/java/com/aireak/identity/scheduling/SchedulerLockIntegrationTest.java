@@ -1,6 +1,6 @@
 package com.aireak.identity.scheduling;
 
-import com.aireak.identity.adapter.out.persistence.outbox.OutboxEventCleanupScheduler;
+import com.aireak.common.outbox.OutboxEventCleanupScheduler;
 import net.javacrumbs.shedlock.core.LockProvider;
 import net.javacrumbs.shedlock.provider.jdbctemplate.JdbcTemplateLockProvider;
 import org.junit.jupiter.api.Test;
@@ -49,7 +49,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 })
 class SchedulerLockIntegrationTest {
 
-    private static final String LOCK_NAME = "identity-outboxCleanup";
+    // Resolved from spring.application.name by the shared OutboxEventCleanupScheduler, rather than
+    // hard-coded once per service as it was when every service had its own copy of that class.
+    private static final String LOCK_NAME = "identity-service-outboxCleanup";
 
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")

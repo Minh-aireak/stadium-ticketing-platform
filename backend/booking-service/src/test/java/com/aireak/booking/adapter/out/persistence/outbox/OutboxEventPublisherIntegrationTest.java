@@ -1,5 +1,7 @@
 package com.aireak.booking.adapter.out.persistence.outbox;
 
+import com.aireak.common.outbox.OutboxEventEntity;
+import com.aireak.common.outbox.OutboxEventJpaRepository;
 import com.aireak.booking.adapter.out.persistence.BookingPersistenceAdapter;
 import com.aireak.booking.application.port.out.BookingRepository;
 import com.aireak.booking.config.InfraConfig;
@@ -59,6 +61,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         InfraConfig.class, // @EnableJpaAuditing — without it, BaseAuditEntity's updatedAt is
                             // never populated and every insert fails a NOT NULL constraint.
         BookingPersistenceAdapter.class,
+        OutboxConfig.class, // @EntityScan/@EnableJpaRepositories for com.aireak.common.outbox
         OutboxEventPublisher.class,
         OutboxEventPublisherIntegrationTest.TestSupportConfig.class
 })

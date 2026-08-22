@@ -7,15 +7,10 @@ import com.aireak.catalog.domain.event.MatchPublishedEvent;
 import com.aireak.catalog.domain.event.ShowtimeAddedEvent;
 import com.aireak.common.event.EventEnvelope;
 import com.aireak.common.kafka.KafkaTopics;
-import com.aireak.common.web.filter.CorrelationIdFilter;
-import tools.jackson.core.JacksonException;
-import tools.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.slf4j.MDC;
+import com.aireak.common.outbox.AbstractOutboxEventPublisher;
+import com.aireak.common.outbox.OutboxEventJpaRepository;
 import org.springframework.stereotype.Component;
-
-import java.util.List;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Outbox adapter implementing {@link DomainEventPublisher}: instead of talking to Kafka
@@ -30,49 +25,22 @@ import java.util.List;
  * same transaction as the Match status change, so the two can never disagree.
  *
  * <p>The written payload is the same {@link EventEnvelope} JSON that used to be sent directly
- * to Kafka, so consumers see an unchanged message shape. The Kafka message key changes from the
- * old (effectively random) {@code eventId} to {@code matchId} (the aggregate id) — same fix
- * applied when booking/identity/inventory/payment migrated to outbox; no consumer of this topic
- * exists yet, so this is safe.
+ * to Kafka, so consumers see an unchanged message shape. The Kafka message key is {@code matchId}
+ * (the aggregate id).
  *
- * <p>Hexagonal rule: this adapter is the ONLY place that knows about the outbox table and topic
- * names. Domain and application layers depend only on the {@link DomainEventPublisher} port.
+ * <p>Hexagonal rule: this adapter is the ONLY place that knows about topic names, which is all
+ * that is left here — {@link AbstractOutboxEventPublisher} owns the envelope/correlation-id/write
+ * mechanism that every service shares.
  */
-@Slf4j
 @Component
-@RequiredArgsConstructor
-public class OutboxEventPublisher implements DomainEventPublisher {
+public class OutboxEventPublisher extends AbstractOutboxEventPublisher implements DomainEventPublisher {
 
-    private final OutboxEventJpaRepository outboxEventJpaRepository;
-    private final ObjectMapper objectMapper;
+    public OutboxEventPublisher(OutboxEventJpaRepository outboxEventJpaRepository, ObjectMapper objectMapper) {
+        super(outboxEventJpaRepository, objectMapper);
+    }
 
     @Override
-    public void publishAll(List<Object> events) {
-        events.forEach(this::publish);
-    }
-
-    private void publish(Object event) {
-        String topic = resolveTopic(event);
-        if (topic == null) {
-            log.warn("No topic for event: {}", event.getClass().getSimpleName());
-            return;
-        }
-        String aggregateId = resolveAggregateId(event);
-        // Carried on both the envelope (which Debezium forwards verbatim, so consumers can restore
-        // it via CorrelationIdRecordInterceptor) and the row itself (so the outbox table can be
-        // searched by trace when a message never arrives).
-        String traceId = MDC.get(CorrelationIdFilter.MDC_KEY);
-        EventEnvelope<?> envelope = EventEnvelope.of(topic, event, traceId);
-
-        String payload = serialize(envelope);
-        outboxEventJpaRepository.save(OutboxEventEntity.of(
-                topic, aggregateId, event.getClass().getSimpleName(), payload, traceId));
-
-        log.debug("Outbox row written: type={}, topic={}, aggregateId={}, eventId={}",
-                event.getClass().getSimpleName(), topic, aggregateId, envelope.getEventId());
-    }
-
-    private String resolveTopic(Object event) {
+    protected String resolveTopic(Object event) {
         return switch (event) {
             case MatchPublishedEvent ignored -> KafkaTopics.MATCH_PUBLISHED;
             case MatchCancelledEvent ignored -> KafkaTopics.MATCH_CANCELLED;
@@ -82,7 +50,8 @@ public class OutboxEventPublisher implements DomainEventPublisher {
         };
     }
 
-    private String resolveAggregateId(Object event) {
+    @Override
+    protected String resolveAggregateId(Object event) {
         return switch (event) {
             case MatchPublishedEvent e -> e.matchId();
             case MatchCancelledEvent e -> e.matchId();
@@ -91,13 +60,5 @@ public class OutboxEventPublisher implements DomainEventPublisher {
             default -> throw new IllegalArgumentException(
                     "No aggregate id mapping for domain event type: " + event.getClass().getSimpleName());
         };
-    }
-
-    private String serialize(EventEnvelope<?> envelope) {
-        try {
-            return objectMapper.writeValueAsString(envelope);
-        } catch (JacksonException e) {
-            throw new IllegalStateException("Failed to serialize domain event envelope", e);
-        }
     }
 }

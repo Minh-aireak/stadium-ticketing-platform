@@ -1,5 +1,7 @@
 package com.aireak.inventory.adapter.out.persistence.outbox;
 
+import com.aireak.common.outbox.OutboxEventEntity;
+import com.aireak.common.outbox.OutboxEventJpaRepository;
 import com.aireak.inventory.adapter.out.persistence.SeatInventoryPersistenceAdapter;
 import com.aireak.inventory.application.port.out.DomainEventPublisher;
 import com.aireak.inventory.application.port.out.SeatInventoryRepository;
@@ -52,6 +54,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         InfraConfig.class, // @EnableJpaAuditing — without it, BaseAuditEntity's updatedAt is
                             // never populated and every insert fails a NOT NULL constraint.
         SeatInventoryPersistenceAdapter.class,
+        OutboxConfig.class, // @EntityScan/@EnableJpaRepositories for com.aireak.common.outbox
         OutboxEventPublisher.class,
         OutboxEventPublisherIntegrationTest.TestSupportConfig.class
 })

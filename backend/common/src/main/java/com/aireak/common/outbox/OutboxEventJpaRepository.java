@@ -1,4 +1,4 @@
-package com.aireak.identity.adapter.out.persistence.outbox;
+package com.aireak.common.outbox;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -8,7 +8,11 @@ import org.springframework.data.repository.query.Param;
 import java.time.Instant;
 import java.util.UUID;
 
-interface OutboxEventJpaRepository extends JpaRepository<OutboxEventEntity, UUID> {
+/**
+ * Registered only where a service asks for it via {@code @EnableJpaRepositories} — see
+ * {@link OutboxEventEntity} for why this is opt-in rather than scanned.
+ */
+public interface OutboxEventJpaRepository extends JpaRepository<OutboxEventEntity, UUID> {
 
     @Modifying(clearAutomatically = true)
     @Query("delete from OutboxEventEntity e where e.createdAt < :cutoff")

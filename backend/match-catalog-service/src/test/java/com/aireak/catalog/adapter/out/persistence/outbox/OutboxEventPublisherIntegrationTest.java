@@ -6,6 +6,8 @@ import com.aireak.catalog.application.service.MatchCatalogService;
 import com.aireak.catalog.application.service.MatchSearchIndexer;
 import com.aireak.catalog.config.InfraConfig;
 import com.aireak.catalog.domain.model.Match;
+import com.aireak.common.outbox.OutboxEventEntity;
+import com.aireak.common.outbox.OutboxEventJpaRepository;
 import com.aireak.common.web.filter.CorrelationIdFilter;
 import tools.jackson.databind.json.JsonMapper;
 import org.flywaydb.core.Flyway;
@@ -48,6 +50,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         InfraConfig.class, // @EnableJpaAuditing — without it, BaseAuditEntity's updatedAt is
                             // never populated and every insert fails a NOT NULL constraint.
         MatchPersistenceAdapter.class,
+        OutboxConfig.class, // @EntityScan/@EnableJpaRepositories for com.aireak.common.outbox
         OutboxEventPublisher.class,
         MatchSearchIndexer.class,
         MatchCatalogService.class,

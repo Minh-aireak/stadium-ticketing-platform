@@ -1,4 +1,4 @@
-package com.aireak.booking.adapter.out.persistence.outbox;
+package com.aireak.common.outbox;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

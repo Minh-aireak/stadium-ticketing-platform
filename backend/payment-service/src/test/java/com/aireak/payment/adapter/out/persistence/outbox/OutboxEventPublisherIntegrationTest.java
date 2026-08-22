@@ -1,5 +1,7 @@
 package com.aireak.payment.adapter.out.persistence.outbox;
 
+import com.aireak.common.outbox.OutboxEventEntity;
+import com.aireak.common.outbox.OutboxEventJpaRepository;
 import com.aireak.common.web.filter.CorrelationIdFilter;
 import com.aireak.payment.adapter.out.persistence.PaymentPersistenceAdapter;
 import com.aireak.payment.application.port.out.DomainEventPublisher;
@@ -48,6 +50,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         JpaConfig.class, // @EnableJpaAuditing — without it, BaseAuditEntity's updatedAt is
                           // never populated and every insert fails a NOT NULL constraint.
         PaymentPersistenceAdapter.class,
+        OutboxConfig.class, // @EntityScan/@EnableJpaRepositories for com.aireak.common.outbox
         OutboxEventPublisher.class,
         OutboxEventPublisherIntegrationTest.TestSupportConfig.class
 })

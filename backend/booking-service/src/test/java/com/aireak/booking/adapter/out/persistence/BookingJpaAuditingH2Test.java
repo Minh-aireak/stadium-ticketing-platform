@@ -1,5 +1,7 @@
 package com.aireak.booking.adapter.out.persistence;
 
+import com.aireak.common.outbox.OutboxEventEntity;
+import com.aireak.common.outbox.OutboxEventJpaRepository;
 import com.aireak.booking.application.port.out.BookingRepository;
 import com.aireak.booking.domain.model.Booking;
 import com.aireak.booking.domain.model.BookingAmount;

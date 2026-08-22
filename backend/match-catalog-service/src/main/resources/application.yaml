@@ -14,6 +14,16 @@ spring:
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
+    # Spelled out rather than left on Hikari's default of 10, because this service now runs as two
+    # instances and the pool is per instance: the number that matters is 2 x this against
+    # postgres-catalog's max_connections (Postgres default 100, shared with Debezium's replication
+    # slot and postgres-exporter). Smaller than the other services' 20 on purpose -- browse reads
+    # are served from the Guava and Redis tiers, and search goes to Elasticsearch, so Postgres only
+    # sees cache misses and the rare admin write.
+    hikari:
+      pool-name: CatalogHikariPool
+      maximum-pool-size: 10
+      minimum-idle: 2
 
   jpa:
     hibernate:

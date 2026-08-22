@@ -1,5 +1,7 @@
 package com.aireak.identity.adapter.out.persistence.outbox;
 
+import com.aireak.common.outbox.OutboxEventEntity;
+import com.aireak.common.outbox.OutboxEventJpaRepository;
 import com.aireak.identity.adapter.out.persistence.AccountPersistenceAdapter;
 import com.aireak.identity.application.port.in.command.RegisterAccountCommand;
 import com.aireak.identity.application.port.out.EmailVerificationTokenPort;
@@ -49,6 +51,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         JpaConfig.class, // @EnableJpaAuditing — without it, BaseAuditEntity's updatedAt is
                           // never populated and every insert fails a NOT NULL constraint.
         AccountPersistenceAdapter.class,
+        OutboxConfig.class, // @EntityScan/@EnableJpaRepositories for com.aireak.common.outbox
         OutboxEventPublisher.class,
         RegisterAccountService.class,
         OutboxEventPublisherIntegrationTest.TestSupportConfig.class

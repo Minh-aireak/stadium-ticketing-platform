@@ -53,7 +53,8 @@
             <optional>true</optional>
         </dependency>
 
-        <!-- JPA concern: BaseAuditEntity (optional — only JPA services pull this) -->
+        <!-- JPA concern: BaseAuditEntity and the shared outbox (optional — only JPA services
+             pull this) -->
         <dependency>
             <groupId>jakarta.persistence</groupId>
             <artifactId>jakarta.persistence-api</artifactId>
@@ -62,6 +63,15 @@
         <dependency>
             <groupId>org.springframework.data</groupId>
             <artifactId>spring-data-jpa</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!-- Hibernate's own @JdbcTypeCode(SqlTypes.JSON) on OutboxEventEntity#payload — mapping a
+             String to a Postgres jsonb column needs that hint, and jakarta.persistence-api has no
+             equivalent. spring-data-jpa does not bring hibernate-core, so it is declared here;
+             every consuming service already has it via spring-boot-starter-data-jpa. -->
+        <dependency>
+            <groupId>org.hibernate.orm</groupId>
+            <artifactId>hibernate-core</artifactId>
             <optional>true</optional>
         </dependency>
 
