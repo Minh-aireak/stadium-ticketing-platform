@@ -3,45 +3,65 @@ import { createBrowserRouter } from 'react-router-dom'
 import App from '@/App'
 import { AdminRoute } from '@/features/auth/AdminRoute'
 import { ProtectedRoute } from '@/features/auth/ProtectedRoute'
-import { AccountPage } from '@/pages/AccountPage'
-import { AdminPage } from '@/pages/AdminPage'
-import { CheckoutPage } from '@/pages/CheckoutPage'
-import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage'
 import { HomePage } from '@/pages/HomePage'
-import { LoginPage } from '@/pages/LoginPage'
-import { MatchDetailPage } from '@/pages/MatchDetailPage'
-import { NotificationsPage } from '@/pages/NotificationsPage'
-import { PaymentStatusPage } from '@/pages/PaymentStatusPage'
-import { RegisterPage } from '@/pages/RegisterPage'
-import { ResetPasswordPage } from '@/pages/ResetPasswordPage'
-import { SeatSelectionPage } from '@/pages/SeatSelectionPage'
 
+// Every page except the landing one is a route-level `lazy`, so its code is fetched on first
+// navigation instead of riding in the initial bundle. HomePage stays eager on purpose: it is what
+// a browsing visitor lands on, and splitting it would trade one bundle for a bundle plus a second
+// round trip on the single most-requested page — the opposite of the point. The route guards are
+// eager for the same reason, being a few lines each that decide whether navigation happens at all.
 export const router = createBrowserRouter([
   {
     path: '/',
     element: <App />,
     children: [
       { index: true, element: <HomePage /> },
-      { path: 'login', element: <LoginPage /> },
-      { path: 'register', element: <RegisterPage /> },
-      { path: 'forgot-password', element: <ForgotPasswordPage /> },
+      { path: 'login', lazy: async () => ({ Component: (await import('@/pages/LoginPage')).LoginPage }) },
+      { path: 'register', lazy: async () => ({ Component: (await import('@/pages/RegisterPage')).RegisterPage }) },
+      {
+        path: 'forgot-password',
+        lazy: async () => ({ Component: (await import('@/pages/ForgotPasswordPage')).ForgotPasswordPage }),
+      },
       // Target of the link in the password-reset email — must stay in sync with the URL
       // notification-service builds from FRONTEND_BASE_URL (see NotificationDispatchService).
-      { path: 'reset-password', element: <ResetPasswordPage /> },
-      { path: 'matches/:matchId', element: <MatchDetailPage /> },
+      {
+        path: 'reset-password',
+        lazy: async () => ({ Component: (await import('@/pages/ResetPasswordPage')).ResetPasswordPage }),
+      },
+      {
+        path: 'matches/:matchId',
+        lazy: async () => ({ Component: (await import('@/pages/MatchDetailPage')).MatchDetailPage }),
+      },
       {
         element: <ProtectedRoute />,
         children: [
-          { path: 'matches/:matchId/seats', element: <SeatSelectionPage /> },
-          { path: 'checkout', element: <CheckoutPage /> },
-          { path: 'checkout/:bookingId/status', element: <PaymentStatusPage /> },
-          { path: 'account', element: <AccountPage /> },
-          { path: 'notifications', element: <NotificationsPage /> },
+          {
+            path: 'matches/:matchId/seats',
+            lazy: async () => ({ Component: (await import('@/pages/SeatSelectionPage')).SeatSelectionPage }),
+          },
+          {
+            path: 'checkout',
+            lazy: async () => ({ Component: (await import('@/pages/CheckoutPage')).CheckoutPage }),
+          },
+          {
+            path: 'checkout/:bookingId/status',
+            lazy: async () => ({ Component: (await import('@/pages/PaymentStatusPage')).PaymentStatusPage }),
+          },
+          {
+            path: 'account',
+            lazy: async () => ({ Component: (await import('@/pages/AccountPage')).AccountPage }),
+          },
+          {
+            path: 'notifications',
+            lazy: async () => ({ Component: (await import('@/pages/NotificationsPage')).NotificationsPage }),
+          },
         ],
       },
       {
         element: <AdminRoute />,
-        children: [{ path: 'admin', element: <AdminPage /> }],
+        children: [
+          { path: 'admin', lazy: async () => ({ Component: (await import('@/pages/AdminPage')).AdminPage }) },
+        ],
       },
     ],
   },
