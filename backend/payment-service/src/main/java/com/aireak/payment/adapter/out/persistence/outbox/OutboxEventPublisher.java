@@ -7,10 +7,12 @@ import com.aireak.payment.domain.event.PaymentFailedEvent;
 import com.aireak.payment.domain.event.PaymentInitiatedEvent;
 import com.aireak.payment.domain.event.PaymentRefundedEvent;
 import com.aireak.payment.domain.event.PaymentSucceededEvent;
+import com.aireak.common.web.filter.CorrelationIdFilter;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -57,11 +59,15 @@ public class OutboxEventPublisher implements DomainEventPublisher {
             return;
         }
         String aggregateId = resolveAggregateId(event);
-        EventEnvelope<?> envelope = EventEnvelope.of(topic, event, null);
+        // Carried on both the envelope (which Debezium forwards verbatim, so consumers can restore
+        // it via CorrelationIdRecordInterceptor) and the row itself (so the outbox table can be
+        // searched by trace when a message never arrives).
+        String traceId = MDC.get(CorrelationIdFilter.MDC_KEY);
+        EventEnvelope<?> envelope = EventEnvelope.of(topic, event, traceId);
 
         String payload = serialize(envelope);
         outboxEventJpaRepository.save(OutboxEventEntity.of(
-                topic, aggregateId, event.getClass().getSimpleName(), payload, null));
+                topic, aggregateId, event.getClass().getSimpleName(), payload, traceId));
 
         log.debug("Outbox row written: type={}, topic={}, aggregateId={}, eventId={}",
                 event.getClass().getSimpleName(), topic, aggregateId, envelope.getEventId());

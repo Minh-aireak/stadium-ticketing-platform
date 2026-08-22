@@ -6,10 +6,12 @@ import com.aireak.catalog.application.service.MatchCatalogService;
 import com.aireak.catalog.application.service.MatchSearchIndexer;
 import com.aireak.catalog.config.InfraConfig;
 import com.aireak.catalog.domain.model.Match;
+import com.aireak.common.web.filter.CorrelationIdFilter;
 import tools.jackson.databind.json.JsonMapper;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
@@ -134,6 +136,31 @@ class OutboxEventPublisherIntegrationTest {
         assertThat(row.getAggregateId()).isEqualTo(matchId);
         assertThat(row.getEventType()).isEqualTo("MatchCancelledEvent");
         assertThat(row.getPayload()).contains("MatchCancelledEvent", matchId, "Stadium closed for safety inspection");
+    }
+
+    /**
+     * The correlation ID has to reach the row AND the envelope inside it: the row is what makes the
+     * outbox searchable by trace when a message never arrives, and the envelope is what
+     * {@code CorrelationIdRecordInterceptor} reads to restore the ID on the consumer side. Missing
+     * it fails silently — the interceptor mints a fresh UUID, so consumer logs still carry a
+     * correlationId, it just belongs to no request.
+     */
+    @Test
+    void outboxRowCarriesTheOriginatingRequestsCorrelationId() {
+        MDC.put(CorrelationIdFilter.MDC_KEY, "trace-from-the-admin-request");
+        try {
+            String matchId = matchCatalogService.createMatch("Home FC", "Away FC", "Premier League");
+            matchCatalogService.addShowtime(matchId, Instant.now().plusSeconds(3600), "my-dinh",
+                    new BigDecimal("150000"), "VND");
+
+            List<OutboxEventEntity> rows = outboxEventJpaRepository.findAll();
+
+            assertThat(rows).hasSize(1);
+            assertThat(rows.get(0).getTraceId()).isEqualTo("trace-from-the-admin-request");
+            assertThat(rows.get(0).getPayload()).contains("trace-from-the-admin-request");
+        } finally {
+            MDC.remove(CorrelationIdFilter.MDC_KEY);
+        }
     }
 
     @TestConfiguration

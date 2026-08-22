@@ -1,5 +1,6 @@
 package com.aireak.payment.adapter.out.persistence.outbox;
 
+import com.aireak.common.web.filter.CorrelationIdFilter;
 import com.aireak.payment.adapter.out.persistence.PaymentPersistenceAdapter;
 import com.aireak.payment.application.port.out.DomainEventPublisher;
 import com.aireak.payment.application.port.out.PaymentRepository;
@@ -11,6 +12,7 @@ import jakarta.persistence.EntityManager;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
@@ -130,6 +132,31 @@ class OutboxEventPublisherIntegrationTest {
         assertThat(row.getAggregateId()).isEqualTo(payment.getPaymentId());
         assertThat(row.getEventType()).isEqualTo("PaymentSucceededEvent");
         assertThat(row.getPayload()).contains("PaymentSucceededEvent", payment.getPaymentId(), "gw-tx-1");
+    }
+
+    /**
+     * The correlation ID has to reach the row AND the envelope inside it: the row is what makes the
+     * outbox searchable by trace when a message never arrives, and the envelope is what
+     * {@code CorrelationIdRecordInterceptor} reads to restore the ID on the consumer side. Missing
+     * it fails silently — the interceptor mints a fresh UUID, so booking-service's logs still carry
+     * a correlationId, it just belongs to no request.
+     */
+    @Test
+    void outboxRowCarriesTheOriginatingRequestsCorrelationId() {
+        MDC.put(CorrelationIdFilter.MDC_KEY, "trace-from-the-checkout-request");
+        try {
+            Payment payment = Payment.initiate("booking-1", "buyer@example.com", new BigDecimal("150.00"), "USD");
+            paymentRepository.save(payment);
+            eventPublisher.publishAll(payment.pullDomainEvents());
+
+            List<OutboxEventEntity> rows = outboxEventJpaRepository.findAll();
+
+            assertThat(rows).hasSize(1);
+            assertThat(rows.get(0).getTraceId()).isEqualTo("trace-from-the-checkout-request");
+            assertThat(rows.get(0).getPayload()).contains("trace-from-the-checkout-request");
+        } finally {
+            MDC.remove(CorrelationIdFilter.MDC_KEY);
+        }
     }
 
     @TestConfiguration
