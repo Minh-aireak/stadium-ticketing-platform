@@ -149,6 +149,39 @@ class OutboxEventPublisherIntegrationTest {
         assertThat(row.getPayload()).contains("BookingCancelledEvent", booking.getBookingId());
     }
 
+    /**
+     * The durability guarantee that replaced the synchronous refund call: cancelling a paid
+     * booking writes the refund request to the outbox in the same transaction as the cancellation
+     * itself. Either both land or neither does — where the old HTTP call could fail on its own,
+     * silently, after the cancellation had already committed.
+     */
+    @Test
+    void cancellingAPaidBookingWritesTheRefundRequestInTheSameTransaction() {
+        Booking booking = Booking.create(
+                "customer-1", "customer-1@example.com", "showtime-1",
+                new SeatSelection(List.of("A1", "A2")),
+                BookingAmount.of(new BigDecimal("150.00"), "USD"), null);
+        booking.markPendingPayment();
+        booking.confirm();
+        booking.pullDomainEvents(); // discard BookingConfirmedEvent, not under test here
+
+        booking.cancelDueToMatchCancellation("Match cancelled by organizer");
+        bookingRepository.save(booking);
+        eventPublisher.publishAll(booking.pullDomainEvents());
+
+        List<OutboxEventEntity> rows = outboxEventJpaRepository.findAll();
+
+        assertThat(rows).hasSize(2);
+        OutboxEventEntity refundRow = rows.stream()
+                .filter(r -> "booking.refund.requested".equals(r.getAggregateType()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no refund request row written"));
+        assertThat(refundRow.getAggregateId()).isEqualTo(booking.getBookingId());
+        assertThat(refundRow.getEventType()).isEqualTo("RefundRequestedEvent");
+        assertThat(refundRow.getPayload())
+                .contains("RefundRequestedEvent", booking.getBookingId(), "Match cancelled by organizer");
+    }
+
     @TestConfiguration
     static class TestSupportConfig {
 

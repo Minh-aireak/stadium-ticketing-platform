@@ -290,7 +290,7 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
         if (booking.getStatus() == BookingStatus.CANCELLED) {
             log.error("PAYMENT_SUCCEEDED arrived after booking {} was cancelled; requesting an " +
                     "idempotent refund", bookingId);
-            paymentPort.refundPayment(bookingId, "Payment succeeded after booking cancellation");
+            sagaSteps.requestRefundForLatePayment(bookingId, "Payment succeeded after booking cancellation");
             return;
         }
         if (booking.getStatus() != BookingStatus.PENDING_PAYMENT) {
@@ -351,10 +351,7 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
     public void cancelBookingsForShowtime(String showtimeId, String reason) {
         List<Booking> activeBookings = bookingRepository.findActiveByShowtimeId(showtimeId);
         for (Booking booking : activeBookings) {
-            boolean wasConfirmed = sagaSteps.cancelBookingDueToMatchCancellation(booking.getBookingId(), reason);
-            if (wasConfirmed) {
-                paymentPort.refundPayment(booking.getBookingId(), reason);
-            }
+            sagaSteps.cancelBookingDueToMatchCancellation(booking.getBookingId(), reason);
         }
         log.info("Cancelled {} active booking(s) for showtime {} due to match cancellation",
                 activeBookings.size(), showtimeId);

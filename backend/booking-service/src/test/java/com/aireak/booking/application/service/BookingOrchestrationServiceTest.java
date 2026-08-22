@@ -122,7 +122,7 @@ class BookingOrchestrationServiceTest {
         service.confirmBooking(BOOKING_ID);
 
         verify(sagaSteps, never()).markConfirmed(anyString());
-        verify(paymentPort).refundPayment(
+        verify(sagaSteps).requestRefundForLatePayment(
                 BOOKING_ID, "Payment succeeded after booking cancellation");
     }
 
@@ -470,7 +470,7 @@ class BookingOrchestrationServiceTest {
             service.confirmBooking(BOOKING_ID);
 
             verify(sagaSteps, never()).markConfirmed(anyString());
-            verify(paymentPort).refundPayment(
+            verify(sagaSteps).requestRefundForLatePayment(
                     BOOKING_ID, "Payment succeeded after booking cancellation");
         }
 
@@ -557,20 +557,20 @@ class BookingOrchestrationServiceTest {
     @Nested
     class CancelBookingsForShowtime {
 
+        // Whether a refund is owed is now decided inside the aggregate, which raises
+        // RefundRequestedEvent alongside the cancellation (see BookingTest) — this service just
+        // cancels each booking and never calls payment-service directly at all.
         @Test
-        void refundsOnlyBookingsThatWereConfirmedAndNeverReleasesSeats() {
+        void cancelsEveryActiveBookingAndNeverReleasesSeatsOrCallsPaymentDirectly() {
             when(bookingRepository.findActiveByShowtimeId(SHOWTIME_ID))
                     .thenReturn(List.of(pendingPaymentBooking("booking-draft"), confirmedBooking("booking-paid")));
-            when(sagaSteps.cancelBookingDueToMatchCancellation("booking-draft", "Match cancelled")).thenReturn(false);
-            when(sagaSteps.cancelBookingDueToMatchCancellation("booking-paid", "Match cancelled")).thenReturn(true);
 
             service.cancelBookingsForShowtime(SHOWTIME_ID, "Match cancelled");
 
             verify(sagaSteps).cancelBookingDueToMatchCancellation("booking-draft", "Match cancelled");
             verify(sagaSteps).cancelBookingDueToMatchCancellation("booking-paid", "Match cancelled");
-            verify(paymentPort, never()).refundPayment(eq("booking-draft"), anyString());
-            verify(paymentPort).refundPayment("booking-paid", "Match cancelled");
             verify(ticketInventoryPort, never()).releaseSeats(anyString(), anyString(), any());
+            verifyNoInteractions(paymentPort);
         }
 
         @Test

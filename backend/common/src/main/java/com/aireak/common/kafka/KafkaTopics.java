@@ -30,6 +30,11 @@ public final class KafkaTopics {
     public static final String BOOKING_CREATED    = "booking.booking.created";
     public static final String BOOKING_CONFIRMED  = "booking.booking.confirmed";
     public static final String BOOKING_CANCELLED  = "booking.booking.cancelled";
+    // Not a fourth Booking lifecycle event but a request aimed at payment-service: a cancelled
+    // booking that was already paid for owes its customer a refund. It rides the outbox for the
+    // same reason the others do -- the row is written in the transaction that cancels the booking,
+    // so the refund cannot be lost if payment-service is down at that moment.
+    public static final String REFUND_REQUESTED   = "booking.refund.requested";
 
     // --- Payment events ---
     public static final String PAYMENT_INITIATED  = "payment.payment.initiated";

@@ -61,6 +61,15 @@
             <groupId>org.redisson</groupId>
             <artifactId>redisson-spring-boot-starter</artifactId>
         </dependency>
+
+        <!-- Kafka (version managed by the Spring Boot BOM) — consumes booking-service's
+             RefundRequestedEvent (see RefundRequestedConsumer). This service produces through the
+             outbox + Debezium and needs no Kafka producer for that, but a durable refund request
+             has to be CONSUMED from Kafka, which the outbox cannot do. -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
         <!-- Guava — runtime dep for com.aireak.common.cache.LocalStringCache, used by
              RedissonPaymentIdempotencyAdapter's local resolved-paymentId cache. common declares
              Guava optional=true, so each consuming service redeclares it here. -->
@@ -118,6 +127,11 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka-test</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

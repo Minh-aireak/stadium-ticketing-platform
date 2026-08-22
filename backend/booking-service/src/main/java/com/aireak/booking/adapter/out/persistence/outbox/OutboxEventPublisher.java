@@ -8,6 +8,7 @@ import com.aireak.booking.application.port.out.DomainEventPublisher;
 import com.aireak.booking.domain.event.BookingCancelledEvent;
 import com.aireak.booking.domain.event.BookingConfirmedEvent;
 import com.aireak.booking.domain.event.BookingCreatedEvent;
+import com.aireak.booking.domain.event.RefundRequestedEvent;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
@@ -37,6 +38,7 @@ public class OutboxEventPublisher extends AbstractOutboxEventPublisher implement
             case BookingCreatedEvent ignored -> KafkaTopics.BOOKING_CREATED;
             case BookingConfirmedEvent ignored -> KafkaTopics.BOOKING_CONFIRMED;
             case BookingCancelledEvent ignored -> KafkaTopics.BOOKING_CANCELLED;
+            case RefundRequestedEvent ignored -> KafkaTopics.REFUND_REQUESTED;
             default -> null;
         };
     }
@@ -47,6 +49,7 @@ public class OutboxEventPublisher extends AbstractOutboxEventPublisher implement
             case BookingCreatedEvent e -> e.bookingId();
             case BookingConfirmedEvent e -> e.bookingId();
             case BookingCancelledEvent e -> e.bookingId();
+            case RefundRequestedEvent e -> e.bookingId();
             default -> throw new IllegalArgumentException(
                     "No aggregate id mapping for domain event type: " + event.getClass().getSimpleName());
         };

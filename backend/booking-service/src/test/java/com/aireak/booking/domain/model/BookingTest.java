@@ -3,6 +3,7 @@ package com.aireak.booking.domain.model;
 import com.aireak.booking.domain.event.BookingCancelledEvent;
 import com.aireak.booking.domain.event.BookingConfirmedEvent;
 import com.aireak.booking.domain.event.BookingCreatedEvent;
+import com.aireak.booking.domain.event.RefundRequestedEvent;
 import com.aireak.booking.domain.exception.InvalidBookingStatusException;
 import com.aireak.booking.domain.exception.MaxTicketsExceededException;
 import org.junit.jupiter.api.Test;
@@ -157,30 +158,64 @@ class BookingTest {
                 .isInstanceOf(InvalidBookingStatusException.class);
     }
 
+    /**
+     * A CONFIRMED booking has been charged, so cancelling it owes the customer their money back.
+     * Both events come out of the same call, which is what puts the refund in the same transaction
+     * — and the same outbox write — as the cancellation.
+     */
     @Test
-    void cancelDueToMatchCancellationFromConfirmedReturnsTrueAndRaisesEvent() {
+    void cancellingAConfirmedBookingRaisesBothCancellationAndRefundRequest() {
         Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
         booking.markPendingPayment();
         booking.confirm();
         booking.pullDomainEvents(); // discard BookingConfirmedEvent
 
-        boolean wasConfirmed = booking.cancelDueToMatchCancellation("Match cancelled by organizer");
+        booking.cancelDueToMatchCancellation("Match cancelled by organizer");
 
-        assertThat(wasConfirmed).isTrue();
         assertThat(booking.getStatus()).isEqualTo(BookingStatus.CANCELLED);
         List<Object> events = booking.pullDomainEvents();
-        assertThat(events).hasSize(1);
+        assertThat(events).hasSize(2);
         assertThat(((BookingCancelledEvent) events.get(0)).reason()).isEqualTo("Match cancelled by organizer");
+        RefundRequestedEvent refund = (RefundRequestedEvent) events.get(1);
+        assertThat(refund.bookingId()).isEqualTo(booking.getBookingId());
+        assertThat(refund.reason()).isEqualTo("Match cancelled by organizer");
+    }
+
+    /** A booking that never reached CONFIRMED was never charged — refunding it would be wrong. */
+    @Test
+    void cancellingAnUnpaidBookingRaisesNoRefundRequest() {
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
+
+        booking.cancelDueToMatchCancellation("Match cancelled by organizer");
+
+        assertThat(booking.getStatus()).isEqualTo(BookingStatus.CANCELLED);
+        assertThat(booking.pullDomainEvents())
+                .hasSize(1)
+                .hasOnlyElementsOfType(BookingCancelledEvent.class);
     }
 
     @Test
-    void cancelDueToMatchCancellationFromDraftReturnsFalse() {
+    void latePaymentRefundRequestRaisesTheEventWithoutChangingStatus() {
         Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
+        booking.cancel("customer changed their mind");
+        booking.pullDomainEvents();
 
-        boolean wasConfirmed = booking.cancelDueToMatchCancellation("Match cancelled by organizer");
+        booking.requestRefundForLatePayment("Payment succeeded after booking cancellation");
 
-        assertThat(wasConfirmed).isFalse();
         assertThat(booking.getStatus()).isEqualTo(BookingStatus.CANCELLED);
+        assertThat(booking.pullDomainEvents())
+                .hasSize(1)
+                .hasOnlyElementsOfType(RefundRequestedEvent.class);
+    }
+
+    /** Guards the aggregate against a refund being requested for a booking still on its way. */
+    @Test
+    void latePaymentRefundRequestRejectsABookingThatIsNotCancelled() {
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
+        booking.markPendingPayment();
+
+        assertThatThrownBy(() -> booking.requestRefundForLatePayment("late payment"))
+                .isInstanceOf(InvalidBookingStatusException.class);
     }
 
     @Test

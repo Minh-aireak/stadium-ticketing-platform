@@ -3,6 +3,7 @@ package com.aireak.booking.domain.model;
 import com.aireak.booking.domain.event.BookingCancelledEvent;
 import com.aireak.booking.domain.event.BookingConfirmedEvent;
 import com.aireak.booking.domain.event.BookingCreatedEvent;
+import com.aireak.booking.domain.event.RefundRequestedEvent;
 import com.aireak.booking.domain.exception.InvalidBookingStatusException;
 import com.aireak.booking.domain.exception.MaxTicketsExceededException;
 
@@ -123,18 +124,39 @@ public class Booking {
     /**
      * System-triggered cancellation for a match that itself got cancelled (see
      * MatchCancelledConsumer) — unlike {@link #cancel}, this is allowed from CONFIRMED (an
-     * already-paid booking) since the match no longer exists to honor it. Returns whether the
-     * booking was CONFIRMED, so the caller knows whether a refund is owed (a DRAFT/PENDING_PAYMENT
-     * booking was never charged).
+     * already-paid booking) since the match no longer exists to honor it.
+     *
+     * <p>A booking that was CONFIRMED has been charged, so it also raises
+     * {@link RefundRequestedEvent}. The aggregate decides that rather than returning a flag for
+     * the caller to act on: whether money changed hands is a fact about this booking's state, and
+     * pairing the two events here is what puts the refund in the same transaction — and therefore
+     * the same outbox write — as the cancellation that owes it.
      */
-    public boolean cancelDueToMatchCancellation(String reason) {
+    public void cancelDueToMatchCancellation(String reason) {
         if (status == BookingStatus.CANCELLED) {
             throw new InvalidBookingStatusException("Cannot cancel a CANCELLED booking");
         }
         boolean wasConfirmed = status == BookingStatus.CONFIRMED;
         this.status = BookingStatus.CANCELLED;
         domainEvents.add(new BookingCancelledEvent(bookingId, customerId, customerEmail, showtimeId, reason));
-        return wasConfirmed;
+        if (wasConfirmed) {
+            domainEvents.add(new RefundRequestedEvent(bookingId, reason));
+        }
+    }
+
+    /**
+     * The late-payment race: PAYMENT_SUCCEEDED arrives for a booking that was already cancelled
+     * (see {@code BookingOrchestrationService#confirmBooking}). The booking stays cancelled — the
+     * seats are long released — but the customer has now been charged for it, so the money has to
+     * go back. Separate from {@link #cancelDueToMatchCancellation} because no state changes here:
+     * the only outcome is the refund request.
+     */
+    public void requestRefundForLatePayment(String reason) {
+        if (status != BookingStatus.CANCELLED) {
+            throw new InvalidBookingStatusException(
+                    "Late-payment refund only applies to a CANCELLED booking, but status is " + status);
+        }
+        domainEvents.add(new RefundRequestedEvent(bookingId, reason));
     }
 
     // Records that ticketInventoryPort.confirmReservation() actually succeeded. Idempotent —

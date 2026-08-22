@@ -14,11 +14,4 @@ public interface PaymentPort {
 
     // The only two terminal states worth acting on synchronously.
     enum PaymentOutcome { SUCCEEDED, FAILED }
-
-    /**
-     * Refunds the SUCCEEDED payment for a booking (see payment-service's RefundPaymentUseCase —
-     * a no-op there, not an error, if the booking was never actually charged). Best-effort: a
-     * failure here must never block the booking's own cancellation from completing.
-     */
-    void refundPayment(String bookingId, String reason);
 }

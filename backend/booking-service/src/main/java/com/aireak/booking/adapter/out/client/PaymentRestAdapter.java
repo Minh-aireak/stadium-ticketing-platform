@@ -55,35 +55,6 @@ public class PaymentRestAdapter implements PaymentPort {
                 .toBodilessEntity();
     }
 
-    /**
-     * Always the internal service token, never a forwarded end-user token — this only ever runs
-     * from {@code MatchCancelledConsumer} (Kafka listener thread), which has no authenticated
-     * end-user request to forward (see TicketInventoryRestAdapter#confirmReservation, same
-     * rationale). Best-effort: a failure here is logged and swallowed so it never blocks the
-     * booking's own cancellation — payment-service's refund endpoint has no reconciliation
-     * backstop yet (see PaymentService#refundByBookingId javadoc), so a swallowed failure here is
-     * a real, currently-accepted gap, not a false sense of safety.
-     */
-    @Override
-    @Bulkhead(name = "payment", type = Bulkhead.Type.SEMAPHORE)
-    @CircuitBreaker(name = "payment", fallbackMethod = "refundPaymentFallback")
-    @Retry(name = "payment")
-    public void refundPayment(String bookingId, String reason) {
-        log.debug("Refunding payment: bookingId={}", bookingId);
-        restClient.post()
-                .uri(baseUrl + "/api/v1/payments/{bookingId}/refund", bookingId)
-                .header("Idempotency-Key", "refund:" + bookingId)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + internalServiceTokenProvider.mintServiceToken())
-                .body(new RefundRequest(reason))
-                .retrieve()
-                .toBodilessEntity();
-    }
-
-    private void refundPaymentFallback(String bookingId, String reason, Throwable t) {
-        log.error("Failed to refund payment (non-critical, no reconciliation backstop yet): bookingId={}: {}",
-                bookingId, t.getMessage());
-    }
-
     // See TicketInventoryRestAdapter#authorizationToken — same fallback rationale.
     private String authorizationToken() {
         return AuthenticatedUserContext.get().map(AuthenticatedUser::token)
@@ -133,8 +104,6 @@ public class PaymentRestAdapter implements PaymentPort {
     }
 
     record InitiatePaymentRequest(String bookingId, BigDecimal amount, String currency) {}
-
-    record RefundRequest(String reason) {}
 
     record PaymentStatusResponse(String paymentId, String bookingId, String status,
                                   String gatewayTransactionId, String failureReason) {}

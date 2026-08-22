@@ -56,13 +56,29 @@ class BookingSagaSteps {
         saveAndPublish(booking);
     }
 
-    /** @return whether the booking was CONFIRMED (and so needs a refund — see Booking#cancelDueToMatchCancellation) */
+    /**
+     * Cancels and, when the booking had been paid for, requests the refund in the SAME
+     * transaction — see {@code Booking#cancelDueToMatchCancellation}. Nothing is returned for the
+     * caller to follow up on: the outbox row is the follow-up, and unlike the HTTP call this
+     * replaced it survives payment-service being down.
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public boolean cancelBookingDueToMatchCancellation(String bookingId, String reason) {
+    public void cancelBookingDueToMatchCancellation(String bookingId, String reason) {
         Booking booking = findOrThrow(bookingId);
-        boolean wasConfirmed = booking.cancelDueToMatchCancellation(reason);
+        booking.cancelDueToMatchCancellation(reason);
         saveAndPublish(booking);
-        return wasConfirmed;
+    }
+
+    /**
+     * Records that a payment landed after its booking was already cancelled, so the charge has to
+     * be given back — see {@code Booking#requestRefundForLatePayment}. Its own transaction for the
+     * same reason every other step here has one: the outbox row must commit or not at all.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void requestRefundForLatePayment(String bookingId, String reason) {
+        Booking booking = findOrThrow(bookingId);
+        booking.requestRefundForLatePayment(reason);
+        eventPublisher.publishAll(booking.pullDomainEvents());
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

@@ -748,6 +748,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # Consumes booking.refund.requested (see RefundRequestedConsumer) -- a refund it cannot read
+      # is a customer left out of pocket, so this is a hard dependency, not a lazy one.
+      kafka:
+        condition: service_healthy
     ports:
       - "8084:8084"
     volumes:
@@ -769,6 +773,7 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       # payment-service is deliberately NOT in booking-service's depends_on -- booking-service
       # waits on payment-service being healthy, and the reverse edge would be a cycle. This URL
       # only has to resolve at request time, not at boot.
