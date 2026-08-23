@@ -13,9 +13,13 @@ import java.util.*;
  *
  * <p>Concurrency protection:
  * <ul>
- *   <li>Layer 1: Redisson RLock at application service layer (before entering this method)</li>
- *   <li>Layer 2: {@code @Version} on JPA entity (optimistic lock)</li>
+ *   <li>Redisson RLock at the application service layer, held across the whole confirm — this is
+ *       what serializes two confirms for the same showtime</li>
+ *   <li>{@code Seat#sell} itself, which rejects a seat already SOLD by a DIFFERENT booking, so a
+ *       lost or expired hold cannot let two bookings both win the same seat unnoticed</li>
  * </ul>
+ * A JPA {@code @Version} on the aggregate root used to be listed here as a second layer; it never
+ * incremented on this path and was removed — see {@code SeatInventoryJpaEntity}.
  */
 public class SeatInventory {
 

@@ -30,14 +30,23 @@ class SeatSaleConfirmer {
     private final SeatInventoryRepository seatInventoryRepository;
     private final DomainEventPublisher eventPublisher;
 
-    /** Persists SOLD for {@code seatCodes} and publishes the resulting domain events. */
+    /**
+     * Persists SOLD for {@code seatCodes} and publishes the resulting domain events.
+     *
+     * <p>Loads and writes only those seats, not the whole aggregate. Confirming two seats used to
+     * read every seat of the showtime (the collection is EAGER), rebuild all of them as domain
+     * objects, and then diff the lot against the aggregate to find the two that changed — work
+     * proportional to stadium capacity for a two-row update, repeated on every successful payment.
+     * See {@code SeatInventoryRepository#findByShowtimeIdWithSeats} for why a partial aggregate is
+     * safe here.
+     */
     @Transactional
     void confirmSale(String showtimeId, List<SeatCode> seatCodes, String bookingId) {
-        SeatInventory inventory = seatInventoryRepository.findByShowtimeId(showtimeId)
+        SeatInventory inventory = seatInventoryRepository.findByShowtimeIdWithSeats(showtimeId, seatCodes)
                 .orElseThrow(() -> new SeatInventoryNotFoundException(showtimeId));
 
         inventory.sellSeats(seatCodes, bookingId);
-        seatInventoryRepository.save(inventory);
+        seatInventoryRepository.saveSeats(inventory);
         eventPublisher.publishAll(inventory.pullDomainEvents());
     }
 }

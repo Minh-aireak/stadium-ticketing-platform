@@ -100,6 +100,34 @@ public class SeatInventoryPersistenceAdapter implements SeatInventoryRepository 
     }
 
     @Override
+    public Optional<SeatInventory> findByShowtimeIdWithSeats(String showtimeId, List<SeatCode> seatCodes) {
+        // Existence is checked separately (and off the local cache) rather than inferred from an
+        // empty seat list: "this showtime has no inventory" and "none of these seat codes exist"
+        // are different answers, and only the first should read as not-found to the caller.
+        if (!existsByShowtimeId(showtimeId)) {
+            return Optional.empty();
+        }
+        return Optional.of(SeatInventory.reconstitute(showtimeId, findSeatsByCodes(showtimeId, seatCodes)));
+    }
+
+    @Override
+    public void saveSeats(SeatInventory seatInventory) {
+        Map<String, Seat> bySeatCode = seatInventory.getSeats().stream()
+                .collect(Collectors.toMap(seat -> seat.getSeatCode().value(), seat -> seat));
+        if (bySeatCode.isEmpty()) {
+            return;
+        }
+        List<SeatJpaEntity> rows = seatJpaRepository.findByShowtimeIdAndSeatCodeIn(
+                seatInventory.getShowtimeId(), List.copyOf(bySeatCode.keySet()));
+        rows.forEach(row -> {
+            Seat seat = bySeatCode.get(row.getSeatCode());
+            row.setStatus(seat.getStatus());
+            row.setReservedByBookingId(seat.getReservedByBookingId());
+        });
+        seatJpaRepository.saveAll(rows);
+    }
+
+    @Override
     public List<Seat> findSeatsByCodes(String showtimeId, List<SeatCode> seatCodes) {
         List<String> codes = seatCodes.stream().map(SeatCode::value).toList();
         return seatJpaRepository.findByShowtimeIdAndSeatCodeIn(showtimeId, codes)

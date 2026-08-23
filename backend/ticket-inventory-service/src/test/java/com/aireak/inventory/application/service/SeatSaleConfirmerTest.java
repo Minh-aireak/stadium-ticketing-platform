@@ -45,12 +45,15 @@ class SeatSaleConfirmerTest {
         newConfirmer();
         SeatInventory inventory = SeatInventory.create("showtime-1",
                 List.of(new Seat(A1, SeatTier.STANDARD, PRICE)));
-        when(seatInventoryRepository.findByShowtimeId("showtime-1")).thenReturn(Optional.of(inventory));
+        when(seatInventoryRepository.findByShowtimeIdWithSeats("showtime-1", List.of(A1)))
+                .thenReturn(Optional.of(inventory));
 
         confirmer.confirmSale("showtime-1", List.of(A1), "booking-1");
 
+        // saveSeats, not save: the confirm path writes the seats it sold and never the aggregate
+        // root, whose row has nothing to update.
         ArgumentCaptor<SeatInventory> saved = ArgumentCaptor.forClass(SeatInventory.class);
-        verify(seatInventoryRepository).save(saved.capture());
+        verify(seatInventoryRepository).saveSeats(saved.capture());
         assertThat(saved.getValue()).isSameAs(inventory);
 
         ArgumentCaptor<List<Object>> published = ArgumentCaptor.forClass(List.class);
@@ -62,7 +65,8 @@ class SeatSaleConfirmerTest {
     @Test
     void confirmSaleThrowsWhenInventoryNotFound() {
         newConfirmer();
-        when(seatInventoryRepository.findByShowtimeId("missing")).thenReturn(Optional.empty());
+        when(seatInventoryRepository.findByShowtimeIdWithSeats("missing", List.of(A1)))
+                .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> confirmer.confirmSale("missing", List.of(A1), "booking-1"))
                 .isInstanceOf(SeatInventoryNotFoundException.class);
