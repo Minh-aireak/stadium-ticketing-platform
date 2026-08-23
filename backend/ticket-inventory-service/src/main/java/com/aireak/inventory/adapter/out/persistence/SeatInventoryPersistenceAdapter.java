@@ -52,14 +52,16 @@ public class SeatInventoryPersistenceAdapter implements SeatInventoryRepository 
     private final SeatJpaRepository seatJpaRepository;
 
     /**
-     * If a row for this showtime already exists, mutate the SAME managed entity
-     * (and its managed child {@code SeatJpaEntity} rows) in place rather than
-     * building a brand-new detached instance. A freshly-{@code .builder()}'d
-     * entity always has {@code version=null}, which Hibernate treats as
-     * transient — {@code jpaRepository.save()} on it would call {@code persist()}
-     * even though a managed instance for the same id already exists in this
-     * persistence context (e.g. loaded earlier in the same transaction by
-     * {@code findByShowtimeId()}), throwing {@code NonUniqueObjectException}.
+     * Writes a whole seat map. In practice only {@code SeatMapGenerationService} calls this, and
+     * only for a showtime that does not have one yet (it returns early otherwise), so the
+     * existing-row branch below no longer runs: selling seats goes through {@link #saveSeats},
+     * which never loads or rewrites the map.
+     *
+     * <p>That branch is kept rather than deleted because dropping it would quietly make this
+     * method wrong for an existing showtime instead of merely unused: {@link #toJpaEntity} builds
+     * detached seats with no id, so merging those over a map that already has rows would insert
+     * duplicates and break {@code uk_seats_showtime_code}. Mutating the managed rows in place is
+     * what keeps re-saving a populated showtime correct if anything ever needs to.
      */
     @Override
     public void save(SeatInventory seatInventory) {
