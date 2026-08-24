@@ -40,7 +40,9 @@ hiccup between "money taken" and "booking confirmed" cannot lose the event.
 | `frontend` | 5173 | React storefront. |
 
 `common` is a shared library, not a service: JWT filter, correlation-id filter, the RFC 7807
-exception handler, `KafkaTopics`, and the ShedLock configuration.
+exception handler, `KafkaTopics`, the ShedLock configuration, and the transactional outbox — its
+entity, repository, purge job and the publisher base class every service extends with nothing but
+its own event-to-topic mapping.
 
 ### The replicated services
 
