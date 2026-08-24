@@ -57,7 +57,8 @@ x-ticket-inventory-service-env: &ticket-inventory-service-env
   REDIS_PORT: 6379
   REDIS_PASSWORD: ${REDIS_PASSWORD}
   KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-  MATCH_CATALOG_SERVICE_URL: http://match-catalog-service:8082
+  # The load balancer, not an instance -- same reasoning as TICKET_INVENTORY_SERVICE_URL.
+  MATCH_CATALOG_SERVICE_URL: http://catalog-lb:8082
   JWT_SECRET: ${JWT_SECRET}
   JWT_PREVIOUS_SECRET: ${JWT_PREVIOUS_SECRET}
   JWT_INTERNAL_SECRET: ${JWT_INTERNAL_SECRET}
@@ -105,6 +106,52 @@ x-booking-service-env: &booking-service-env
   # inventory replicas the same way the gateway's do.
   TICKET_INVENTORY_SERVICE_URL: http://ticket-inventory-lb:8083
   PAYMENT_SERVICE_URL: http://payment-service:8084
+  JWT_SECRET: ${JWT_SECRET}
+  JWT_PREVIOUS_SECRET: ${JWT_PREVIOUS_SECRET}
+  JWT_INTERNAL_SECRET: ${JWT_INTERNAL_SECRET}
+  JWT_ISSUER: ${JWT_ISSUER}
+  JWT_AUDIENCE: ${JWT_AUDIENCE}
+
+x-match-catalog-service: &match-catalog-service
+  build:
+    context: ./backend
+    dockerfile: match-catalog-service/Dockerfile
+  networks: [stadium-net]
+  depends_on:
+    postgres-catalog:
+      condition: service_healthy
+    # Waits for the accounts, not just for a healthy cluster: catalog_service does not exist
+    # until elasticsearch-init has run, and every request would 401 until it does.
+    elasticsearch-init:
+      condition: service_completed_successfully
+    kafka:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  volumes:
+    - app_logs:/var/log/app
+  healthcheck:
+    test: ["CMD-SHELL", "curl -sf http://localhost:8082/actuator/health"]
+    interval: 15s
+    timeout: 5s
+    retries: 20
+    start_period: 60s
+
+x-match-catalog-service-env: &match-catalog-service-env
+  DB_HOST: postgres-catalog
+  DB_PORT: 5432
+  DB_USERNAME: ${DB_USERNAME}
+  DB_PASSWORD: ${DB_PASSWORD}
+  ELASTICSEARCH_HOST: elasticsearch
+  ELASTICSEARCH_PORT: 9200
+  ELASTICSEARCH_SCHEME: http
+  # Scoped to the "matches" index only — this service has no access to the platform's logs.
+  ELASTICSEARCH_USERNAME: catalog_service
+  ELASTICSEARCH_PASSWORD: ${CATALOG_ES_PASSWORD}
+  KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  REDIS_PASSWORD: ${REDIS_PASSWORD}
   JWT_SECRET: ${JWT_SECRET}
   JWT_PREVIOUS_SECRET: ${JWT_PREVIOUS_SECRET}
   JWT_INTERNAL_SECRET: ${JWT_INTERNAL_SECRET}
@@ -630,56 +677,63 @@ services:
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
 
   # ---- match-catalog-service (match browse/search, Elasticsearch read model) ----
-  match-catalog-service:
-    build:
-      context: ./backend
-      dockerfile: match-catalog-service/Dockerfile
-    container_name: match-catalog-service_stadium_booking
-    networks: [stadium-net]
-    depends_on:
-      postgres-catalog:
-        condition: service_healthy
-      # Waits for the accounts, not just for a healthy cluster: catalog_service does not exist
-      # until elasticsearch-init has run, and every request would 401 until it does.
-      elasticsearch-init:
-        condition: service_completed_successfully
-      kafka:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+  # ---- match-catalog-service, instance 1 (browse/search read model) ----
+  # Two instances are what make CachingMatchRepository's local tier observable: save() invalidates
+  # Redis and the writing pod's own Guava cache, but cannot reach into the other pod's, so an admin
+  # publish/cancel stays visible-as-stale on the other instance until its 5s local TTL expires. One
+  # instance can never show that window. availableSeats is unaffected either way -- overlayLiveSeats
+  # re-reads it from Redis on every return and never trusts a cache tier for it.
+  match-catalog-service-1:
+    <<: *match-catalog-service
+    container_name: match-catalog-service-1_stadium_booking
     ports:
-      - "8082:8082"
-    volumes:
-      - app_logs:/var/log/app
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8082/actuator/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 20
-      start_period: 60s
+      # Direct access, bypassing the load balancer -- for asking one specific instance what it
+      # currently believes while measuring that divergence window. Host port is
+      # <instance number><the service's own port>, so a third instance would be 38082.
+      - "18082:8082"
     environment:
+      <<: *match-catalog-service-env
       # Turns on the ECS JSON log file Logstash tails; see the logging block in
       # this service's application.yaml for why it is set here and not there.
-      LOGGING_FILE_NAME: /var/log/app/match-catalog-service.log
-      DB_HOST: postgres-catalog
-      DB_PORT: 5432
-      DB_USERNAME: ${DB_USERNAME}
-      DB_PASSWORD: ${DB_PASSWORD}
-      ELASTICSEARCH_HOST: elasticsearch
-      ELASTICSEARCH_PORT: 9200
-      ELASTICSEARCH_SCHEME: http
-      # Scoped to the "matches" index only — this service has no access to the platform's logs.
-      ELASTICSEARCH_USERNAME: catalog_service
-      ELASTICSEARCH_PASSWORD: ${CATALOG_ES_PASSWORD}
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
-      JWT_SECRET: ${JWT_SECRET}
-      JWT_PREVIOUS_SECRET: ${JWT_PREVIOUS_SECRET}
-      JWT_INTERNAL_SECRET: ${JWT_INTERNAL_SECRET}
-      JWT_ISSUER: ${JWT_ISSUER}
-      JWT_AUDIENCE: ${JWT_AUDIENCE}
+      # Per instance, never shared: two JVMs appending to one file interleave half-written
+      # JSON lines and both apply their own rolling policy to it.
+      LOGGING_FILE_NAME: /var/log/app/match-catalog-service-1.log
+
+  # ---- match-catalog-service, instance 2 --------------------------------
+  match-catalog-service-2:
+    <<: *match-catalog-service
+    container_name: match-catalog-service-2_stadium_booking
+    ports:
+      - "28082:8082"
+    environment:
+      <<: *match-catalog-service-env
+      LOGGING_FILE_NAME: /var/log/app/match-catalog-service-2.log
+
+  # ---- match-catalog load balancer --------------------------------------
+  # Same construction as ticket-inventory-lb below; see the comment there for why it waits on
+  # service_healthy rather than service_started.
+  catalog-lb:
+    image: nginx:1.27-alpine
+    container_name: catalog-lb_stadium_booking
+    networks: [stadium-net]
+    depends_on:
+      match-catalog-service-1:
+        condition: service_healthy
+      match-catalog-service-2:
+        condition: service_healthy
+    ports:
+      # The host port the single match-catalog-service container used to publish, so nothing
+      # outside compose has to change.
+      - "8082:8082"
+    volumes:
+      - ./infra/nginx/catalog-lb.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      # nginx:alpine has BusyBox wget but no curl, unlike the service images.
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8082/nginx-health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   ticket-inventory-service-1:
     <<: *ticket-inventory-service
@@ -866,10 +920,10 @@ services:
         condition: service_healthy
       identity-service:
         condition: service_healthy
-      match-catalog-service:
-        condition: service_healthy
       # The load balancers, not the instances behind them: a healthy LB already implies both of
       # its instances passed their healthcheck (that is its own depends_on condition).
+      catalog-lb:
+        condition: service_healthy
       ticket-inventory-lb:
         condition: service_healthy
       payment-service:
@@ -896,7 +950,7 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       IDENTITY_SERVICE_URL: http://identity-service:8081
-      MATCH_CATALOG_SERVICE_URL: http://match-catalog-service:8082
+      MATCH_CATALOG_SERVICE_URL: http://catalog-lb:8082
       # These two are load balancers fronting two instances each (infra/nginx/*.conf); the rest
       # are single containers addressed by their own DNS name. Spring Cloud Gateway has no
       # service discovery configured, so it only ever knows the one URI it is given -- which is

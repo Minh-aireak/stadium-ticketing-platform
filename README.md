@@ -32,7 +32,7 @@ hiccup between "money taken" and "booking confirmed" cannot lose the event.
 |---|---|---|
 | `api-gateway` | 8080 | Single entry point. Validates JWTs, strips spoofed identity headers, enforces per-route rate limits. Purely technical — no domain model. |
 | `identity-service` | 8081 | Registration, email verification, login, refresh-token rotation with reuse detection, password reset. |
-| `match-catalog-service` | 8082 | Matches and showtimes. CQRS: Postgres for writes, Elasticsearch for browse/search. |
+| `match-catalog-service` | 8082 | Matches and showtimes. CQRS: Postgres for writes, Elasticsearch for browse/search. **Runs as 2 instances.** |
 | `ticket-inventory-service` | 8083 | Seat availability and holds, guarded by a Redisson lock so two customers cannot take the same seat. **Runs as 2 instances.** |
 | `payment-service` | 8084 | Payment initiation, Stripe webhooks, refunds, and reconciliation of payments that were charged but never confirmed. |
 | `notification-service` | 8085 | Consumes domain events and sends transactional email through Brevo; keeps an in-app notification feed. |
@@ -42,11 +42,14 @@ hiccup between "money taken" and "booking confirmed" cannot lose the event.
 `common` is a shared library, not a service: JWT filter, correlation-id filter, the RFC 7807
 exception handler, `KafkaTopics`, and the ShedLock configuration.
 
-### The replicated service
+### The replicated services
 
-`ticket-inventory-service` runs as two instances behind an nginx load balancer
-(`infra/nginx/ticket-inventory-lb.conf`); the other six run as one. The point is not throughput on a
-laptop — it is that a single instance cannot exercise the machinery its correctness rests on:
+`ticket-inventory-service` and `match-catalog-service` each run as two instances behind an nginx
+load balancer (`infra/nginx/ticket-inventory-lb.conf`, `infra/nginx/catalog-lb.conf`); the other
+five run as one. The point is not throughput on a laptop, and the two are replicated for different
+reasons.
+
+**ticket-inventory-service** — its correctness rests on machinery a lone process cannot exercise:
 
 | Mechanism | Why one instance proves nothing |
 |---|---|
@@ -54,17 +57,23 @@ laptop — it is that a single instance cannot exercise the machinery its correc
 | ShedLock on the reconcilers and outbox cleanup | The `shedlock` row only ever has one claimant, so the guard never has to reject anyone. |
 | Kafka consumer-group rebalancing | A group of one is never rebalanced. |
 
-`booking-service` has the same three mechanisms and is still run as one instance, because its
-contested path — the Redis idempotency claim on `POST /bookings` — sits behind the
-`bookings.idempotency_key` unique index, which rejects a duplicate however many instances are
-running. A second booking instance would verify a guarantee that already holds, where a second
-inventory instance is the only thing standing between a JVM-local lock and a seat sold twice.
+**match-catalog-service** — nothing here is unsafe across instances; what a second one exposes is
+the price of its local cache tier. `CachingMatchRepository.save()` invalidates Redis and the
+writing pod's own Guava cache, but cannot reach into the other pod's, so an admin publish or cancel
+stays visible-as-stale on the other instance until its 5s TTL expires. That window exists on any
+multi-pod deployment and is invisible on one. `availableSeats` is unaffected: `overlayLiveSeats`
+re-reads it from Redis on every return and never trusts a cache tier for it.
 
-Callers address the load balancer (`ticket-inventory-lb:8083`), never an
-instance. Each instance is *also* published directly on the host, for when you need to ask one
-specific instance a question while debugging. Those host ports are
-`<instance number><the service's own port>` — 18083 and 28083 — so a third instance would be
-38083 without anyone having to invent a number.
+`booking-service` deliberately stays single. It has the same ShedLock and consumer-group machinery,
+but its contested path — the Redis idempotency claim on `POST /bookings` — sits behind the
+`bookings.idempotency_key` unique index, which rejects a duplicate however many instances are
+running. A second booking instance would verify a guarantee that already holds.
+
+Callers address a load balancer (`ticket-inventory-lb:8083`, `catalog-lb:8082`), never an instance.
+Each instance is *also* published directly on the host, for when you need to ask one specific
+instance a question while debugging. Those host ports are
+`<instance number><the service's own port>` — 18083/28083 for inventory, 18082/28082 for the
+catalog — so a third instance would be 38083 without anyone having to invent a number.
 
 Because there is no service registry, nginx only knows the instances written into its `upstream`
 block, and its health checking is passive (an instance drops out *after* failing three requests).
@@ -72,11 +81,16 @@ Adding a third instance means one more `server` line, one more compose stanza, a
 Prometheus target. That manual step is the trade being made: Eureka or Consul would remove it, at
 the cost of another always-on container to keep healthy.
 
-Two details in the nginx config are load-bearing rather than boilerplate. `proxy_next_upstream`
-deliberately omits `non_idempotent`, so a POST already handed to an instance is never replayed
-against the other one — retrying a seat reservation that may have succeeded is how a seat gets sold
-twice. And balancing is `least_conn`, not round-robin, because a reserve call can sit on the seat
-lock for seconds while an availability read returns immediately.
+Two details in the nginx configs are load-bearing rather than boilerplate. `proxy_next_upstream`
+deliberately omits `non_idempotent` in both, so a POST already handed to an instance is never
+replayed against the other one — retrying a seat reservation that may have succeeded is how a seat
+gets sold twice, and the catalog's admin writes share a path prefix with its reads.
+
+The balancing strategies differ on purpose. Inventory uses `least_conn`, because a reserve call can
+sit on the seat lock for seconds while an availability read returns immediately, so in-flight count
+is a far better load signal than request share. The catalog uses plain round-robin: nothing there
+blocks, and an even split is what makes the local-cache divergence window observable in the first
+place.
 
 ---
 
@@ -136,8 +150,8 @@ ready to serve, not merely that containers launched.
 
 ### Metrics
 
-Prometheus scrapes `/actuator/prometheus` on every service (both instances of
-`ticket-inventory-service`, each under its own container name) plus four exporters — node, Redis, Postgres and Kafka. Grafana
+Prometheus scrapes `/actuator/prometheus` on every service (both instances of each replicated
+one, each under its own container name) plus four exporters — node, Redis, Postgres and Kafka. Grafana
 auto-loads whatever dashboard JSON sits in `infra/grafana/provisioning/dashboards/`.
 
 Kafka is the one thing measured from outside the application. `kafka-exporter` asks the broker for
@@ -159,7 +173,7 @@ deliberately unset), so each service sets `setConcurrency(1)` on its listener fa
 Kafka never assigns one partition to two consumers in the same group, so a higher number would
 only allocate idle consumers, each holding a broker connection and heartbeating for no work. The
 two settings are one decision: raise them together or not at all. Note this caps *consumer*
-parallelism only — HTTP traffic still spreads across both instances of `ticket-inventory-service`,
+parallelism only — HTTP traffic still spreads across both instances of the replicated services,
 and both write to their outbox freely.
 
 ### Logs
@@ -169,11 +183,11 @@ normally) and the same event as ECS JSON to `/var/log/app/<service>.log` on the 
 volume. Logstash tails those files and indexes them into the `logs-stadium-dev` data stream, which
 is what to point a Kibana data view at.
 
-`ticket-inventory-service` writes one file *per instance*
-(`ticket-inventory-service-1.log`, `ticket-inventory-service-2.log`) — two JVMs appending to one file
-would interleave half-written JSON lines and each apply its own rolling policy to it. Both files
-carry the same `service.name`, so a Kibana query for the service returns both instances as one
-stream; `log.file.path` is the field that tells them apart.
+The replicated services write one file *per instance*
+(`ticket-inventory-service-1.log`, `match-catalog-service-2.log`, …) — two JVMs appending to one
+file would interleave half-written JSON lines and each apply its own rolling policy to it. Both
+files of a service carry the same `service.name`, so a Kibana query for it returns both instances
+as one stream; `log.file.path` is the field that tells them apart.
 
 The JSON side is Spring Boot's own `logging.structured.format.file=ecs` — no logging appender
 library is involved — so `service.name` and the `correlationId` MDC entry are already fields you can
@@ -194,8 +208,8 @@ Work started by a `@Scheduled` job (the reconcilers, outbox cleanup) has no requ
 Outbound REST calls then send no header and the callee mints its own; the Kafka interceptor mints
 one per record so those lines still group together.
 
-Only the Java services ship logs (eight containers, since one of the seven services is replicated).
-Infrastructure containers — Postgres, Redis, Kafka, the nginx load balancer, and the Elastic
+Only the Java services ship logs (nine containers, since two of the seven services are replicated).
+Infrastructure containers — Postgres, Redis, Kafka, the two nginx load balancers, and the Elastic
 stack itself — stay on `docker compose logs`.
 
 Elasticsearch, Logstash and Kibana are pinned to the **same** version (9.5.1). Kibana refuses to
