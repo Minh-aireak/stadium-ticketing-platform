@@ -1,7 +1,7 @@
 package com.aireak.catalog.application.service;
 
-import com.aireak.catalog.application.port.out.SeatAvailabilityCounterPort;
-import com.aireak.catalog.application.port.out.SeatAvailabilityCounterPort.SeedResult;
+import com.aireak.catalog.application.port.out.SeatCounterSeedPort;
+import com.aireak.catalog.application.port.out.SeatCounterSeedPort.SeedResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -16,7 +16,7 @@ import static org.mockito.Mockito.when;
 class ShowtimeSeatCounterInitializerTest {
 
     @Mock
-    private SeatAvailabilityCounterPort counterPort;
+    private SeatCounterSeedPort counterPort;
 
     private ShowtimeSeatCounterInitializer initializer;
 

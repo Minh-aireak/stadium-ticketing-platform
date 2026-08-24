@@ -1,6 +1,6 @@
 package com.aireak.catalog.application.service;
 
-import com.aireak.catalog.application.port.out.SeatAvailabilityCounterPort;
+import com.aireak.catalog.application.port.out.SeatCapacityQueryPort;
 import com.aireak.catalog.domain.model.SeatCapacityCheck;
 import com.aireak.catalog.domain.model.SeatCapacityCheck.Verdict;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,7 +17,7 @@ import static org.mockito.Mockito.when;
 class SeatCapacityCheckerTest {
 
     @Mock
-    private SeatAvailabilityCounterPort counterPort;
+    private SeatCapacityQueryPort counterPort;
 
     private SeatCapacityChecker checker;
 

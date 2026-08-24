@@ -1,7 +1,8 @@
 package com.aireak.catalog.application.service;
 
 import com.aireak.catalog.application.port.in.CheckSeatCapacityUseCase;
-import com.aireak.catalog.application.port.out.SeatAvailabilityCounterPort;
+import com.aireak.catalog.application.port.out.SeatCapacityQueryPort;
+import com.aireak.catalog.application.port.out.SeatCounterUpdatePort;
 import com.aireak.catalog.domain.model.SeatCapacityCheck;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,7 +20,7 @@ import org.springframework.stereotype.Service;
  *
  * <p><b>This is not a gate.</b> The counter can move between this read and whatever the caller
  * does next, so a {@code WITHIN_CAPACITY} answer is a snapshot, not a promise. Only
- * {@link SeatAvailabilityCounterPort#decrement} — one atomic script — decides authoritatively.
+ * {@link SeatCounterUpdatePort#decrement} — one atomic script — decides authoritatively.
  * What this method really buys is the log line: an over-capacity request that shows up here, with
  * the requested count, the live count and the shortfall, is the earliest visible trace of an
  * oversell, well before anyone notices it in the seat map.
@@ -29,11 +30,11 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class SeatCapacityChecker implements CheckSeatCapacityUseCase {
 
-    private final SeatAvailabilityCounterPort seatAvailabilityCounterPort;
+    private final SeatCapacityQueryPort seatCapacityQueryPort;
 
     @Override
     public SeatCapacityCheck checkCapacity(String showtimeId, int requestedSeats) {
-        SeatCapacityCheck check = seatAvailabilityCounterPort.check(showtimeId, requestedSeats);
+        SeatCapacityCheck check = seatCapacityQueryPort.check(showtimeId, requestedSeats);
 
         switch (check.verdict()) {
             case EXCEEDS_CAPACITY -> log.warn(

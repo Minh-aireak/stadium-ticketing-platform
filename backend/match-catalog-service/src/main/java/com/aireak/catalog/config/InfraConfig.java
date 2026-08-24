@@ -10,7 +10,9 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import java.util.concurrent.Executor;
 
 // Domain events go out via the Postgres outbox (see adapter.out.persistence.outbox) and
-// Debezium CDC now — no direct Kafka producer beans needed here anymore.
+// Debezium CDC, so no domain-event producer lives here. The one Kafka producer this service does
+// have is KafkaConfig#deadLetterKafkaTemplate, which republishes records that failed every retry —
+// no transaction to stay consistent with, so no outbox to ride.
 @Configuration
 @EnableJpaAuditing
 @EnableAsync

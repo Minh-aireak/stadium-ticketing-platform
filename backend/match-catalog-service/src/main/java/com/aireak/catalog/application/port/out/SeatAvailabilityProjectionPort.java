@@ -5,7 +5,7 @@ package com.aireak.catalog.application.port.out;
  * in Postgres — exactly once.
  *
  * <p>Only the database half. The live Redis counter is handled by
- * {@link SeatAvailabilityCounterPort}, and the two are sequenced by
+ * {@link SeatCounterUpdatePort}, and the two are sequenced by
  * {@code SoldSeatsProjectionService}.
  */
 public interface SeatAvailabilityProjectionPort {

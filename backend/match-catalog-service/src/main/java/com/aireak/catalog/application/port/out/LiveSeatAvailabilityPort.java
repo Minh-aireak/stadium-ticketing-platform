@@ -8,7 +8,7 @@ import java.util.Map;
  * cache of the rest of a Match's (rarely-changing) data.
  *
  * <p>Read-only by design. Every write to the counter goes through
- * {@link SeatAvailabilityCounterPort}, which is the only thing that may touch it — seeding it when
+ * {@link SeatCounterSeedPort} and {@link SeatCounterUpdatePort}, the only things that may touch it — seeding it when
  * a showtime is created, and decrementing it atomically as sales are projected. Splitting the two
  * is what keeps the atomicity meaningful: an unconditional "overwrite with this number" reachable
  * from the read side would let a caller undo a decrement it never saw, which is exactly the

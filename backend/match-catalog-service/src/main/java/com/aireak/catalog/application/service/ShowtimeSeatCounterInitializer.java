@@ -1,7 +1,7 @@
 package com.aireak.catalog.application.service;
 
-import com.aireak.catalog.application.port.out.SeatAvailabilityCounterPort;
-import com.aireak.catalog.application.port.out.SeatAvailabilityCounterPort.SeedResult;
+import com.aireak.catalog.application.port.out.SeatCounterSeedPort;
+import com.aireak.catalog.application.port.out.SeatCounterSeedPort.SeedResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -30,12 +30,12 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class ShowtimeSeatCounterInitializer {
 
-    private final SeatAvailabilityCounterPort seatAvailabilityCounterPort;
+    private final SeatCounterSeedPort seatCounterSeedPort;
 
     public void initializeCounter(String showtimeId, int totalSeats) {
         SeedResult result;
         try {
-            result = seatAvailabilityCounterPort.initialize(showtimeId, totalSeats);
+            result = seatCounterSeedPort.initialize(showtimeId, totalSeats);
         } catch (RuntimeException e) {
             log.error("Failed to seed the live seat counter for a new showtime, it will be derived from "
                             + "Postgres on the first sale: showtime={}, totalSeats={}",

@@ -1,8 +1,8 @@
 package com.aireak.catalog.adapter.out.cache;
 
-import com.aireak.catalog.application.port.out.SeatAvailabilityCounterPort.DecrementResult;
-import com.aireak.catalog.application.port.out.SeatAvailabilityCounterPort.DecrementStatus;
-import com.aireak.catalog.application.port.out.SeatAvailabilityCounterPort.SeedResult;
+import com.aireak.catalog.application.port.out.SeatCounterSeedPort.SeedResult;
+import com.aireak.catalog.application.port.out.SeatCounterUpdatePort.DecrementResult;
+import com.aireak.catalog.application.port.out.SeatCounterUpdatePort.DecrementStatus;
 import com.aireak.catalog.domain.model.SeatCapacityCheck;
 import com.aireak.catalog.domain.model.SeatCapacityCheck.Verdict;
 import org.junit.jupiter.api.AfterAll;

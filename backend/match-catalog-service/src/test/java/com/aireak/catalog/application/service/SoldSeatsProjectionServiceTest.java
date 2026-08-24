@@ -1,11 +1,14 @@
 package com.aireak.catalog.application.service;
 
 import com.aireak.catalog.application.port.in.CheckSeatCapacityUseCase;
-import com.aireak.catalog.application.port.out.SeatAvailabilityCounterPort;
-import com.aireak.catalog.application.port.out.SeatAvailabilityCounterPort.DecrementResult;
-import com.aireak.catalog.application.port.out.SeatAvailabilityCounterPort.DecrementStatus;
 import com.aireak.catalog.application.port.out.SeatAvailabilityProjectionPort;
+import com.aireak.catalog.application.port.out.SeatCounterUpdatePort;
+import com.aireak.catalog.application.port.out.SeatCounterUpdatePort.DecrementResult;
+import com.aireak.catalog.application.port.out.SeatCounterUpdatePort.DecrementStatus;
 import com.aireak.catalog.application.port.out.ShowtimeSeatCountPort;
+import com.aireak.catalog.domain.model.SeatCapacityCheck;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -38,18 +42,23 @@ class SoldSeatsProjectionServiceTest {
     @Mock
     private CheckSeatCapacityUseCase seatCapacityCheck;
     @Mock
-    private SeatAvailabilityCounterPort counterPort;
+    private SeatCounterUpdatePort counterPort;
     @Mock
     private SeatAvailabilityProjectionPort projectionPort;
     @Mock
     private ShowtimeSeatCountPort showtimeSeatCountPort;
 
+    private final MeterRegistry meterRegistry = new SimpleMeterRegistry();
     private SoldSeatsProjectionService service;
 
     @BeforeEach
     void setUp() {
+        // Every path through the service asks this first; lenient so the handful of tests that care
+        // about the answer can re-stub it without the default counting as an unused stubbing.
+        lenient().when(seatCapacityCheck.checkCapacity(anyString(), anyInt()))
+                .thenReturn(SeatCapacityCheck.of(SHOWTIME_ID, 3, 100));
         service = new SoldSeatsProjectionService(
-                seatCapacityCheck, counterPort, projectionPort, showtimeSeatCountPort);
+                seatCapacityCheck, counterPort, projectionPort, showtimeSeatCountPort, meterRegistry);
     }
 
     @Test
@@ -176,7 +185,78 @@ class SoldSeatsProjectionServiceTest {
         verify(counterPort, never()).reseed(anyString(), anyInt());
     }
 
+    // ----------------------------------------------------------------
+    // Metrics — the branches above matter operationally, and a log line alone cannot be alerted on
+    // from Prometheus. Each assertion here pins the meter an alert rule would be written against.
+    // ----------------------------------------------------------------
+
+    @Test
+    void countsEveryProjectionUnderTheOutcomeItReached() {
+        givenRedisDecrement(new DecrementResult(DecrementStatus.APPLIED, 97, 3));
+        when(projectionPort.decrementAvailableSeats(EVENT_ID, SHOWTIME_ID, 3)).thenReturn(true, false);
+
+        service.applySoldSeats(EVENT_ID, SHOWTIME_ID, 3);
+        service.applySoldSeats(EVENT_ID, SHOWTIME_ID, 3);
+
+        assertThat(count("catalog.seat_projection", "outcome", "applied")).isEqualTo(1);
+        assertThat(count("catalog.seat_projection", "outcome", "duplicate")).isEqualTo(1);
+        assertThat(count("catalog.seat_projection", "outcome", "failed")).isZero();
+    }
+
+    @Test
+    void countsAFailedProjectionSeparatelyFromADuplicateOne() {
+        givenRedisDecrement(new DecrementResult(DecrementStatus.APPLIED, 97, 3));
+        when(projectionPort.decrementAvailableSeats(EVENT_ID, SHOWTIME_ID, 3))
+                .thenThrow(new IllegalStateException("postgres down"));
+
+        assertThatThrownBy(() -> service.applySoldSeats(EVENT_ID, SHOWTIME_ID, 3))
+                .isInstanceOf(IllegalStateException.class);
+
+        assertThat(count("catalog.seat_projection", "outcome", "failed")).isEqualTo(1);
+    }
+
+    /** Movement here means inventory sold more seats than the catalog believed were left. */
+    @Test
+    void countsASaleThatArrivesForMoreSeatsThanTheCounterHolds() {
+        when(seatCapacityCheck.checkCapacity(SHOWTIME_ID, 5))
+                .thenReturn(SeatCapacityCheck.of(SHOWTIME_ID, 5, 2));
+        givenRedisDecrement(new DecrementResult(DecrementStatus.CLAMPED, 0, 2));
+        when(projectionPort.decrementAvailableSeats(EVENT_ID, SHOWTIME_ID, 5)).thenReturn(true);
+        when(showtimeSeatCountPort.findAvailableSeats(SHOWTIME_ID)).thenReturn(Optional.of(40));
+
+        service.applySoldSeats(EVENT_ID, SHOWTIME_ID, 5);
+
+        assertThat(count("catalog.seat_counter.oversell")).isEqualTo(1);
+    }
+
+    @Test
+    void countsDriftUnderTheReasonTheCounterHadToBeRebuilt() {
+        givenRedisDecrement(DecrementResult.nothingWritten(DecrementStatus.NOT_INITIALIZED));
+        when(projectionPort.decrementAvailableSeats(EVENT_ID, SHOWTIME_ID, 3)).thenReturn(true);
+        when(showtimeSeatCountPort.findAvailableSeats(SHOWTIME_ID)).thenReturn(Optional.of(97));
+
+        service.applySoldSeats(EVENT_ID, SHOWTIME_ID, 3);
+
+        assertThat(count("catalog.seat_counter.drift", "reason", "not_initialized")).isEqualTo(1);
+        assertThat(count("catalog.seat_counter.drift", "reason", "clamped")).isZero();
+    }
+
+    @Test
+    void countsNoDriftWhenRedisAndPostgresAgreed() {
+        givenRedisDecrement(new DecrementResult(DecrementStatus.APPLIED, 97, 3));
+        when(projectionPort.decrementAvailableSeats(EVENT_ID, SHOWTIME_ID, 3)).thenReturn(true);
+
+        service.applySoldSeats(EVENT_ID, SHOWTIME_ID, 3);
+
+        assertThat(meterRegistry.find("catalog.seat_counter.drift").counters()).isEmpty();
+        assertThat(meterRegistry.find("catalog.seat_counter.oversell").counters()).isEmpty();
+    }
+
     private void givenRedisDecrement(DecrementResult result) {
         when(counterPort.decrement(anyString(), anyInt())).thenReturn(result);
+    }
+
+    private double count(String name, String... tags) {
+        return meterRegistry.counter(name, tags).count();
     }
 }

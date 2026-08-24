@@ -1,6 +1,8 @@
 package com.aireak.catalog.adapter.out.cache;
 
-import com.aireak.catalog.application.port.out.SeatAvailabilityCounterPort;
+import com.aireak.catalog.application.port.out.SeatCapacityQueryPort;
+import com.aireak.catalog.application.port.out.SeatCounterSeedPort;
+import com.aireak.catalog.application.port.out.SeatCounterUpdatePort;
 import com.aireak.catalog.domain.model.SeatCapacityCheck;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RBucket;
@@ -14,8 +16,13 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * Redisson-backed {@link SeatAvailabilityCounterPort}: the only writer of
+ * Redisson-backed implementation of all three live-seat-counter ports: the only writer of
  * {@code catalog:seats:{showtimeId}}.
+ *
+ * <p>Three interfaces, one class. The ports are split so each caller depends on the one operation
+ * it needs (see {@link SeatCounterUpdatePort}); they land in a single adapter because the counter
+ * having exactly one writer is the invariant the atomicity below rests on, and splitting the
+ * implementation would put that invariant in more than one place.
  *
  * <p><b>Why Lua.</b> Redis executes an {@code EVAL} to completion before it serves any other
  * command, so everything inside one script is a single atomic step from every other client's point
@@ -46,13 +53,14 @@ import java.util.List;
  * <p><b>TTL.</b> The counter is seeded when a showtime is created and refreshed on every write, so
  * under normal operation the TTL never fires. It is a backstop against keys for showtimes that came
  * and went: a counter that stops being written eventually disappears, and the first write after
- * that reports {@link SeatAvailabilityCounterPort.DecrementStatus#NOT_INITIALIZED} so the caller
+ * that reports {@link SeatCounterUpdatePort.DecrementStatus#NOT_INITIALIZED} so the caller
  * re-derives it from Postgres. A showtime created further ahead than this TTL simply takes that
  * recovery path on its first sale.
  */
 @Slf4j
 @Component
-public class RedisSeatAvailabilityCounter implements SeatAvailabilityCounterPort {
+public class RedisSeatAvailabilityCounter
+        implements SeatCounterSeedPort, SeatCapacityQueryPort, SeatCounterUpdatePort {
 
     /**
      * Seeds only into an absent key. The read-then-write is inside the script rather than around it

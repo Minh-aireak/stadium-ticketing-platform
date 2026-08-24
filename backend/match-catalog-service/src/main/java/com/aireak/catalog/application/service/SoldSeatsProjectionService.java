@@ -2,13 +2,17 @@ package com.aireak.catalog.application.service;
 
 import com.aireak.catalog.application.port.in.ApplySoldSeatsUseCase;
 import com.aireak.catalog.application.port.in.CheckSeatCapacityUseCase;
-import com.aireak.catalog.application.port.out.SeatAvailabilityCounterPort;
-import com.aireak.catalog.application.port.out.SeatAvailabilityCounterPort.DecrementResult;
 import com.aireak.catalog.application.port.out.SeatAvailabilityProjectionPort;
+import com.aireak.catalog.application.port.out.SeatCounterUpdatePort;
+import com.aireak.catalog.application.port.out.SeatCounterUpdatePort.DecrementResult;
 import com.aireak.catalog.application.port.out.ShowtimeSeatCountPort;
+import com.aireak.catalog.domain.model.SeatCapacityCheck;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+
+import java.util.Locale;
 
 /**
  * Applies a completed seat sale to both places the catalog keeps availability: the live Redis
@@ -16,7 +20,7 @@ import org.springframework.stereotype.Service;
  *
  * <p><b>Order, and why.</b> Redis first, Postgres second:
  * <pre>
- *   1. capacity pre-flight  — read-only, logs an over-capacity sale before anything moves
+ *   1. capacity pre-flight  — read-only, catches an over-capacity sale before anything moves
  *   2. Redis decrement      — ONE Lua script: read, floor, write, atomically
  *   3. Postgres decrement   — idempotent, transactional, the durable record
  *   4. reconcile / undo     — whichever the outcome of 2 and 3 calls for
@@ -40,6 +44,10 @@ import org.springframework.stereotype.Service;
  * {@link #reconcileFromDatabase} re-derives the counter from the row Postgres just committed. The
  * only residue is a sub-millisecond window during an undo where the count reads low — visible as
  * fewer seats, never as more.
+ *
+ * <p><b>Every one of those branches is also a metric</b>, because a disagreement that exists only
+ * as a log line can only be alerted on from the log pipeline. See {@link #recordOutcome} for the
+ * meters and what each one means when it moves.
  *
  * <p><b>The one thing that is NOT atomic, and why that is acceptable.</b>
  * {@link #reconcileFromDatabase} reads Postgres and then writes Redis — the same read-modify-write
@@ -65,18 +73,27 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class SoldSeatsProjectionService implements ApplySoldSeatsUseCase {
 
+    private static final String PROJECTION_METRIC = "catalog.seat_projection";
+    private static final String OVERSELL_METRIC = "catalog.seat_counter.oversell";
+    private static final String DRIFT_METRIC = "catalog.seat_counter.drift";
+
     private final CheckSeatCapacityUseCase seatCapacityCheck;
-    private final SeatAvailabilityCounterPort seatAvailabilityCounterPort;
+    private final SeatCounterUpdatePort seatCounterUpdatePort;
     private final SeatAvailabilityProjectionPort seatAvailabilityProjectionPort;
     private final ShowtimeSeatCountPort showtimeSeatCountPort;
+    private final MeterRegistry meterRegistry;
 
     @Override
     public boolean applySoldSeats(String eventId, String showtimeId, int soldSeatCount) {
-        // Read-only and non-binding — the decrement below is the authoritative gate. This runs for
-        // the log line: a sale larger than what Redis says is left is the first sign of an oversell.
-        seatCapacityCheck.checkCapacity(showtimeId, soldSeatCount);
+        // Read-only and non-binding — the decrement below is the authoritative gate. This runs to
+        // catch the condition early: a sale larger than what Redis says is left is the first sign
+        // of an oversell, and worth a metric of its own rather than only a log line.
+        SeatCapacityCheck capacity = seatCapacityCheck.checkCapacity(showtimeId, soldSeatCount);
+        if (capacity.exceedsCapacity()) {
+            meterRegistry.counter(OVERSELL_METRIC).increment();
+        }
 
-        DecrementResult redisLeg = seatAvailabilityCounterPort.decrement(showtimeId, soldSeatCount);
+        DecrementResult redisLeg = seatCounterUpdatePort.decrement(showtimeId, soldSeatCount);
 
         boolean applied;
         try {
@@ -85,6 +102,7 @@ public class SoldSeatsProjectionService implements ApplySoldSeatsUseCase {
             log.error("Sold-seat projection failed in Postgres, rolling the Redis counter back: "
                             + "eventId={}, showtime={}, seats={}, deductedFromRedis={}",
                     eventId, showtimeId, soldSeatCount, redisLeg.deductedSeats(), e);
+            recordOutcome("failed");
             undoRedisLeg(showtimeId, redisLeg);
             throw e;
         }
@@ -95,12 +113,14 @@ public class SoldSeatsProjectionService implements ApplySoldSeatsUseCase {
             log.info("Sold-seat event had already been projected, undoing the Redis decrement it repeated: "
                             + "eventId={}, showtime={}, seats={}",
                     eventId, showtimeId, soldSeatCount);
+            recordOutcome("duplicate");
             undoRedisLeg(showtimeId, redisLeg);
             return false;
         }
 
         log.info("Sold-seat projection applied: eventId={}, showtime={}, seats={}, redis={}, remaining={}",
                 eventId, showtimeId, soldSeatCount, redisLeg.status(), redisLeg.remainingSeats());
+        recordOutcome("applied");
         reconcileFromDatabase(showtimeId, redisLeg);
         return true;
     }
@@ -116,7 +136,7 @@ public class SoldSeatsProjectionService implements ApplySoldSeatsUseCase {
                     showtimeId, redisLeg.status());
             return;
         }
-        seatAvailabilityCounterPort.restore(showtimeId, redisLeg.deductedSeats());
+        seatCounterUpdatePort.restore(showtimeId, redisLeg.deductedSeats());
     }
 
     /**
@@ -133,14 +153,42 @@ public class SoldSeatsProjectionService implements ApplySoldSeatsUseCase {
         if (redisLeg.isClean()) {
             return;
         }
+        meterRegistry.counter(DRIFT_METRIC, "reason", tagValue(redisLeg.status().name())).increment();
         showtimeSeatCountPort.findAvailableSeats(showtimeId).ifPresentOrElse(
                 availableSeats -> {
                     log.warn("Live seat counter disagreed with Postgres after a projection, reseeding it: "
                                     + "showtime={}, redisStatus={}, postgresAvailableSeats={}",
                             showtimeId, redisLeg.status(), availableSeats);
-                    seatAvailabilityCounterPort.reseed(showtimeId, availableSeats);
+                    seatCounterUpdatePort.reseed(showtimeId, availableSeats);
                 },
                 () -> log.error("Cannot reseed the live seat counter, the showtime has no row in Postgres: "
                         + "showtime={}, redisStatus={}", showtimeId, redisLeg.status()));
+    }
+
+    /**
+     * Three meters, each answering a question a log search cannot answer cheaply:
+     *
+     * <ul>
+     *   <li>{@code catalog.seat_projection{outcome}} — throughput and health of the projection.
+     *       {@code failed} climbing means events are heading for the dead-letter topic (see
+     *       {@code SeatsSoldDeadLetterConsumer}); a steady trickle of {@code duplicate} is normal
+     *       Kafka at-least-once delivery, a sudden burst is a consumer that stopped committing
+     *       offsets.</li>
+     *   <li>{@code catalog.seat_counter.oversell} — sales arriving for more seats than the counter
+     *       says are left. Any movement is worth looking at: either the counter is behind, or
+     *       ticket-inventory-service sold seats it should not have.</li>
+     *   <li>{@code catalog.seat_counter.drift{reason}} — Redis and Postgres disagreed and the
+     *       counter had to be rebuilt. {@code not_initialized} after a Redis restart is expected
+     *       and self-healing; {@code clamped} is not, and means the number customers were shown was
+     *       wrong until this reseed corrected it.</li>
+     * </ul>
+     */
+    private void recordOutcome(String outcome) {
+        meterRegistry.counter(PROJECTION_METRIC, "outcome", outcome).increment();
+    }
+
+    // Prometheus convention is lower_snake_case label values; the enum constants are SCREAMING_SNAKE.
+    private static String tagValue(String enumName) {
+        return enumName.toLowerCase(Locale.ROOT);
     }
 }
