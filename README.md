@@ -64,7 +64,10 @@ the price of its local cache tier. `CachingMatchRepository.save()` invalidates R
 writing pod's own Guava cache, but cannot reach into the other pod's, so an admin publish or cancel
 stays visible-as-stale on the other instance until its 5s TTL expires. That window exists on any
 multi-pod deployment and is invisible on one. `availableSeats` is unaffected: `overlayLiveSeats`
-re-reads it from Redis on every return and never trusts a cache tier for it.
+re-reads it from the live seat counter on every return and never takes it from either Match cache
+tier. (That read still passes through `AdaptiveTtlLiveSeatStore`, whose own 1s local TTL is
+dropped the moment this pod writes the counter and is bypassed entirely once a count falls below
+the scarcity threshold.)
 
 `booking-service` deliberately stays single. It has the same ShedLock and consumer-group machinery,
 but its contested path — the Redis idempotency claim on `POST /bookings` — sits behind the
@@ -112,6 +115,15 @@ configs live in `backend/*/infra/debezium/`.
 **Saga with compensation.** `booking-service` drives hold → pay → confirm. Each step has a
 compensating action, and two reconciliation jobs sweep for bookings left stuck when an event never
 arrived.
+
+**The live seat count moves atomically, in Redis first.** `showtimes.available_seats` in Postgres
+is the durable record, but what a browse page shows comes from a Redis counter, seeded when the
+showtime is created and decremented on every projected sale. That decrement is a single Lua
+`EVAL` — read, floor at zero, write — because the obvious alternative (update Postgres, read the
+new total back, overwrite the key) is a read-modify-write across two systems: two overlapping
+sales both read before either writes, and the slower one restores seats that were already sold.
+Postgres follows the script; a failed write hands back exactly what the script deducted, and any
+branch where the two disagree rebuilds the counter from the committed row.
 
 **Idempotency everywhere a retry can reach.** Redis-backed idempotency keys on booking and payment
 initiation; a `processed_events` table in notification-service; consumers assume redelivery.
@@ -272,7 +284,7 @@ npm run build   # tsc -b && vite build
 
 `.github/workflows/ci.yml` runs on every push and PR to `main`:
 
-1. **build-and-test** — `./mvnw verify -fae -B` over the whole reactor (~560 tests), uploading
+1. **build-and-test** — `./mvnw verify -fae -B` over the whole reactor (~700 tests), uploading
    surefire reports if anything fails.
 2. **frontend** — `npm ci`, lint, then `tsc -b && vite build`.
 3. **docker-build** — builds an image per service, in a matrix, once the tests pass.
