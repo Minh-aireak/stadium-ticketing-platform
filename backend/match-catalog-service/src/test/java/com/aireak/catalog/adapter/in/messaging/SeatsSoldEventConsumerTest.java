@@ -1,6 +1,6 @@
 package com.aireak.catalog.adapter.in.messaging;
 
-import com.aireak.catalog.application.port.out.SeatAvailabilityProjectionPort;
+import com.aireak.catalog.application.port.in.ApplySoldSeatsUseCase;
 import com.aireak.common.event.EventEnvelope;
 import com.aireak.common.kafka.KafkaTopics;
 import com.aireak.inventory.domain.event.SeatsSoldEvent;
@@ -17,7 +17,7 @@ class SeatsSoldEventConsumerTest {
 
     @Test
     void decrementsAvailabilityByTheNumberOfActuallySoldSeats() {
-        SeatAvailabilityProjectionPort projection = mock(SeatAvailabilityProjectionPort.class);
+        ApplySoldSeatsUseCase projection = mock(ApplySoldSeatsUseCase.class);
         SeatsSoldEventConsumer consumer = new SeatsSoldEventConsumer(projection);
         SeatsSoldEvent event = new SeatsSoldEvent("showtime-1", List.of("A1", "A2"), Instant.now());
         EventEnvelope<SeatsSoldEvent> envelope = EventEnvelope.of(
@@ -25,12 +25,12 @@ class SeatsSoldEventConsumerTest {
 
         consumer.consume(envelope);
 
-        verify(projection).decrementAvailableSeats("event-1", "showtime-1", 2);
+        verify(projection).applySoldSeats("event-1", "showtime-1", 2);
     }
 
     @Test
     void ignoresAnEmptySoldSeatEvent() {
-        SeatAvailabilityProjectionPort projection = mock(SeatAvailabilityProjectionPort.class);
+        ApplySoldSeatsUseCase projection = mock(ApplySoldSeatsUseCase.class);
         SeatsSoldEventConsumer consumer = new SeatsSoldEventConsumer(projection);
         SeatsSoldEvent event = new SeatsSoldEvent("showtime-1", List.of(), Instant.now());
 

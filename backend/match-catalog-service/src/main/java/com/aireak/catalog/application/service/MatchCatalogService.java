@@ -45,6 +45,7 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
     private final MatchSearchPort matchSearchPort;
     private final DomainEventPublisher eventPublisher;
     private final MatchSearchIndexer matchSearchIndexer;
+    private final ShowtimeSeatCounterInitializer showtimeSeatCounterInitializer;
 
     @Override
     @Transactional
@@ -73,9 +74,20 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
         }
 
         Match match = findOrThrow(matchId);
-        match.addShowtime(new Showtime(startTime, stadiumId, stadium.totalSeats(), basePrice, currency));
+        Showtime showtime = new Showtime(startTime, stadiumId, stadium.totalSeats(), basePrice, currency);
+        match.addShowtime(showtime);
         matchRepository.save(match);
         eventPublisher.publishAll(match.pullDomainEvents());
+
+        // Every showtime gets its live seat counter seeded here, at creation, rather than lazily on
+        // the first sale — see ShowtimeSeatCounterInitializer for why that invariant is worth having.
+        // Deliberately fail-open and inside this transaction: a Redis hiccup must not fail the
+        // creation, and a counter seeded for a showtime whose transaction then rolls back is a key
+        // under a UUID that will never be used again, which expires on its own.
+        showtimeSeatCounterInitializer.initializeCounter(showtime.getShowtimeId(), showtime.getTotalSeats());
+
+        log.info("Showtime added: match={}, showtime={}, stadium={}, totalSeats={}, startTime={}",
+                matchId, showtime.getShowtimeId(), stadiumId, showtime.getTotalSeats(), startTime);
     }
 
     @Override

@@ -4,6 +4,7 @@ import com.aireak.catalog.adapter.out.persistence.MatchPersistenceAdapter;
 import com.aireak.catalog.application.port.out.MatchSearchPort;
 import com.aireak.catalog.application.service.MatchCatalogService;
 import com.aireak.catalog.application.service.MatchSearchIndexer;
+import com.aireak.catalog.application.service.ShowtimeSeatCounterInitializer;
 import com.aireak.catalog.config.InfraConfig;
 import com.aireak.catalog.domain.model.Match;
 import com.aireak.common.outbox.OutboxEventEntity;
@@ -31,6 +32,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 /**
  * Verifies the core outbox guarantee: writing the Match aggregate and its outbox row happen in
@@ -173,6 +175,15 @@ class OutboxEventPublisherIntegrationTest {
         JsonMapper objectMapper() {
             return JsonMapper.builder().findAndAddModules(
                     OutboxEventPublisherIntegrationTest.class.getClassLoader()).build();
+        }
+
+        /**
+         * Seeding the live seat counter is a Redis call, and Redis is out of scope for a test about
+         * one Postgres transaction — {@code addShowtime} only has to reach the outbox row.
+         */
+        @Bean
+        ShowtimeSeatCounterInitializer showtimeSeatCounterInitializer() {
+            return mock(ShowtimeSeatCounterInitializer.class);
         }
 
         @Bean

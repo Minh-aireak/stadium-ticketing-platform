@@ -44,12 +44,15 @@ class MatchCatalogServiceTest {
     private DomainEventPublisher eventPublisher;
     @Mock
     private MatchSearchIndexer matchSearchIndexer;
+    @Mock
+    private ShowtimeSeatCounterInitializer showtimeSeatCounterInitializer;
 
     private MatchCatalogService service;
 
     @BeforeEach
     void setUp() {
-        service = new MatchCatalogService(matchRepository, matchSearchPort, eventPublisher, matchSearchIndexer);
+        service = new MatchCatalogService(matchRepository, matchSearchPort, eventPublisher, matchSearchIndexer,
+                showtimeSeatCounterInitializer);
     }
 
     private static final BigDecimal BASE_PRICE = new BigDecimal("150000");
@@ -91,6 +94,31 @@ class MatchCatalogServiceTest {
         verify(eventPublisher).publishAll(published.capture());
         assertThat(published.getValue()).hasSize(1);
         assertThat(published.getValue().get(0)).isInstanceOf(ShowtimeAddedEvent.class);
+    }
+
+    /**
+     * The counter has to exist from the moment the showtime does — a browse request can arrive
+     * before the first ticket is ever sold, and nothing else seeds it.
+     */
+    @Test
+    void addShowtimeSeedsTheLiveSeatCounterWithTheStadiumsFullCapacity() {
+        Match existing = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
+                MatchStatus.DRAFT, Instant.now(), List.of());
+        when(matchRepository.findById("match-1")).thenReturn(Optional.of(existing));
+
+        service.addShowtime("match-1", Instant.now().plusSeconds(7200), "my-dinh", BASE_PRICE, "VND");
+
+        String showtimeId = existing.getShowtimes().get(0).getShowtimeId();
+        verify(showtimeSeatCounterInitializer).initializeCounter(showtimeId, 432);
+    }
+
+    @Test
+    void addShowtimeSeedsNoCounterWhenTheShowtimeIsRejected() {
+        assertThatThrownBy(() -> service.addShowtime(
+                "match-1", Instant.now().plusSeconds(3600), "unknown-stadium", BASE_PRICE, "VND"))
+                .isInstanceOf(InvalidShowtimeException.class);
+
+        verify(showtimeSeatCounterInitializer, never()).initializeCounter(any(), anyInt());
     }
 
     @Test

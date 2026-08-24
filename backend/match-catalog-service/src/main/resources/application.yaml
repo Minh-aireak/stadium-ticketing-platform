@@ -93,6 +93,14 @@ catalog:
     local-ttl-millis: ${CATALOG_LIVE_SEATS_LOCAL_TTL_MILLIS:1000}
     scarcity-threshold: ${CATALOG_LIVE_SEATS_SCARCITY_THRESHOLD:25}
     max-cached-showtimes: ${CATALOG_LIVE_SEATS_MAX_CACHED_SHOWTIMES:10000}
+    # How long a seat counter survives without being written. It is seeded when the showtime is
+    # created and refreshed by every atomic decrement, so on a showtime that sells anything at all
+    # this never fires -- it exists so counters for showtimes that came and went do not accumulate
+    # in Redis forever. Expiry is not a correctness problem either way: the first decrement after
+    # it reports NOT_INITIALIZED and SoldSeatsProjectionService reseeds from Postgres. Raise it
+    # only if showtimes are routinely created more than a week before they sell, and you would
+    # rather pay a key per showtime than that one recovery read.
+    counter-ttl: ${CATALOG_LIVE_SEATS_COUNTER_TTL:7d}
 
 # Resilience4j: Bulkhead/RateLimiter on the public browse/search use cases in
 # MatchCatalogService. Both are sized well above inventory's reserve path (100 concurrent, 200/s)

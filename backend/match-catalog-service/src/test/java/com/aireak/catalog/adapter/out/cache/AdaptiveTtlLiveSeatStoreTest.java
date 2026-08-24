@@ -116,16 +116,20 @@ class AdaptiveTtlLiveSeatStoreTest {
         verifyNoMoreInteractions(delegate);
     }
 
+    /**
+     * The write side (a Lua decrement in {@code RedisSeatAvailabilityCounter}) has no way to reach
+     * this cache except through {@code LocalSeatCountCache#invalidate}, so a pod that just changed a
+     * counter must not keep serving the value from before that write.
+     */
     @Test
-    void publishWritesThroughAndDropsThisPodsCopy() {
+    void invalidateDropsThisPodsCopySoTheNextReadGoesBackToRedis() {
         when(delegate.getAll(List.of("showtime-1"))).thenReturn(Map.of("showtime-1", 300));
         store.getAll(List.of("showtime-1"));
 
-        store.publish("showtime-1", 250);
+        store.invalidate("showtime-1");
         when(delegate.getAll(List.of("showtime-1"))).thenReturn(Map.of("showtime-1", 250));
         assertThat(store.getAll(List.of("showtime-1"))).containsEntry("showtime-1", 250);
 
-        verify(delegate).publish("showtime-1", 250);
         verify(delegate, times(2)).getAll(anyCollection());
     }
 

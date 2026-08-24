@@ -1,6 +1,6 @@
 package com.aireak.catalog.adapter.in.messaging;
 
-import com.aireak.catalog.application.port.out.SeatAvailabilityProjectionPort;
+import com.aireak.catalog.application.port.in.ApplySoldSeatsUseCase;
 import com.aireak.common.event.EventEnvelope;
 import com.aireak.common.kafka.KafkaTopics;
 import com.aireak.inventory.domain.event.SeatsSoldEvent;
@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class SeatsSoldEventConsumer {
 
-    private final SeatAvailabilityProjectionPort projectionPort;
+    private final ApplySoldSeatsUseCase applySoldSeatsUseCase;
 
     @KafkaListener(
             topics = KafkaTopics.SEATS_SOLD,
@@ -33,10 +33,8 @@ public class SeatsSoldEventConsumer {
                     envelope.getEventId(), event.showtimeId());
             return;
         }
-        boolean applied = projectionPort.decrementAvailableSeats(
-                envelope.getEventId(), event.showtimeId(), soldSeatCount);
-        log.debug("Sold-seat projection {}: eventId={}, showtime={}, count={}",
-                applied ? "applied" : "already processed", envelope.getEventId(),
-                event.showtimeId(), soldSeatCount);
+        // Outcome is logged by the use case itself, which knows what actually happened to each of
+        // the two stores — repeating it here only produced a second, less informative line.
+        applySoldSeatsUseCase.applySoldSeats(envelope.getEventId(), event.showtimeId(), soldSeatCount);
     }
 }

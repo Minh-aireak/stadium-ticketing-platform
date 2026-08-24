@@ -14,6 +14,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.redisson.Redisson;
 import org.redisson.api.RedissonClient;
+import org.redisson.client.codec.StringCodec;
 import org.redisson.config.Config;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -83,6 +84,17 @@ class CachingMatchRepositoryTest {
         repository = new CachingMatchRepository(delegate, liveSeatStore, redissonClient);
     }
 
+    /**
+     * Writes the live seat counter the way {@code RedisSeatAvailabilityCounter} does — plain decimal
+     * text under {@code StringCodec}, since its Lua scripts call {@code tonumber()} on those bytes.
+     * Done directly here rather than through the counter adapter: this test is about what
+     * {@link CachingMatchRepository} reads, not about how the value got there.
+     */
+    private static void seedLiveSeatCount(String showtimeId, int availableSeats) {
+        redissonClient.getBucket("catalog:seats:" + showtimeId, StringCodec.INSTANCE)
+                .set(String.valueOf(availableSeats));
+    }
+
     private static Match aPublishedMatch(String matchId, String showtimeId, int availableSeats) {
         Showtime showtime = new Showtime(showtimeId, Instant.parse("2026-09-01T18:00:00Z"), "stadium-1",
                 100, availableSeats, new BigDecimal("50.00"), "USD");
@@ -149,7 +161,7 @@ class CachingMatchRepositoryTest {
         when(delegate.findAllByIds(List.of("match-1"))).thenReturn(List.of(match));
         repository.findById("match-1"); // caches availableSeats=100
 
-        liveSeatStore.publish("showtime-1", 37); // a ticket sale happens, write-through to Redis
+        seedLiveSeatCount("showtime-1", 37); // a ticket sale happens, the counter drops to 37
 
         var result = repository.findById("match-1"); // still a cache hit (not invalidated)
 
@@ -219,7 +231,7 @@ class CachingMatchRepositoryTest {
                 aPublishedMatch("match-1", "showtime-1", 100),
                 aPublishedMatch("match-2", "showtime-2", 50),
                 aPublishedMatch("match-3", "showtime-3", 25)));
-        liveSeatStore.publish("showtime-2", 7);
+        seedLiveSeatCount("showtime-2", 7);
 
         List<Match> page = repository.findByStatus(MatchStatus.PUBLISHED, 0, 20);
 

@@ -42,11 +42,17 @@ import java.util.concurrent.TimeUnit;
  * errors and returns an empty map, and nothing here turns that into an exception — an id neither
  * tier can resolve is simply absent from the result, and the caller keeps the seat count the Match
  * already carries.
+ *
+ * <p>Also the {@link LocalSeatCountCache} the write side invalidates through: when
+ * {@link RedisSeatAvailabilityCounter} changes a counter, this pod drops its copy immediately
+ * instead of serving the pre-write value for the rest of the local TTL. That is a courtesy to the
+ * pod that happened to do the write, not a guarantee — no pod can reach another's memory, which is
+ * what the TTL bounds instead.
  */
 @Slf4j
 @Component
 @Primary
-public class AdaptiveTtlLiveSeatStore implements LiveSeatAvailabilityPort {
+public class AdaptiveTtlLiveSeatStore implements LiveSeatAvailabilityPort, LocalSeatCountCache {
 
     private final LiveSeatAvailabilityPort delegate;
     private final Cache<String, Integer> localCounts;
@@ -78,11 +84,9 @@ public class AdaptiveTtlLiveSeatStore implements LiveSeatAvailabilityPort {
                 .build();
     }
 
+    /** Only this pod's copy — see the class javadoc for what bounds every other pod's staleness. */
     @Override
-    public void publish(String showtimeId, int availableSeats) {
-        delegate.publish(showtimeId, availableSeats);
-        // Only this pod's copy — there is no way to reach another pod's memory, which is what
-        // bounds every other pod's staleness to the TTL instead.
+    public void invalidate(String showtimeId) {
         localCounts.invalidate(showtimeId);
     }
 

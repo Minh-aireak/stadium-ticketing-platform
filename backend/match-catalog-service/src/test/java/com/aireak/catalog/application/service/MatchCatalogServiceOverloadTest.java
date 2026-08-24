@@ -163,11 +163,18 @@ class MatchCatalogServiceOverloadTest {
         }
 
         @Bean
+        ShowtimeSeatCounterInitializer showtimeSeatCounterInitializer() {
+            return mock(ShowtimeSeatCounterInitializer.class);
+        }
+
+        @Bean
         MatchCatalogService matchCatalogService(MatchRepository matchRepository,
                                                 MatchSearchPort matchSearchPort,
                                                 DomainEventPublisher eventPublisher,
-                                                MatchSearchIndexer matchSearchIndexer) {
-            return new MatchCatalogService(matchRepository, matchSearchPort, eventPublisher, matchSearchIndexer);
+                                                MatchSearchIndexer matchSearchIndexer,
+                                                ShowtimeSeatCounterInitializer showtimeSeatCounterInitializer) {
+            return new MatchCatalogService(matchRepository, matchSearchPort, eventPublisher, matchSearchIndexer,
+                    showtimeSeatCounterInitializer);
         }
     }
 }
