@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { BookingStatus } from '@/features/booking/types'
 import type { PaymentStatus } from '@/features/payment/types'
@@ -34,10 +34,6 @@ function arrange(bookingStatus: BookingStatus, paymentStatus: PaymentStatus) {
     </MemoryRouter>,
   )
 }
-
-afterEach(() => {
-  vi.clearAllTimers()
-})
 
 describe('PaymentStatusPage', () => {
   it('reports success for a confirmed booking', async () => {
