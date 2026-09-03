@@ -138,6 +138,11 @@ jobs:
       # catches a broken nginx.conf, and the try_files fallback specifically: without it
       # every client-side route 404s on reload, which no other check in this pipeline
       # would notice.
+      #
+      # The status-code assertions below are necessary and nowhere near sufficient: the
+      # fallback answers every path with a 200, so any question phrased as "is it 200?"
+      # is answered by the fallback itself rather than by the file being there. The
+      # header and 404 assertions are the ones that can tell those two apart.
       - name: Smoke-test the served SPA
         run: |
           docker run -d --name fe-ci -p 8088:80 aireak/frontend:${{ github.sha }}
@@ -148,4 +153,16 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8088/)" = "200"
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8088/account)" = "200"
           curl -s http://localhost:8088/ | grep -q 'assets/index-.*\.js'
+
+          ASSET="$(curl -s http://localhost:8088/ | grep -o 'assets/index-[^"]*\.js' | head -1)"
+          # Served compressed at all -- nginx compresses nothing by default.
+          curl -s -D - -o /dev/null -H 'Accept-Encoding: gzip' "http://localhost:8088/${ASSET}" | tr -d '\r' | grep -qi '^content-encoding: gzip'
+          # Content-hashed, therefore immutable; and index.html never is, on either the
+          # direct path or the client-side-route fallback.
+          curl -s -D - -o /dev/null "http://localhost:8088/${ASSET}" | tr -d '\r' | grep -qi '^cache-control:.*immutable'
+          curl -s -D - -o /dev/null http://localhost:8088/ | tr -d '\r' | grep -qi '^cache-control: no-cache'
+          curl -s -D - -o /dev/null http://localhost:8088/account | tr -d '\r' | grep -qi '^cache-control: no-cache'
+          # A hash that is no longer on disk is a stale client, not a route.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8088/assets/does-not-exist-Abc12345.js)" = "404"
+
           docker rm -f fe-ci
