@@ -13,11 +13,15 @@ import java.time.temporal.ChronoUnit;
 /**
  * Purges {@code processed_events} rows older than {@code retentionDays}.
  *
- * <p>notification-service is the only service that does consumer idempotency in Postgres rather
- * than in Redis — every other one uses a Redisson store whose keys expire on their own. Without
- * this job the table grows by one row per consumed event, forever, and nothing ever reads a row
- * that old: {@code NotificationDispatchService} only asks whether an id exists, and a redelivery
- * arriving weeks after the original is not a case worth guarding against.
+ * <p>This service, match-catalog-service and payment-service are the three that do idempotency in
+ * Postgres rather than in Redis — every other one uses a Redisson store whose keys expire on their
+ * own. Without this job the table grows by one row per consumed event, forever, and nothing ever
+ * reads a row that old: {@code NotificationDispatchService} only asks whether an id exists, and a
+ * redelivery arriving weeks after the original is not a case worth guarding against. The other two
+ * are purged by {@code ProcessedInventoryEventCleanupScheduler} and
+ * {@code ProcessedWebhookEventCleanupScheduler}, which mirror this one. Twice now this javadoc has
+ * undercounted the stores that need purging, and each time the one it left out had no purge at
+ * all — first catalog's, then payment's.
  *
  * <p>Mirrors the {@code OutboxEventCleanupScheduler} every producing service already runs, down
  * to the property names.
