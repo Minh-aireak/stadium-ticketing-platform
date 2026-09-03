@@ -19,6 +19,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -126,6 +127,27 @@ class TransactionalEmailServiceTest {
                 new PasswordResetEmail("john@example.com", "http://localhost:5173/reset-password?token=t", 30));
 
         assertThat(content).isPresent();
+    }
+
+    @Test
+    void sendTemplatedEmail_stillSendsTheCancellationWhenNoReasonWasSupplied() {
+        // FreeMarker refuses to render a null ${...}, and this service catches that and sends
+        // nothing — which also skips the in-app notification record, since NotificationDispatchService
+        // builds it from the rendered text. The reason is the one genuinely optional field in this
+        // model, so it carries a default in the template: losing one line beats never telling a
+        // customer their booking was cancelled. Every other variable stays undefaulted on purpose,
+        // where a missing value means a real bug that should fail loudly.
+        Map<String, Object> model = new HashMap<>();
+        model.put("bookingId", "booking-1");
+        model.put("customerId", "cust-1");
+        model.put("showtimeId", "showtime-1");
+        model.put("reason", null);
+
+        Optional<EmailContent> content = service.sendTemplatedEmail(
+                "booking-cancelled", "Your booking has been cancelled", "john@example.com", model);
+
+        assertThat(content).isPresent();
+        assertThat(content.get().textBody()).contains("booking-1");
     }
 
     @Test

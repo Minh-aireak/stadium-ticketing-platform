@@ -6,7 +6,7 @@ We regret to inform you that your booking has been cancelled.
 
   Booking ID  : ${bookingId}
   Showtime ID : ${showtimeId}
-  Reason      : ${reason}
+  Reason      : ${reason!"Not specified"}
 
 If a payment was already charged, it will be automatically refunded within 3-5
 business days.

@@ -24,7 +24,7 @@
                 <h3>Cancellation Details:</h3>
                 <p><strong>Booking ID:</strong> ${bookingId}</p>
                 <p><strong>Showtime ID:</strong> ${showtimeId}</p>
-                <p><strong>Reason:</strong> ${reason}</p>
+                <p><strong>Reason:</strong> ${reason!"Not specified"}</p>
             </div>
             
             <p>If a payment was already charged, it will be automatically refunded within 3-5 business days.</p>

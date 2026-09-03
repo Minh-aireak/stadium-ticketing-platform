@@ -85,6 +85,49 @@ class PaymentTest {
     }
 
     @Test
+    void aFailureTheGatewayDidNotExplainStillCarriesAReason() {
+        // Stripe sends payment_intent.payment_failed with no last_payment_error for some declines,
+        // and StripeWebhookController passes null through when it is absent. A null reason used to
+        // reach the customer's cancellation email as a null ${reason}, which FreeMarker refuses to
+        // render — so the email was dropped, and with it the in-app notification record. The
+        // customer's booking was cancelled and nothing ever told them.
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
+        payment.pullDomainEvents(); // drop PaymentInitiatedEvent
+
+        payment.markFailed(null);
+
+        assertThat(payment.getFailureReason()).isNotBlank();
+        assertThat(payment.pullDomainEvents())
+                .singleElement()
+                .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.type(PaymentFailedEvent.class))
+                .extracting(PaymentFailedEvent::reason)
+                .asString()
+                .isNotBlank();
+    }
+
+    @Test
+    void aBlankReasonIsTreatedTheSameAsAMissingOne() {
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
+
+        payment.markFailed("   ");
+
+        assertThat(payment.getFailureReason()).isNotBlank();
+    }
+
+    @Test
+    void anAmbiguousFailureWithNoReasonStaysRecognisablyAmbiguous() {
+        // The prefix is how isAmbiguousFailure() lets a later webhook correct this payment to
+        // SUCCEEDED, so substituting the missing reason must not cost it.
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
+
+        payment.markFailedAmbiguous(null);
+
+        assertThat(payment.isAmbiguousFailure()).isTrue();
+        assertThat(payment.getFailureReason()).startsWith(Payment.GATEWAY_AMBIGUOUS_PREFIX);
+        assertThat(payment.getFailureReason()).isNotEqualTo(Payment.GATEWAY_AMBIGUOUS_PREFIX);
+    }
+
+    @Test
     void markSucceededRejectsWhenAlreadyFailedWithDefiniteDecline() {
         Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
         payment.markFailed("card declined"); // non-ambiguous decline
