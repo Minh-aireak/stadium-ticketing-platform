@@ -6,6 +6,8 @@ import com.aireak.inventory.adapter.out.persistence.SeatInventoryPersistenceAdap
 import com.aireak.inventory.application.port.out.DomainEventPublisher;
 import com.aireak.inventory.application.port.out.SeatInventoryRepository;
 import com.aireak.inventory.config.InfraConfig;
+import com.aireak.inventory.domain.event.SeatsReleasedEvent;
+import com.aireak.inventory.domain.event.SeatsReservedEvent;
 import com.aireak.inventory.domain.model.Seat;
 import com.aireak.inventory.domain.model.SeatCode;
 import com.aireak.inventory.domain.model.SeatInventory;
@@ -30,6 +32,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * Verifies the core outbox guarantee: writing the SeatInventory aggregate and its outbox row
@@ -42,10 +45,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * explicitly in {@link #migrateSchema()} before the Spring context (and Hibernate's
  * {@code ddl-auto: validate}) starts.
  *
- * <p>Only {@code SeatsSoldEvent} is covered here: {@link SeatInventory#sellSeats} is the only
- * aggregate mutation that writes to Postgres — reserve/release ({@code SeatInventoryService})
- * hold seats in Redis only and never touch this aggregate or the outbox table (see
- * {@link OutboxEventPublisher} javadoc).
+ * <p>{@link SeatInventory#sellSeats} is the only aggregate mutation that writes to Postgres:
+ * reserve and release ({@code SeatInventoryService}) move seat holds in Redis and never touch
+ * this aggregate. They do still write to the outbox, though — {@link OutboxEventPublisher} maps
+ * {@code SeatsReservedEvent} and {@code SeatsReleasedEvent} to topics of their own, so a reserve
+ * leaves a row in this table exactly as a sale does, with no aggregate save alongside it to
+ * account for it.
  */
 @DataJpaTest
 @Testcontainers
@@ -111,6 +116,30 @@ class OutboxEventPublisherIntegrationTest {
         assertThat(row.getAggregateId()).isEqualTo("showtime-1");
         assertThat(row.getEventType()).isEqualTo("SeatsSoldEvent");
         assertThat(row.getPayload()).contains("SeatsSoldEvent", "showtime-1", "A1", "A2");
+    }
+
+    /**
+     * The claim the paragraph above used to make in reverse. A reserve or a release changes no
+     * aggregate, so this row is the only trace either leaves in Postgres — and it is what Debezium
+     * turns into {@code inventory.seats.reserved} / {@code inventory.seats.released}. Driven
+     * through the same publisher bean {@code SeatInventoryService} uses, so a mapping dropped from
+     * {@code resolveTopic} surfaces here as a missing row rather than as the WARN line
+     * {@code AbstractOutboxEventPublisher} logs for an unmapped event and nothing reads.
+     */
+    @Test
+    void reservingAndReleasingSeatsEachWriteAnOutboxRowWithNoAggregateSaveBehindIt() {
+        List<SeatCode> seats = List.of(new SeatCode("A1"), new SeatCode("A2"));
+
+        eventPublisher.publishAll(List.of(
+                new SeatsReservedEvent("showtime-1", "booking-1", seats),
+                new SeatsReleasedEvent("showtime-1", seats)));
+
+        assertThat(outboxEventJpaRepository.findAll())
+                .extracting(OutboxEventEntity::getAggregateType, OutboxEventEntity::getEventType,
+                        OutboxEventEntity::getAggregateId)
+                .containsExactlyInAnyOrder(
+                        tuple("inventory.seats.reserved", "SeatsReservedEvent", "showtime-1"),
+                        tuple("inventory.seats.released", "SeatsReleasedEvent", "showtime-1"));
     }
 
     @TestConfiguration
