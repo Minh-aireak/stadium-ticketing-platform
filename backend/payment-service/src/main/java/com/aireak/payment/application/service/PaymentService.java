@@ -85,10 +85,33 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
         // Step 1: create + persist payment in INITIATED state — commits immediately.
         // tryInsert flushes-and-commits so a unique-constraint violation (the fail-open race
         // window when Redis was down) surfaces here, before any gateway charge is attempted.
-        PaymentSagaSteps.InitiateOutcome outcome =
-                sagaSteps.tryInitiate(bookingId, command.customerEmail(), command.amount(), command.currency());
+        //
+        // Both exits below hand the guard back, because this call was granted it (Acquired) and is
+        // leaving without a payment: nothing is in flight for the guard to protect, so keeping it
+        // would answer the next attempt "already being processed" about a payment that does not
+        // exist and never will. That answer is not merely unhelpful — PaymentController#initiate
+        // turns this exception into 202 Accepted, which booking-service reads as confirmation that
+        // a charge is running and accepts the booking as PENDING_PAYMENT, leaving a booking that no
+        // event and no reconciliation query can ever resolve. The AlreadyHeld branch above is the
+        // one exit that must NOT release: that guard belongs to a different attempt.
+        PaymentSagaSteps.InitiateOutcome outcome;
+        try {
+            outcome = sagaSteps.tryInitiate(bookingId, command.customerEmail(), command.amount(), command.currency());
+        } catch (RuntimeException e) {
+            idempotencyPort.release(idempotencyKey);
+            throw e;
+        }
         if (outcome instanceof PaymentSagaSteps.InitiateOutcome.AlreadyExists) {
-            return existingPaymentIdOrThrow(bookingId, idempotencyKey);
+            try {
+                return existingPaymentIdOrThrow(bookingId, idempotencyKey);
+            } catch (RuntimeException e) {
+                // DuplicatePaymentException, because tryInsert maps every
+                // DataIntegrityViolationException to AlreadyExists and a constraint other than
+                // uq_payments_booking_id reaches here with no row to find — but the lookup itself
+                // can fail too, and that exit is no more entitled to keep the guard than this one.
+                idempotencyPort.release(idempotencyKey);
+                throw e;
+            }
         }
         String paymentId = ((PaymentSagaSteps.InitiateOutcome.Created) outcome).paymentId();
         // paymentId is a durable, immutable identity fact from this point on regardless of the

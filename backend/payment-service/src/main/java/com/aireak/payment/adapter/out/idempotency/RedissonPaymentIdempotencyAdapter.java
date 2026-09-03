@@ -67,4 +67,33 @@ public class RedissonPaymentIdempotencyAdapter implements PaymentIdempotencyPort
     public void remember(String key, String paymentId) {
         paymentIdCache.put(key, paymentId);
     }
+
+    /**
+     * Swallows every Redis failure, like {@link #acquire}, and for a sharper reason: its only
+     * caller runs it in a catch block immediately before rethrowing the failure that got it there
+     * (see {@code PaymentService#execute}). A throw from here would replace that exception with a
+     * Redis one, so a caller whose payment row could not be committed would be told about a cache.
+     *
+     * <p>The cost of losing this delete is exactly the behaviour that existed before it: the key
+     * stays held for the rest of {@link #GUARD_TTL} and a retry inside that window is refused for
+     * a payment that was never created.
+     *
+     * <p>Safe even when {@link #acquire} failed open and never wrote a key at all. The worst that
+     * costs is deleting a guard a concurrent attempt had legitimately taken, and that attempt is
+     * already covered by the DB-level backstop this class's javadoc requires — its INSERT is
+     * refused by {@code uq_payments_booking_id} and resolved through {@code tryInitiate}'s
+     * AlreadyExists branch. A redundant round trip, never a second charge.
+     */
+    @Override
+    public void release(String key) {
+        try {
+            redissonClient.getBucket(key).delete();
+        } catch (Exception e) {
+            log.warn("Could not release the idempotency guard; it expires on its own in {}s: key={}, error={}",
+                    GUARD_TTL.toSeconds(), key, e.getMessage());
+        }
+        // Defensive: release is only ever reached for a key that never resolved to a paymentId, so
+        // there is nothing cached to evict — invalidating anyway closes off any future misuse.
+        paymentIdCache.invalidate(key);
+    }
 }

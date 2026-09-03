@@ -143,11 +143,29 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
         try {
             paymentPort.initiatePayment(bookingId, reserved.amount(), reserved.currency());
         } catch (Exception e) {
-            // Compatibility guard for older payment-service instances: during the tiny window
-            // between acquiring the Redis idempotency key and committing the Payment row, a
-            // retry used to return 422 "already being processed". That response confirms that
-            // another attempt owns the payment; treating it as rejection can cancel a booking
-            // whose original Stripe charge is still running.
+            // A 409/422 "already being processed" would be payment-service reporting that another
+            // attempt holds this booking's payment idempotency guard — the window between
+            // acquiring it and committing the Payment row (PaymentService#execute). Treating that
+            // as a rejection can cancel a booking whose original Stripe charge is still running,
+            // so it is accepted here instead.
+            //
+            // Written in the conditional on purpose: no payment-service on this platform sends
+            // that response. PaymentController#initiate catches DuplicatePaymentException and
+            // answers 202 Accepted, which is a success status, so initiatePayment above returns
+            // normally and the live "another attempt owns this" case never enters this catch at
+            // all — it falls straight through to Step 5, silently. Both halves arrived in one
+            // commit (6e2a1ee), so the two have never had a chance to disagree. This branch is
+            // the net for the day that catch goes; PaymentRestAdapterTest pins both answers as
+            // they leave the adapter, and payment-service's own
+            // initiateReturnsAcceptedWhenAnIdempotentPaymentAttemptIsStillInProgress pins the 202.
+            //
+            // Either way the acceptance is only safe because payment-service hands the guard back
+            // when its own attempt ends without a payment. Until it did, a draft row that failed
+            // to commit left the guard held for its full 5-minute TTL, PaymentRestAdapter's @Retry
+            // re-send was answered 202 about a payment that did not exist and never would, and the
+            // booking was accepted as PENDING_PAYMENT with no payment row, no charge, and no
+            // outcome BookingReconciliationJob could ever resolve it from — checkOutcome maps
+            // payment-service's 404 to empty. See PaymentIdempotencyPort#release.
             if (isPaymentAlreadyBeingProcessed(e)) {
                 log.warn("Payment is already being processed for booking {}; treating the " +
                         "idempotent retry as accepted", bookingId);
@@ -266,6 +284,10 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
         }
     }
 
+    // Matches a shape payment-service does not currently produce — see the Step 4 catch above for
+    // why it is kept anyway, and PaymentRestAdapterTest for what it does produce. The wording is a
+    // cross-service coupling either way: DuplicatePaymentException's message is what this reads,
+    // and payment-service pins it in theRefusalCarriesTheWordingBookingServiceMatchesOn.
     private boolean isPaymentAlreadyBeingProcessed(Exception exception) {
         if (!(exception instanceof HttpStatusCodeException httpException)) {
             return false;

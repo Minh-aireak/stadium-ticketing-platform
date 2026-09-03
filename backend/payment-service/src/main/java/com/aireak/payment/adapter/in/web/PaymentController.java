@@ -77,6 +77,12 @@ public class PaymentController {
             // the Payment row. This is an accepted in-flight request, not a validation failure:
             // returning 202 prevents an idempotent retry from cancelling the booking while the
             // original gateway charge continues in the background.
+            //
+            // This — not the 422 the exception would otherwise collect from GlobalExceptionHandler
+            // — is what booking-service actually sees, so it is the only thing standing between a
+            // concurrent attempt and a cancelled booking. Its Step 4 does carry a second net that
+            // reads the 422 wording (BookingOrchestrationService#isPaymentAlreadyBeingProcessed),
+            // but that net has never had a sender; removing this catch is what would wake it up.
             return ResponseEntity.accepted().body(new InitiatePaymentResponse(null));
         }
     }

@@ -88,8 +88,23 @@ class BookingOrchestrationServiceTest {
                 .thenReturn(new TicketInventoryPort.ReservedPrice(SERVER_AMOUNT, CURRENCY));
     }
 
+    /**
+     * The body below is invented by this test, and has to be: no payment-service on this platform
+     * sends it. {@code PaymentController#initiate} catches {@code DuplicatePaymentException} and
+     * answers 202 Accepted -- pinned there by
+     * {@code initiateReturnsAcceptedWhenAnIdempotentPaymentAttemptIsStillInProgress} -- so
+     * {@code initiatePayment} returns normally on the live path and never reaches the branch this
+     * exercises at all. Both halves came from one commit, 6e2a1ee, which is why they have never
+     * disagreed loudly enough to be noticed.
+     *
+     * <p>Kept rather than deleted because the branch is the safety net for the day the 202 catch
+     * goes: what it must never do is cancel a booking whose gateway charge is still running.
+     * {@code PaymentRestAdapterTest} pins both answers as they leave the adapter, so the claim
+     * that only one of them exists today is checked against a real HTTP exchange rather than
+     * against this stub.
+     */
     @Test
-    void legacyAlreadyProcessingResponseIsAcceptedWithoutCancellingBooking() {
+    void a4xxRefusalNamingAnInFlightPaymentIsAcceptedThoughPaymentServiceAnswers202Instead() {
         when(idempotencyStore.claim("idem-1")).thenReturn(new IdempotencyClaim.Claimed());
         stubCreateDraftBooking();
         stubReserveSeats();

@@ -20,4 +20,15 @@ public interface PaymentIdempotencyPort {
      * Payment row is durably persisted) — never for an in-flight/unresolved attempt.
      */
     void remember(String key, String paymentId);
+
+    /**
+     * Hands {@code key} back after an attempt that held it ended without a payment, so the next
+     * attempt gets a real try instead of being told one is already in flight.
+     *
+     * <p>Only ever for a key this caller was granted {@link PaymentIdempotencyResult.Acquired}
+     * for. A key reported {@link PaymentIdempotencyResult.AlreadyHeld} belongs to a different
+     * attempt that may be mid-charge, and releasing that one would let a second charge start
+     * behind the first.
+     */
+    void release(String key);
 }
