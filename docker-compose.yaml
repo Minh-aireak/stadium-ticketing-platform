@@ -420,11 +420,17 @@ services:
 
   # ---- Kafka Connect + Debezium (CDC from outbox tables to Kafka) ------
   # Connectors are auto-registered by the kafka-connect-init service below
-  # once this container reports healthy. To re-register one manually after
-  # editing its JSON (e.g. after a config change), re-run e.g.:
-  #   curl -X POST -H "Content-Type: application/json" \
-  #     --data @backend/identity-service/infra/debezium/identity-outbox-connector.json \
-  #     http://localhost:8083/connectors
+  # once this container reports healthy.
+  #
+  # To apply an EDIT to a connector's JSON, PUT its config -- do not POST it
+  # again. POST /connectors answers 409 "Connector ... already exists" and
+  # changes nothing, and kafka-connect-init counts that 409 as success, so
+  # `docker compose up -d` after an edit reports OK and applies none of it.
+  # PUT takes the inner `config` object alone, not the whole file, and leaves
+  # the connector RUNNING:
+  #   curl -X PUT -H "Content-Type: application/json" \
+  #     --data "$(jq .config backend/identity-service/infra/debezium/identity-outbox-connector.json)" \
+  #     http://localhost:8083/connectors/identity-outbox-connector/config
   kafka-connect:
     image: debezium/connect:2.7.3.Final
     container_name: kafka-connect_stadium_booking

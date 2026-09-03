@@ -3,6 +3,13 @@
 # Idempotent: a 409 (connector already exists) counts as success, so
 # re-running `docker compose up -d` is always safe.
 #
+# "Safe" means it will not fail, NOT that it will pick up an edit. A 409 leaves
+# the existing connector on whatever config it was created with, so this script
+# only ever creates -- it never updates. Applying an edited JSON needs
+# PUT /connectors/<name>/config; see the recipe on the kafka-connect service in
+# docker-compose.yaml. Left as POST deliberately: a compose restart should not
+# silently reconfigure a running CDC connector.
+#
 # The connector JSONs carry no credentials: they reference
 # ${file:/kafka/connect-secrets/postgres.properties:...}, which Kafka Connect's FileConfigProvider
 # resolves inside the kafka-connect container (see its entrypoint in docker-compose.yaml). This
