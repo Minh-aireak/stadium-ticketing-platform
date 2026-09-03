@@ -1,6 +1,7 @@
 package com.aireak.gateway.filter;
 
 import com.aireak.gateway.config.JwtValidationProperties;
+import com.aireak.gateway.util.PublicPathMatcher;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.JWSVerifier;
 import com.nimbusds.jose.crypto.MACVerifier;
@@ -10,18 +11,24 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ProblemDetail;
 import org.springframework.http.server.reactive.ServerHttpRequest;
+import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
-import org.springframework.util.AntPathMatcher;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
+import tools.jackson.databind.json.JsonMapper;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.text.ParseException;
+import java.time.Instant;
 import java.util.Date;
 
 /**
@@ -46,7 +53,6 @@ import java.util.Date;
 public class JwtAuthenticationWebFilter implements WebFilter, Ordered {
 
     private static final Logger log = LoggerFactory.getLogger(JwtAuthenticationWebFilter.class);
-    private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();
 
     /**
      * Exchange attribute (gateway-internal only, never forwarded as a header) carrying the
@@ -62,6 +68,8 @@ public class JwtAuthenticationWebFilter implements WebFilter, Ordered {
     private final JWSVerifier primaryVerifier;
     private final JWSVerifier previousVerifier;
     private final JwtValidationProperties properties;
+    private final JsonMapper jsonMapper = JsonMapper.builder().findAndAddModules(
+            JwtAuthenticationWebFilter.class.getClassLoader()).build();
 
     public JwtAuthenticationWebFilter(JwtValidationProperties properties) {
         this.properties = properties;
@@ -83,7 +91,8 @@ public class JwtAuthenticationWebFilter implements WebFilter, Ordered {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         String path = exchange.getRequest().getURI().getPath();
-        if (isPublic(path)) {
+        String method = exchange.getRequest().getMethod().name();
+        if (isPublic(method, path)) {
             ServerHttpRequest strippedRequest = exchange.getRequest().mutate()
                     .headers(headers -> {
                         headers.remove("X-User-Id");
@@ -147,22 +156,43 @@ public class JwtAuthenticationWebFilter implements WebFilter, Ordered {
         return chain.filter(mutatedExchange);
     }
 
-    private boolean isPublic(String path) {
-        return properties.publicPaths().stream().anyMatch(pattern -> PATH_MATCHER.match(pattern, path));
+    /**
+     * Delegates to {@link PublicPathMatcher}, which understands the {@code METHOD:/path} syntax.
+     * Without method scoping, {@code /api/v1/matches/**} had to be listed unscoped to make
+     * catalog browsing public, which also handed the ADMIN-only mutations on those same paths
+     * ({@code POST /api/v1/matches}, {@code PUT /api/v1/matches/{id}/cancel}) a free pass through
+     * this filter — and, because {@code PreAuthRateLimitingWebFilter} skips whatever this
+     * considers public, past the per-IP flood guard as well. match-catalog-service still rejected
+     * them on its own, so this was never an authorization hole; it was an unmetered one.
+     */
+    private boolean isPublic(String method, String path) {
+        return PublicPathMatcher.isPublic(properties.publicPaths(), method, path);
     }
 
+    /**
+     * Builds the 401 body with {@link JsonMapper}, not string concatenation. {@code instance}
+     * carries the request path, and {@code URI#getPath()} returns it DECODED — a request to
+     * {@code /api/v1/bookings/x%22,%22role%22:%22admin} used to put a raw quote straight into the
+     * JSON, letting any unauthenticated caller inject arbitrary fields into (or simply corrupt)
+     * this response. Serializing a {@link ProblemDetail} escapes it, and matches how every other
+     * error response in the platform is produced (see common's {@code JwtAuthenticationFilter}).
+     */
     private Mono<Void> unauthorized(ServerWebExchange exchange, String reason) {
+        String path = exchange.getRequest().getURI().getPath();
         CorrelationIdWebFilter.withCorrelationId(exchange, () ->
-                log.debug("Rejected request to {}: {}", exchange.getRequest().getURI().getPath(), reason));
-        org.springframework.http.server.reactive.ServerHttpResponse response = exchange.getResponse();
+                log.debug("Rejected request to {}: {}", path, reason));
+        ServerHttpResponse response = exchange.getResponse();
         response.setStatusCode(HttpStatus.UNAUTHORIZED);
-        response.getHeaders().setContentType(org.springframework.http.MediaType.APPLICATION_PROBLEM_JSON);
+        response.getHeaders().setContentType(MediaType.APPLICATION_PROBLEM_JSON);
 
-        String body = String.format(
-                "{\"type\":\"%sunauthorized\",\"title\":\"Unauthorized\",\"status\":401,\"detail\":\"%s\",\"instance\":\"%s\",\"timestamp\":\"%s\"}",
-                TYPE_BASE, reason, exchange.getRequest().getURI().getPath(), java.time.Instant.now()
-        );
-        org.springframework.core.io.buffer.DataBuffer buffer = response.bufferFactory().wrap(body.getBytes(StandardCharsets.UTF_8));
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, reason);
+        problem.setType(URI.create(TYPE_BASE + "unauthorized"));
+        problem.setTitle("Unauthorized");
+        problem.setInstance(URI.create(path));
+        problem.setProperty("timestamp", Instant.now());
+
+        DataBuffer buffer = response.bufferFactory()
+                .wrap(jsonMapper.writeValueAsBytes(problem));
         return response.writeWith(Mono.just(buffer));
     }
 }

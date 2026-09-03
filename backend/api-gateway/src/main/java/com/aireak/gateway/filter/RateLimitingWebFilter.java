@@ -86,6 +86,11 @@ public class RateLimitingWebFilter implements WebFilter, Ordered {
         PATH_POLICIES.put("/api/v1/matches/**", RateLimitPolicy.READ_ANONYMOUS);
         PATH_POLICIES.put("/api/v1/inventory/**", RateLimitPolicy.READ_AUTHENTICATED);
         PATH_POLICIES.put("/api/v1/bookings/**", RateLimitPolicy.BOOKING);
+        // MUST precede the /api/v1/payments/** entry below — first match wins. The webhook is a
+        // public path, so no X-User-Id is ever set for it, and PAYMENT is USER-keyed: it would
+        // meter every Stripe delivery against a single shared bucket at one request per six
+        // seconds. Stripe is not a user and must not be keyed like one.
+        PATH_POLICIES.put("/api/v1/payments/webhook", RateLimitPolicy.STRIPE_WEBHOOK);
         PATH_POLICIES.put("/api/v1/payments/**", RateLimitPolicy.PAYMENT);
         PATH_POLICIES.put("/api/v1/notifications/**", RateLimitPolicy.NOTIFICATION);
     }
@@ -125,8 +130,8 @@ public class RateLimitingWebFilter implements WebFilter, Ordered {
             return chain.filter(exchange);
         }
 
-        boolean isPublicPath = jwtProperties.publicPaths().stream()
-                .anyMatch(pattern -> PATH_MATCHER.match(pattern, path));
+        boolean isPublicPath = com.aireak.gateway.util.PublicPathMatcher.isPublic(
+                jwtProperties.publicPaths(), exchange.getRequest().getMethod().name(), path);
         // X-User-Id is only trustworthy on routes JwtAuthenticationWebFilter actually validated
         // (non-public paths); it is stripped-and-never-set on public paths.
         String trustedUserId = isPublicPath ? null
@@ -170,7 +175,13 @@ public class RateLimitingWebFilter implements WebFilter, Ordered {
     private String resolveKey(RateLimitPolicy policy, ServerWebExchange exchange, String trustedUserId) {
         return switch (policy.keyStrategy()) {
             case IP -> "ip:" + clientIp(exchange);
-            case USER -> "user:" + trustedUserId;
+            // Falls back to IP rather than emitting the literal key "user:null". A USER-keyed
+            // policy matched against a path with no authenticated caller (a public path, or a new
+            // route added to PATH_POLICIES before anyone notices it is unauthenticated) would
+            // otherwise put every such request into ONE shared bucket — which is both far too
+            // strict for whoever is legitimately calling and a trivial way for one client to
+            // exhaust the allowance of everyone else on that route.
+            case USER -> trustedUserId != null ? "user:" + trustedUserId : "ip:" + clientIp(exchange);
             case USER_OR_IP -> {
                 String verifiedUserId = tryVerifySubjectFromBearer(exchange);
                 yield verifiedUserId != null ? "user:" + verifiedUserId : "ip:" + clientIp(exchange);

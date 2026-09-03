@@ -88,14 +88,24 @@ jwt:
     # Reached by a user who by definition cannot log in, so neither can carry a Bearer token.
     - /api/v1/auth/forgot-password
     - /api/v1/auth/reset-password
-    - /api/v1/matches/**
+    # Catalog browsing is public, but the ADMIN-only mutations live on these same paths
+    # (POST /api/v1/matches, PUT /api/v1/matches/{id}/publish|cancel|complete). Scoping to GET
+    # keeps those behind token validation AND behind PreAuthRateLimitingWebFilter's per-IP flood
+    # guard, which skips whatever this list marks public. Mirrors match-catalog-service's own
+    # jwt.excluded-paths, which was already method-scoped for exactly this reason.
+    - "GET:/api/v1/matches"
+    - "GET:/api/v1/matches/**"
+    # Stripe authenticates with its own HMAC (Stripe-Signature), not a platform JWT, and .env.example
+    # forwards webhooks here (port 8080) rather than straight to payment-service. Without this entry
+    # every delivery was rejected 401 at the edge and never reached the handler — payment-service
+    # carves the same path out of its own filter, which only matters once the request arrives. That
+    # made the whole async payment-reconciliation backstop dead code in the documented deployment.
+    # Method-scoped so only the POST Stripe actually sends is exempt.
+    - "POST:/api/v1/payments/webhook"
     - /actuator/health
     - /actuator/info
     # Prometheus has no user JWT to present — public here for the same reason health/info are.
     - /actuator/prometheus
-    - /v3/api-docs/**
-    - /swagger-ui/**
-    - /swagger-ui.html
 
 # Direct socket addresses trusted to set X-Forwarded-For/Forwarded (the load balancer/ingress in
 # front of this gateway) — anything else is an untrusted client and those headers are ignored

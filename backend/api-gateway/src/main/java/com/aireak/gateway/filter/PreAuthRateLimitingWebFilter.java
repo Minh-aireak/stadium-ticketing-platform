@@ -13,7 +13,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
-import org.springframework.util.AntPathMatcher;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
@@ -55,8 +54,6 @@ import java.nio.charset.StandardCharsets;
 @Order(-60)
 public class PreAuthRateLimitingWebFilter implements WebFilter, Ordered {
 
-    private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();
-
     private final LocalIpTokenBucketLimiter limiter;
     private final JwtValidationProperties jwtProperties;
     private final com.aireak.gateway.config.GatewayProperties gatewayProperties;
@@ -80,7 +77,7 @@ public class PreAuthRateLimitingWebFilter implements WebFilter, Ordered {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         String path = exchange.getRequest().getURI().getPath();
-        if (isPublic(path)) {
+        if (isPublic(exchange.getRequest().getMethod().name(), path)) {
             return chain.filter(exchange);
         }
 
@@ -97,8 +94,11 @@ public class PreAuthRateLimitingWebFilter implements WebFilter, Ordered {
         return tooManyRequests(exchange);
     }
 
-    private boolean isPublic(String path) {
-        return jwtProperties.publicPaths().stream().anyMatch(pattern -> PATH_MATCHER.match(pattern, path));
+    // Must agree exactly with JwtAuthenticationWebFilter about what "public" means — hence the
+    // shared matcher. A pattern this filter read as public but that one did not would leave a
+    // protected route unmetered by the flood guard while still requiring a token.
+    private boolean isPublic(String method, String path) {
+        return com.aireak.gateway.util.PublicPathMatcher.isPublic(jwtProperties.publicPaths(), method, path);
     }
 
     private String clientIp(ServerWebExchange exchange) {

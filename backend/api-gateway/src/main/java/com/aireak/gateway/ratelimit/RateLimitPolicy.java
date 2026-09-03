@@ -31,6 +31,13 @@ public enum RateLimitPolicy {
     // customer who trips the password policy a few times isn't locked out of their own reset link.
     PASSWORD_RESET_CONFIRM(KeyStrategy.IP, 1, 120, 12),
     REFRESH_TOKEN(KeyStrategy.USER_OR_IP, 1, 60, 3),
+    // Stripe's webhook deliveries. Keyed by IP because there is no platform user behind them, and
+    // sized for a provider that legitimately bursts (a backlog being flushed, retries of earlier
+    // failures) — throttling Stripe does not protect anything here, it just delays the payment
+    // reconciliation this endpoint exists to perform, and Stripe gives up after its retry window.
+    // Still bounded rather than exempt: the path is publicly reachable, so anyone can post to it,
+    // and a bad signature is cheap to reject but not free.
+    STRIPE_WEBHOOK(KeyStrategy.IP, 20, 600, 1),
     READ_ANONYMOUS(KeyStrategy.IP, 5, 300, 3),
     READ_AUTHENTICATED(KeyStrategy.USER, 10, 600, 3),
     BOOKING(KeyStrategy.USER, 1, 90, 3),
