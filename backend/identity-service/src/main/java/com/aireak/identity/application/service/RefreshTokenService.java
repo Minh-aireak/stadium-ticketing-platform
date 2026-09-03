@@ -14,7 +14,6 @@ import com.aireak.identity.domain.model.AccountStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 
@@ -24,6 +23,13 @@ import java.time.Instant;
  * <p>Rotation itself (validation + reuse detection) is delegated to
  * {@link RefreshSessionStorePort#rotate(String)}, which is atomic. This service only reacts
  * to the outcome — never logs the raw token.
+ *
+ * <p>Deliberately <strong>not</strong> {@code @Transactional}, for the reason
+ * {@code LoginService} sets out: one repository read and no writes, so a transaction added no
+ * atomicity and only widened a Hikari connection's hold to cover the Redis rotation script that
+ * runs before it. This is the most frequently called endpoint on the platform — every tab that
+ * comes back from a refresh hits it — so it is the worst place to hold a connection across
+ * someone else's round trip.
  */
 @Slf4j
 @Service
@@ -36,7 +42,6 @@ public class RefreshTokenService implements RefreshTokenUseCase {
     private final JwtProperties jwtProperties;
 
     @Override
-    @Transactional(readOnly = true)
     public AuthResult execute(String rawRefreshToken) {
         if (rawRefreshToken == null || rawRefreshToken.isBlank()) {
             throw new InvalidRefreshTokenException("Missing refresh token");

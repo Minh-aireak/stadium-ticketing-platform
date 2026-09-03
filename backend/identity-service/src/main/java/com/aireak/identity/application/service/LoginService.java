@@ -19,7 +19,6 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -33,6 +32,14 @@ import java.util.Optional;
  * gateway limits login by IP ({@code LOGIN(IP, 1, 120, 12)}), which does nothing about an attacker
  * spreading the same account's guesses over many addresses. Neither is a lock — see the port's
  * javadoc for why this deliberately does not disable the account.
+ *
+ * <p>Deliberately <strong>not</strong> {@code @Transactional}. It reads one row and writes none,
+ * so a transaction bought no atomicity — what it did buy was a Hikari connection held for the
+ * whole method, and most of this method is not database work: a Redis throttle check, a bcrypt
+ * comparison at strength 12 that is meant to cost hundreds of milliseconds, and one or two more
+ * Redis calls. At the default pool size that put a ceiling on concurrent logins set by connections
+ * held during CPU work that needs none. Same reasoning {@code PaymentService} already applies to
+ * the gateway call it refuses to hold a connection across.
  */
 @Slf4j
 @Service
@@ -62,7 +69,6 @@ public class LoginService implements LoginUseCase {
     }
 
     @Override
-    @Transactional(readOnly = true)
     public AuthResult execute(LoginCommand command) {
         Email email = new Email(command.email());
         RawPassword rawPassword = RawPassword.forAuthentication(command.rawPassword());
