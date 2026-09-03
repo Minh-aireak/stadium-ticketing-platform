@@ -91,7 +91,7 @@ class RedissonSeatHoldAdapterTest {
 
         adapter.releaseHolds(showtimeId, seats, "booking-1");
 
-        assertThat(adapter.findHeld(showtimeId, seats)).isEmpty();
+        assertThat(adapter.findHoldOwners(showtimeId, seats)).isEmpty();
     }
 
     @Test
@@ -102,7 +102,7 @@ class RedissonSeatHoldAdapterTest {
 
         adapter.releaseHolds(showtimeId, seats, "booking-2");
 
-        assertThat(adapter.findHeld(showtimeId, seats)).containsExactly(new SeatCode("A1"));
+        assertThat(adapter.findHoldOwners(showtimeId, seats)).containsOnlyKeys(new SeatCode("A1"));
     }
 
     @Test
@@ -113,7 +113,7 @@ class RedissonSeatHoldAdapterTest {
 
         adapter.releaseHolds(showtimeId, seats, "customer-1");
 
-        assertThat(adapter.findHeld(showtimeId, seats)).isEmpty();
+        assertThat(adapter.findHoldOwners(showtimeId, seats)).isEmpty();
     }
 
     private static String uniqueShowtime() {

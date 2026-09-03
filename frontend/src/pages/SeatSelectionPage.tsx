@@ -134,7 +134,15 @@ export function SeatSelectionPage() {
 
     getSeatMap(state.showtimeId)
       .then((data) => {
-        if (!cancelled) setSeats(data.seats)
+        if (cancelled) return
+        setSeats(data.seats)
+        // Adopt the holds this customer already owns. Leaving seat selection for checkout keeps
+        // them (see the unmount cleanup above), and a reload never releases them at all, so
+        // arriving here with live holds is routine rather than exceptional. Before the seat map
+        // said whose each hold was, those seats came back indistinguishable from another
+        // shopper's: greyed out, unselectable, and stuck that way for the rest of the 10-minute
+        // TTL — the customer could neither pay for them nor pick anything else.
+        setSelected(data.seats.filter((seat) => seat.heldByYou).map((seat) => seat.code))
       })
       .catch((err: unknown) => {
         if (cancelled) return

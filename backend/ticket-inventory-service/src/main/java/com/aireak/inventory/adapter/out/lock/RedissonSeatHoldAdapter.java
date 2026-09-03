@@ -11,10 +11,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -168,21 +167,23 @@ public class RedissonSeatHoldAdapter implements SeatHoldPort {
     }
 
     @Override
-    public Set<SeatCode> findHeld(String showtimeId, List<SeatCode> seatCodes) {
+    public Map<SeatCode, String> findHoldOwners(String showtimeId, List<SeatCode> seatCodes) {
         if (seatCodes.isEmpty()) {
-            return Set.of();
+            return Map.of();
         }
         Map<String, SeatCode> seatCodeByKey = seatCodes.stream()
                 .collect(Collectors.toMap(seatCode -> holdKey(showtimeId, seatCode), seatCode -> seatCode));
 
         RMapCache<String, String> holds = redissonClient.getMapCache(CACHE_NAME);
         // Single round trip for the whole seat map instead of one GET per seat (getAll only
-        // returns entries that actually exist, so its key set IS the held subset).
+        // returns entries that actually exist, so its key set IS the held subset). The values
+        // come back in the same trip, so attributing each hold to its owner costs nothing extra.
         Map<String, String> present = holds.getAll(seatCodeByKey.keySet());
 
-        return present.keySet().stream()
-                .map(seatCodeByKey::get)
-                .collect(Collectors.toCollection(HashSet::new));
+        Map<SeatCode, String> ownersBySeat = new HashMap<>();
+        present.forEach((key, storedValue) ->
+                ownersBySeat.put(seatCodeByKey.get(key), decodeOwningCustomer(storedValue)));
+        return ownersBySeat;
     }
 
     private String holdKey(String showtimeId, SeatCode seatCode) {
@@ -191,6 +192,17 @@ public class RedissonSeatHoldAdapter implements SeatHoldPort {
 
     private String encodeConfirmedOwner(String customerId, String bookingId) {
         return customerId + OWNER_SEP + bookingId;
+    }
+
+    /**
+     * The customer a hold belongs to, from its stored value: the whole value for a standalone
+     * pre-booking hold (whose value is the customerId — {@link #holdSeats} is only ever called
+     * with one, see {@code SeatInventoryService}), or the customer component for a hold already
+     * confirmed into a booking (see class javadoc).
+     */
+    private String decodeOwningCustomer(String storedValue) {
+        int sepIndex = storedValue.indexOf(OWNER_SEP);
+        return sepIndex >= 0 ? storedValue.substring(0, sepIndex) : storedValue;
     }
 
     /**

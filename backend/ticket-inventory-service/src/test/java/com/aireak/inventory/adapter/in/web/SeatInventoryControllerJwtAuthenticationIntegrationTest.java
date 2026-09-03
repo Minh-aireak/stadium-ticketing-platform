@@ -31,6 +31,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -124,7 +126,7 @@ class SeatInventoryControllerJwtAuthenticationIntegrationTest {
 
     @Test
     void getSeatMapWithValidTokenReturns404WhenNotFound() throws Exception {
-        when(getSeatMapUseCase.getSeatMap("showtime-1")).thenReturn(Optional.empty());
+        when(getSeatMapUseCase.getSeatMap(eq("showtime-1"), any())).thenReturn(Optional.empty());
 
         mockMvc.perform(get("/api/v1/inventory/{showtimeId}/seats", "showtime-1")
                         .header("Authorization", "Bearer " + validToken()))

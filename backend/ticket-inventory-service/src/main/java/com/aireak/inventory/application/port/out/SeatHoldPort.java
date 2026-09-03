@@ -3,7 +3,7 @@ package com.aireak.inventory.application.port.out;
 import com.aireak.inventory.domain.model.SeatCode;
 
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 
 /**
  * Outbound port: temporary (TTL-based) seat holds.
@@ -45,11 +45,19 @@ public interface SeatHoldPort {
     void confirmHold(String showtimeId, List<SeatCode> seatCodes, String previousOwnerId, String newOwnerId);
 
     /**
-     * Batched hold check for a whole seat map — one round trip instead of one per seat (see
-     * {@code SeatMapQueryService}, the only caller). Returns the subset of {@code seatCodes}
-     * that currently have an active (non-expired) hold, regardless of owner.
+     * Batched hold lookup for a whole seat map — one round trip instead of one per seat (see
+     * {@code SeatMapQueryService}, the only caller). Returns an entry for each of
+     * {@code seatCodes} that currently has an active (non-expired) hold, mapped to the id of the
+     * <em>customer</em> who owns it — for a hold already confirmed into a booking (see
+     * {@link #confirmHold}) that is the customer component, not the bookingId.
+     *
+     * <p>Returned the held subset alone until the seat map needed to tell a customer's own hold
+     * from someone else's. It could not: every hold rendered identically as "someone is
+     * mid-checkout", so a customer who reloaded the seat page — or backed into it out of
+     * checkout — saw the seats they were still holding greyed out as another shopper's, with no
+     * way to select them and nothing to do but wait out the TTL.
      */
-    Set<SeatCode> findHeld(String showtimeId, List<SeatCode> seatCodes);
+    Map<SeatCode, String> findHoldOwners(String showtimeId, List<SeatCode> seatCodes);
 
     /**
      * True unless some seat in {@code seatCodes} currently has an active hold confirmed (see

@@ -135,10 +135,14 @@ public class SeatInventoryController {
         return ResponseEntity.ok().build();
     }
 
-    /** GET /api/v1/inventory/{showtimeId}/seats — seat map for seat selection, incl. live Redis holds. */
+    /**
+     * GET /api/v1/inventory/{showtimeId}/seats — seat map for seat selection, incl. live Redis
+     * holds. Passes the authenticated caller so each HELD seat can say whether the hold is
+     * theirs ({@code heldByYou}); it does not otherwise scope what is returned.
+     */
     @GetMapping("/{showtimeId}/seats")
     public ResponseEntity<SeatMapResponse> getSeatMap(@PathVariable String showtimeId) {
-        return getSeatMapUseCase.getSeatMap(showtimeId)
+        return getSeatMapUseCase.getSeatMap(showtimeId, currentUserId())
                 .map(result -> ResponseEntity.ok(toResponse(result)))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
@@ -153,7 +157,7 @@ public class SeatInventoryController {
         String row = code.substring(0, 1);
         int number = Integer.parseInt(code.substring(1));
         return new SeatResponse(code, row, number, seat.status().toLowerCase(), seat.tier().toLowerCase(),
-                seat.price());
+                seat.price(), seat.heldByCaller());
     }
 
     /**
@@ -210,7 +214,13 @@ public class SeatInventoryController {
         }
     }
 
-    record SeatResponse(String code, String row, int number, String status, String tier, BigDecimal price) {}
+    /**
+     * {@code heldByYou} distinguishes the caller's own hold from anyone else's on a {@code held}
+     * seat, so the frontend can restore a selection the customer already paid a hold for instead
+     * of rendering it as taken (see the storefront's SeatSelectionPage).
+     */
+    record SeatResponse(String code, String row, int number, String status, String tier, BigDecimal price,
+                        boolean heldByYou) {}
     record SeatMapResponse(String showtimeId, List<SeatResponse> seats) {}
     record ReserveSeatsResponse(BigDecimal totalPrice, String currency) {}
     record HoldSeatsResponse(BigDecimal totalPrice, String currency) {}
