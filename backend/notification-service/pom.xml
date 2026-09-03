@@ -20,6 +20,16 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <!-- Required by common's GlobalExceptionHandler, which declares an @ExceptionHandler for
+             jakarta.validation.ConstraintViolationException; without jakarta.validation on the
+             classpath that bean fails to instantiate and the whole context refuses to start. This
+             service had been getting it transitively through springdoc-openapi, which it never
+             actually used — an accidental dependency that only surfaced when springdoc was
+             removed. Every other web service already declares this starter explicitly. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
 
         <!-- Kafka (version managed by Spring Boot 4.1.0 BOM) -->
         <dependency>
@@ -50,11 +60,6 @@
             <scope>runtime</scope>
         </dependency>
 
-        <!-- OpenAPI Swagger UI -->
-        <dependency>
-            <groupId>org.springdoc</groupId>
-            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-        </dependency>
 
         <!-- Nimbus JOSE+JWT — needed at runtime by common's JwtAuthenticationFilter (it's an
              optional dependency there, so every consuming service must redeclare it), and by

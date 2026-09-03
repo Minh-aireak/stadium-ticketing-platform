@@ -11,6 +11,7 @@ import com.aireak.notification.application.port.out.NotificationRepository;
 import com.aireak.notification.application.port.out.ProcessedEventRepository;
 import com.aireak.notification.application.port.out.dto.EmailMessage;
 import com.aireak.notification.config.AppLinkProperties;
+import com.aireak.notification.config.FreeMarkerEscapingConfig;
 import com.aireak.notification.domain.model.Notification;
 import com.aireak.payment.domain.event.PaymentSucceededEvent;
 import freemarker.template.Configuration;
@@ -65,10 +66,16 @@ class NotificationDispatchServiceTest {
         Configuration freemarkerConfig = new Configuration(Configuration.VERSION_2_3_32);
         freemarkerConfig.setClassForTemplateLoading(NotificationDispatchServiceTest.class, "/templates");
         freemarkerConfig.setDefaultEncoding("UTF-8");
+        // Same call production makes, so escaping behaviour here is production's behaviour.
+        FreeMarkerEscapingConfig.applyTo(freemarkerConfig);
 
+        // The real NotificationRecordingSteps over mocked repositories: it is the only writer, so
+        // the existing assertions on notificationRepository/processedEventRepository still observe
+        // exactly what production would persist — just from behind the transactional boundary that
+        // now keeps the email send out of a database transaction.
         service = new NotificationDispatchService(
                 new TransactionalEmailService(emailSenderPort, freemarkerConfig),
-                processedEventRepository, notificationRepository,
+                new NotificationRecordingSteps(notificationRepository, processedEventRepository),
                 new AppLinkProperties("http://localhost:8081", "http://localhost:5173"));
     }
 
@@ -104,6 +111,39 @@ class NotificationDispatchServiceTest {
         assertThat(sent.to()).isEqualTo("customer-1@example.com");
         assertThat(sent.htmlBody()).contains("customer requested refund");
         assertThat(sent.textBody()).contains("customer requested refund");
+    }
+
+    /**
+     * The cancellation reason is not always server-authored: for a cancelled match it is free text
+     * an administrator typed, and it reaches the inbox of every customer holding a booking for that
+     * match. FreeMarker escapes nothing unless a template's output format says to, and these
+     * templates are named {@code *.html.ftl} rather than {@code *.ftlh}, so nothing inferred it —
+     * {@code FreeMarkerEscapingConfig} is what makes this pass.
+     */
+    @Test
+    void send_cancelledBooking_escapesMarkupInTheReasonInTheHtmlBodyButNotThePlainTextOne() {
+        String injected = "<img src=x onerror=alert(1)>";
+        BookingCancelledEvent cancelled = new BookingCancelledEvent(
+                "booking-1", "customer-1", "customer-1@example.com", "showtime-1",
+                injected, Instant.now());
+
+        dispatch(BOOKING_CANCELLED, cancelled);
+
+        EmailMessage sent = captureSent();
+        assertThat(sent.htmlBody()).doesNotContain(injected).contains("&lt;img");
+        // The plain-text body must stay literal — escaping there would show readers "&amp;".
+        assertThat(sent.textBody()).contains(injected);
+    }
+
+    @Test
+    void send_cancelledBooking_leavesAnAmpersandAloneInThePlainTextBody() {
+        BookingCancelledEvent cancelled = new BookingCancelledEvent(
+                "booking-1", "customer-1", "customer-1@example.com", "showtime-1",
+                "Barcelona & Madrid postponed", Instant.now());
+
+        dispatch(BOOKING_CANCELLED, cancelled);
+
+        assertThat(captureSent().textBody()).contains("Barcelona & Madrid postponed");
     }
 
     @Test
