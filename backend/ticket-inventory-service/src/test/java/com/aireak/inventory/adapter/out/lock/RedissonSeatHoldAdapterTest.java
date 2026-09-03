@@ -1,5 +1,6 @@
 package com.aireak.inventory.adapter.out.lock;
 
+import com.aireak.inventory.domain.exception.SeatsNotAvailableException;
 import com.aireak.inventory.domain.model.SeatCode;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Exercises {@link RedissonSeatHoldAdapter} against a real Redis (Testcontainers) — the
@@ -114,6 +116,54 @@ class RedissonSeatHoldAdapterTest {
         adapter.releaseHolds(showtimeId, seats, "customer-1");
 
         assertThat(adapter.findHoldOwners(showtimeId, seats)).isEmpty();
+    }
+
+    /**
+     * A reserve that fails on one seat must not cost the customer the seats it did not fail on.
+     *
+     * <p>The frontend holds seats one at a time as they are clicked (see SeatSelectionPage), so a
+     * selection's holds expire at staggered times: one seat going stale while the rest are still
+     * live is the ordinary case, not an exotic one. The rollback used to delete every key it had
+     * written, which for a handed-over seat meant deleting a hold the customer still owned rather
+     * than putting it back the way it was found.
+     */
+    @Test
+    void aFailedConfirmHoldRestoresTheCustomersOwnPreBookingHold() {
+        String showtimeId = uniqueShowtime();
+        SeatCode stillMine = new SeatCode("A1");
+        SeatCode goneToSomeoneElse = new SeatCode("A2");
+
+        adapter.holdSeats(showtimeId, List.of(stillMine), "customer-1");
+        adapter.holdSeats(showtimeId, List.of(goneToSomeoneElse), "customer-2");
+
+        assertThatThrownBy(() -> adapter.confirmHold(
+                showtimeId, List.of(stillMine, goneToSomeoneElse), "customer-1", "booking-1"))
+                .isInstanceOf(SeatsNotAvailableException.class);
+
+        assertThat(adapter.findHoldOwners(showtimeId, List.of(stillMine, goneToSomeoneElse)))
+                .containsEntry(stillMine, "customer-1")
+                .containsEntry(goneToSomeoneElse, "customer-2");
+    }
+
+    /**
+     * The other half of the rollback contract, so restoring handed-over holds cannot quietly turn
+     * into restoring everything: a seat this call placed from scratch had no owner before it and
+     * must be left with none.
+     */
+    @Test
+    void aFailedConfirmHoldStillRemovesTheHoldsItPlacedFromScratch() {
+        String showtimeId = uniqueShowtime();
+        SeatCode neverHeldBefore = new SeatCode("A1");
+        SeatCode goneToSomeoneElse = new SeatCode("A2");
+
+        adapter.holdSeats(showtimeId, List.of(goneToSomeoneElse), "customer-2");
+
+        assertThatThrownBy(() -> adapter.confirmHold(
+                showtimeId, List.of(neverHeldBefore, goneToSomeoneElse), "customer-1", "booking-1"))
+                .isInstanceOf(SeatsNotAvailableException.class);
+
+        assertThat(adapter.findHoldOwners(showtimeId, List.of(neverHeldBefore, goneToSomeoneElse)))
+                .containsOnlyKeys(goneToSomeoneElse);
     }
 
     private static String uniqueShowtime() {

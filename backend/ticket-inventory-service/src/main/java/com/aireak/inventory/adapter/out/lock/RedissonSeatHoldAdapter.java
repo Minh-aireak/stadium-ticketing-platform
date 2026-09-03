@@ -111,25 +111,32 @@ public class RedissonSeatHoldAdapter implements SeatHoldPort {
         // composite value (see class javadoc) so the customer stays attributable later, e.g. for
         // isFreeOfHoldsByOtherOwners.
         String confirmedOwner = encodeConfirmedOwner(previousOwnerId, newOwnerId);
-        // Only what THIS call newly wrote — see holdSeats for why the rollback must not undo a
-        // hold that was already confirmed to this same booking by an earlier attempt.
+        // Two lists, because this call's effect is not the same on every seat and so neither is
+        // its undo. A seat handed over from the customer's own pre-booking hold has to be put
+        // BACK to previousOwnerId; a seat placed from scratch has to be removed outright. See
+        // rollbackConfirm — collapsing the two into one "newlyPlaced" list is what made a
+        // half-failed reserve delete holds the customer still legitimately owned.
+        List<SeatCode> handedOver = new ArrayList<>();
         List<SeatCode> newlyPlaced = new ArrayList<>();
         List<SeatCode> unavailable = new ArrayList<>();
 
         for (SeatCode seatCode : seatCodes) {
             String key = holdKey(showtimeId, seatCode);
-            // Caller already holds the per-showtime DistributedLockPort lock (same precondition
-            // as holdSeats), so this remove-then-put pair is race-free without needing a single
-            // atomic swap: handing over an existing pre-booking hold, or — if it already expired
-            // or was never placed — falling back to a plain new hold.
-            if (holds.remove(key, previousOwnerId)) {
-                holds.put(key, confirmedOwner, holdTtlMinutes, TimeUnit.MINUTES);
-                newlyPlaced.add(seatCode);
-                continue;
-            }
+            // Take the customer's own pre-booking hold off the key first, so the conditional
+            // write below covers hand-over and fresh placement with one code path. Whether it
+            // was a hand-over is remembered only for the rollback.
+            boolean handOver = holds.remove(key, previousOwnerId);
+
+            // putIfAbsent, never an unconditional put — this is the per-key guard
+            // RedissonDistributedLockAdapter's javadoc says every path under the lock has, and
+            // an unconditional put did not provide it. The per-showtime lock is LEASED
+            // (tryLock(wait, lease, unit)), so it can expire mid-call; a plain put would then
+            // overwrite a hold another customer had legitimately taken in that window, leaving
+            // two buyers each believing they held the seat until one of them lost at Seat#sell,
+            // after paying.
             String previous = holds.putIfAbsent(key, confirmedOwner, holdTtlMinutes, TimeUnit.MINUTES);
             if (previous == null) {
-                newlyPlaced.add(seatCode);
+                (handOver ? handedOver : newlyPlaced).add(seatCode);
             } else if (!confirmedOwner.equals(previous)) {
                 unavailable.add(seatCode);
             }
@@ -141,7 +148,7 @@ public class RedissonSeatHoldAdapter implements SeatHoldPort {
         }
 
         if (!unavailable.isEmpty()) {
-            newlyPlaced.forEach(seatCode -> holds.remove(holdKey(showtimeId, seatCode), confirmedOwner));
+            rollbackConfirm(showtimeId, handedOver, newlyPlaced, previousOwnerId, confirmedOwner);
             throw new SeatsNotAvailableException(showtimeId, unavailable);
         }
 
@@ -184,6 +191,38 @@ public class RedissonSeatHoldAdapter implements SeatHoldPort {
         present.forEach((key, storedValue) ->
                 ownersBySeat.put(seatCodeByKey.get(key), decodeOwningCustomer(storedValue)));
         return ownersBySeat;
+    }
+
+    /**
+     * Puts the seats back the way {@link #confirmHold} found them when it could not claim all of
+     * them: fresh placements removed, hand-overs returned to {@code previousOwnerId}.
+     *
+     * <p>The distinction is the whole point. The frontend takes a pre-booking hold per seat as it
+     * is clicked (see the storefront's SeatSelectionPage), so a selection's holds expire at
+     * staggered times and one seat going stale while the rest are still live is the ordinary
+     * case. Deleting every key this call wrote turned that into: the reserve fails because of the
+     * one lost seat, AND every other seat the customer was still holding is freed for other
+     * buyers before they can retry.
+     *
+     * <p>Restored with a full TTL rather than whatever the pre-booking hold had left. RMapCache
+     * offers no read-remaining-and-reapply that is atomic against this, and the alternative —
+     * dropping the hold because its exact remaining lifetime is unknowable — is the bug this
+     * method exists to fix.
+     *
+     * <p>{@code putIfAbsent} on the way back for the same reason as on the way in: under an
+     * expired lock lease the seat may already belong to someone else, and a hold we are giving up
+     * anyway must not overwrite theirs.
+     */
+    private void rollbackConfirm(String showtimeId, List<SeatCode> handedOver, List<SeatCode> newlyPlaced,
+                                  String previousOwnerId, String confirmedOwner) {
+        RMapCache<String, String> holds = redissonClient.getMapCache(CACHE_NAME);
+        newlyPlaced.forEach(seatCode -> holds.remove(holdKey(showtimeId, seatCode), confirmedOwner));
+        handedOver.forEach(seatCode -> {
+            String key = holdKey(showtimeId, seatCode);
+            if (holds.remove(key, confirmedOwner)) {
+                holds.putIfAbsent(key, previousOwnerId, holdTtlMinutes, TimeUnit.MINUTES);
+            }
+        });
     }
 
     private String holdKey(String showtimeId, SeatCode seatCode) {
