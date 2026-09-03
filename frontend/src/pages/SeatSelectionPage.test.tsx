@@ -184,4 +184,70 @@ describe('SeatSelectionPage', () => {
       }),
     )
   })
+
+  /**
+   * The showtime stopped selling while the customer sat on this page — an admin cancelled the
+   * match, or its kickoff passed. inventory's requireBookable raises ShowtimeBookingClosedException,
+   * another DomainException 422, and its English named the internal showtimeId just as the
+   * seats-taken one did. MatchDetailPage no longer offers a cancelled match at all, but it cannot
+   * cover a customer already standing here when the cancellation lands.
+   */
+  it('explains a showtime that stopped selling in Vietnamese', async () => {
+    getSeatMap.mockResolvedValue({ showtimeId: 'show-1', seats: [seat('A1'), seat('A2')] })
+    const closed = new AxiosError('Request failed', 'ERR_BAD_RESPONSE')
+    closed.config = { headers: new AxiosHeaders() } as never
+    closed.response = {
+      status: 422,
+      statusText: '',
+      data: { detail: 'Ticket booking is closed for showtime: show-1' },
+      headers: {},
+      config: closed.config,
+    } as never
+    holdSeats.mockRejectedValue(closed)
+
+    renderSeatSelection()
+
+    await waitFor(() => expect(screen.getByTitle(/^A1 ·/)).toBeDefined())
+    fireEvent.click(screen.getByTitle(/^A1 ·/))
+
+    await waitFor(() => expect(toast).toHaveBeenCalled())
+    expect(toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Không thể giữ ghế',
+        description: 'Trận đấu này đã ngừng bán vé. Vui lòng chọn trận đấu khác.',
+      }),
+    )
+  })
+
+  /**
+   * Guard for the pair above: a catalog outage is NOT a closed booking window. c8ff01a split
+   * ShowtimeCatalogUnavailableException off DomainException precisely so it answers 503, and its
+   * detail must keep reaching the customer with the correlation id getErrorMessage appends to a
+   * 5xx — the whole point of that split.
+   */
+  it('still reports a catalog outage as an outage, with its correlation id', async () => {
+    getSeatMap.mockResolvedValue({ showtimeId: 'show-1', seats: [seat('A1'), seat('A2')] })
+    const outage = new AxiosError('Request failed', 'ERR_BAD_RESPONSE')
+    outage.config = { headers: new AxiosHeaders() } as never
+    outage.response = {
+      status: 503,
+      statusText: '',
+      data: { detail: 'Cannot confirm the booking window right now' },
+      headers: { 'x-correlation-id': 'corr-42' },
+      config: outage.config,
+    } as never
+    holdSeats.mockRejectedValue(outage)
+
+    renderSeatSelection()
+
+    await waitFor(() => expect(screen.getByTitle(/^A1 ·/)).toBeDefined())
+    fireEvent.click(screen.getByTitle(/^A1 ·/))
+
+    await waitFor(() => expect(toast).toHaveBeenCalled())
+    expect(toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: 'Cannot confirm the booking window right now (Mã lỗi: corr-42)',
+      }),
+    )
+  })
 })

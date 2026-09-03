@@ -8,7 +8,7 @@ import { useAuth } from '@/features/auth/AuthContext'
 import { createBooking } from '@/features/booking/bookingApi'
 import { unholdSeats } from '@/features/seats/seatsApi'
 import { formatCurrency } from '@/lib/format'
-import { getErrorMessage, isSeatsUnavailableError } from '@/lib/errors'
+import { getErrorMessage, isBookingClosedError, isSeatsUnavailableError } from '@/lib/errors'
 import { randomUuid } from '@/lib/uuid'
 
 export interface CheckoutState {
@@ -78,6 +78,8 @@ export function CheckoutPage() {
         // 7d3eee1 added this predicate to keep off the screen, on the endpoint that never got it.
         isSeatsUnavailableError(err)
           ? 'Một trong những ghế bạn chọn vừa được người khác đặt. Vui lòng quay lại và chọn ghế khác.'
+          : isBookingClosedError(err)
+          ? 'Trận đấu này đã ngừng bán vé. Vui lòng chọn trận đấu khác.'
           : getErrorMessage(err, 'Không thể tạo đơn đặt vé. Vui lòng thử lại.'),
       )
     } finally {

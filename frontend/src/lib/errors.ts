@@ -101,3 +101,20 @@ export function isSeatsUnavailableError(error: unknown): boolean {
   const detail = error.response?.data?.detail
   return typeof detail === 'string' && /seats not available/i.test(detail)
 }
+
+/**
+ * True for the other 422 the seat hold/reserve endpoints raise: the showtime itself has stopped
+ * selling, because its match was cancelled or completed or its kickoff has passed (see
+ * ticket-inventory-service ShowtimeBookingClosedException). Its detail is English and names the
+ * internal showtimeId, exactly as {@link isSeatsUnavailableError}'s does.
+ *
+ * <p>Pinned to 422 rather than to the sentence alone, so it cannot swallow the failure it was
+ * split away from: a catalog that could not be reached is ShowtimeCatalogUnavailableException,
+ * deliberately not a DomainException, and answers 503 with a correlation id the customer is meant
+ * to see. Telling them sales had closed would be the very confusion that split fixed.
+ */
+export function isBookingClosedError(error: unknown): boolean {
+  if (!isAxiosError(error) || error.response?.status !== 422) return false
+  const detail = error.response?.data?.detail
+  return typeof detail === 'string' && /booking is closed/i.test(detail)
+}

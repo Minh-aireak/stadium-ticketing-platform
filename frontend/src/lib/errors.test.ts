@@ -5,6 +5,7 @@ import {
   getCorrelationId,
   getErrorMessage,
   isDuplicateEmailError,
+  isBookingClosedError,
   isInvalidResetTokenError,
   isSeatsUnavailableError,
 } from './errors'
@@ -134,5 +135,21 @@ describe('domain error predicates', () => {
       .toBe(false)
     expect(isSeatsUnavailableError(responseError(503, taken))).toBe(false)
     expect(isSeatsUnavailableError(new Error('Seats not available'))).toBe(false)
+  })
+
+  /**
+   * The other half of the pair above: ShowtimeBookingClosedException, raised when the showtime
+   * itself is no longer selling rather than when one seat is taken. Must not swallow the outage
+   * beside it — an unreachable catalog is ShowtimeCatalogUnavailableException, deliberately not a
+   * DomainException, and answers 503 (see c8ff01a).
+   */
+  it('recognises the booking-closed 422 and nothing else', () => {
+    const closed = { detail: 'Ticket booking is closed for showtime: show-1' }
+    expect(isBookingClosedError(responseError(422, closed))).toBe(true)
+    expect(isBookingClosedError(responseError(422, { detail: 'Seats not available for showtime show-1: A14' })))
+      .toBe(false)
+    expect(isBookingClosedError(responseError(503, closed))).toBe(false)
+    expect(isBookingClosedError(responseError(422, {}))).toBe(false)
+    expect(isBookingClosedError(new Error('Ticket booking is closed'))).toBe(false)
   })
 })

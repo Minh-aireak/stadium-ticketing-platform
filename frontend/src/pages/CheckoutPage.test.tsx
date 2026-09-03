@@ -156,6 +156,21 @@ describe('CheckoutPage', () => {
     expect(screen.getByRole('button', { name: /Quay lại chọn ghế khác/ })).toBeDefined()
   })
 
+  /**
+   * The showtime stopped selling between seat selection and this click. Reaches the page the same
+   * way the seats-taken 422 does — refusalDetail copies inventory's ShowtimeBookingClosedException
+   * detail through booking-service unchanged.
+   */
+  it('explains a showtime that stopped selling in Vietnamese', async () => {
+    createBooking.mockRejectedValue(problemDetail(422, 'Ticket booking is closed for showtime: show-1'))
+
+    renderCheckout()
+    fireEvent.click(screen.getByRole('button', { name: /Xác nhận & Thanh toán/ }))
+
+    await waitFor(() => expect(screen.getByText('Trận đấu này đã ngừng bán vé. Vui lòng chọn trận đấu khác.')).toBeDefined())
+    expect(screen.queryByText(/Ticket booking is closed/)).toBeNull()
+  })
+
   it('still shows a 422 that is not the seat race exactly as the backend worded it', async () => {
     createBooking.mockRejectedValue(problemDetail(422, 'Booking amount does not match the seats'))
 

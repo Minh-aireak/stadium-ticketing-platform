@@ -12,7 +12,7 @@ import { getSeatLayout, getSeatMap, holdSeats, unholdSeats } from '@/features/se
 import { buildStadiumMap } from '@/features/seats/stadiumLayout'
 import type { Seat, SeatLayout } from '@/features/seats/types'
 import { useToast } from '@/hooks/useToast'
-import { getErrorMessage, isSeatsUnavailableError } from '@/lib/errors'
+import { getErrorMessage, isBookingClosedError, isSeatsUnavailableError } from '@/lib/errors'
 import { formatCurrency } from '@/lib/format'
 import { memoComponent, useMemoizedKeyMap, useMemoizedSet } from '@/lib/memo'
 import type { CheckoutState } from './CheckoutPage'
@@ -252,8 +252,13 @@ export function SeatSelectionPage() {
         // internal showtimeId, and getErrorMessage renders any detail it finds verbatim. So this
         // case has to be recognised here: passing the sentence as getErrorMessage's fallback put
         // it behind a condition (no detail at all) that this endpoint never satisfies.
+        // The same endpoint's other domain 422 (ShowtimeBookingClosedException) needs the same
+        // treatment for the same reason: the customer can be sitting on this page when an admin
+        // cancels the match, which MatchDetailPage's gate cannot reach.
         description: isSeatsUnavailableError(err)
           ? 'Ghế này vừa được người khác chọn. Vui lòng chọn ghế khác.'
+          : isBookingClosedError(err)
+          ? 'Trận đấu này đã ngừng bán vé. Vui lòng chọn trận đấu khác.'
           : getErrorMessage(err),
         variant: 'error',
       })
