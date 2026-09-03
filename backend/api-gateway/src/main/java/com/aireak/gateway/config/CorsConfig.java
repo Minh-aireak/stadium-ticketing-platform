@@ -46,7 +46,13 @@ public class CorsConfig {
         // the gateway always sets it.
         configuration.setAllowedHeaders(List.of(
                 "Authorization", "Content-Type", "X-XSRF-TOKEN", "Idempotency-Key", "X-Correlation-Id"));
-        configuration.setExposedHeaders(List.of("X-XSRF-TOKEN", "X-Correlation-Id"));
+        // Retry-After belongs here for the same reason: both rate-limit filters set it beside
+        // their 429 body, and the frontend's formatRateLimitMessage reads it when the body has
+        // no retryAfterSeconds. It is not one of the seven CORS-safelisted response headers
+        // (Cache-Control, Content-Language, Content-Length, Content-Type, Expires,
+        // Last-Modified, Pragma), so without this entry the browser hides it and that fallback
+        // can never be taken.
+        configuration.setExposedHeaders(List.of("X-XSRF-TOKEN", "X-Correlation-Id", "Retry-After"));
         configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
