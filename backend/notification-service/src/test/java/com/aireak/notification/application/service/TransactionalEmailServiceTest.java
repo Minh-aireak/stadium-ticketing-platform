@@ -17,8 +17,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -75,11 +73,22 @@ class TransactionalEmailServiceTest {
         assertThat(content.get().textBody()).isEqualTo(sent.textBody());
     }
 
+    /**
+     * The expected timestamp is written out in full rather than recomputed from the service's own
+     * formatting expression. It used to be recomputed, {@code ZoneId.systemDefault()} and all,
+     * which made it agree with the code by construction on every host: the receipt read 16:30 on
+     * a developer's machine and 09:30 in the container, and this test was green for both.
+     *
+     * <p>A literal fails for either of the two things that can go wrong. On a UTC host the hour
+     * is wrong; on a +07:00 host the offset suffix is missing. There is no assertion that can
+     * prove from inside one JVM that the zone is not the default one, since {@code PAID_AT_FORMAT}
+     * captures it once at class-init -- what this pins is the only thing that matters to the
+     * customer, which is that the same instant renders as the same string everywhere and says
+     * which clock it is on.
+     */
     @Test
     void sendPaymentSuccessEmail_carriesCustomerAmountOrderIdAndPaymentTimeInBothParts() {
         Instant paidAt = Instant.parse("2026-08-16T09:30:00Z");
-        String expectedPaidAt = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss")
-                .withZone(ZoneId.systemDefault()).format(paidAt);
 
         service.sendPaymentSuccessEmail(new PaymentSuccessEmail(
                 "john@example.com", "booking-42", new BigDecimal("1250000"), "VND", paidAt));
@@ -91,13 +100,14 @@ class TransactionalEmailServiceTest {
                     .contains("john")
                     .contains("booking-42")
                     .contains("1,250,000 VND")
-                    .contains(expectedPaidAt);
+                    .contains("16/08/2026 16:30:00 UTC+07:00");
         }
         assertThat(sent.textBody()).doesNotContain("<html");
     }
 
+    /** Same formatter, second call site — see {@link #sendPaymentSuccessEmail_carriesCustomerAmountOrderIdAndPaymentTimeInBothParts}. */
     @Test
-    void sendRefundIssuedEmail_carriesTheOrderAmountAndReasonInBothParts() {
+    void sendRefundIssuedEmail_carriesTheOrderAmountReasonAndRefundTimeInBothParts() {
         service.sendRefundIssuedEmail(new TransactionalEmailService.RefundIssuedEmail(
                 "john@example.com", "booking-9", new BigDecimal("249.50"), "USD",
                 "Match cancelled", Instant.parse("2026-08-25T10:15:30Z")));
@@ -108,6 +118,7 @@ class TransactionalEmailServiceTest {
             assertThat(body).contains("booking-9");
             assertThat(body).contains("249.50 USD");
             assertThat(body).contains("Match cancelled");
+            assertThat(body).contains("25/08/2026 17:15:30 UTC+07:00");
         }
     }
 

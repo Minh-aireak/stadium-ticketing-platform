@@ -43,8 +43,33 @@ public class TransactionalEmailService {
     private static final String PASSWORD_RESET_TEMPLATE = "password-reset";
     private static final String REFUND_ISSUED_TEMPLATE = "refund-issued";
 
+    /**
+     * The zone every customer-facing timestamp below is stamped in, and named in the rendered
+     * string so the reader never has to guess which clock it is.
+     *
+     * <p>This used to be {@code ZoneId.systemDefault()}, which is not a zone but a property of
+     * whatever host the process happens to be on. The runtime image is eclipse-temurin on Ubuntu
+     * and neither docker-compose.yaml nor any Dockerfile sets TZ, so the container's default is
+     * UTC while a developer's machine is usually not -- the same {@code Instant} rendered as
+     * 15:30 in one and 22:30 in the other, and the pattern carried no offset field to say which.
+     * That reached a customer as "Paid at 15:30:00" on a receipt for a purchase they made at
+     * half past ten at night.
+     *
+     * <p>Fixed rather than configurable, and fixed to this zone: it is the market this deployment
+     * serves, the same reason {@code inventory.pricing.currency} defaults to VND and the
+     * storefront formats every date with {@code Intl.DateTimeFormat('vi-VN', ...)}. A new
+     * property would have to be threaded through .env.example, docker-compose.yaml and the README
+     * to say something the offset in the string already says out loud.
+     *
+     * <p>{@code Locale.US} for the same reason {@code formatAmount} uses it -- these emails are
+     * English throughout -- and because it keeps the digits ASCII whatever the host's default
+     * locale is. The {@code 'UTC'} in the pattern is a literal, so the label reads UTC+07:00
+     * rather than depending on locale data for the word.
+     */
+    private static final ZoneId DISPLAY_ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
+
     private static final DateTimeFormatter PAID_AT_FORMAT =
-            DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss").withZone(ZoneId.systemDefault());
+            DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss 'UTC'xxx", Locale.US).withZone(DISPLAY_ZONE);
 
     private final EmailSenderPort emailSenderPort;
     private final Configuration freemarkerConfig;

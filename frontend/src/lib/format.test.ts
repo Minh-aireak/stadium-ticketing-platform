@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { formatCurrency } from './format'
 
@@ -44,5 +44,53 @@ describe('formatCurrency', () => {
   it('falls back instead of throwing on a code Intl rejects', () => {
     expect(() => formatCurrency(1000, 'V')).not.toThrow()
     expect(formatCurrency(1000, 'V')).toContain('1.000')
+  })
+})
+
+describe('formatKickoff', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  })
+
+  /**
+   * The regression. `kickoffFormatter` is a module-level `Intl.DateTimeFormat('vi-VN', {...})`
+   * with no `timeZone` option, so it renders in whatever zone happens to be the process default
+   * at the moment the module is first imported — a CI runner, a developer's machine, or (were
+   * this ever server-rendered) a container, none of which have anything to do with when a match
+   * in a Vietnamese stadium actually kicks off. Every showtime this platform sells is in Vietnam
+   * (see MatchController's stadium data and inventory.pricing.currency defaulting to VND), so
+   * every kickoff has exactly one correct clock reading regardless of who is looking at the page
+   * or from where — the same reasoning TransactionalEmailService's DISPLAY_ZONE javadoc gives for
+   * pinning the confirmation email to Asia/Ho_Chi_Minh instead of the backend host's default.
+   * Before the fix this module re-imported under two different process timezones renders the
+   * SAME instant as two different clock times, neither of which says which zone it is.
+   */
+  it('renders the same kickoff instant identically regardless of the host process timezone', async () => {
+    const instant = '2026-09-05T19:00:00Z' // 02:00 the next day in Vietnam (UTC+7)
+
+    vi.stubEnv('TZ', 'UTC')
+    vi.resetModules()
+    const { formatKickoff: underUtc } = await import('./format')
+
+    vi.stubEnv('TZ', 'America/Los_Angeles')
+    vi.resetModules()
+    const { formatKickoff: underLosAngeles } = await import('./format')
+
+    vi.stubEnv('TZ', 'Australia/Sydney')
+    vi.resetModules()
+    const { formatKickoff: underSydney } = await import('./format')
+
+    const results = [underUtc(instant), underLosAngeles(instant), underSydney(instant)]
+    expect(new Set(results).size).toBe(1)
+  })
+
+  it('reads as the Vietnam-local kickoff time no matter which zone the module loaded under', async () => {
+    vi.stubEnv('TZ', 'Pacific/Kiritimati') // UTC+14 — as far from Vietnam's UTC+7 as the IANA database goes
+    vi.resetModules()
+    const { formatKickoff } = await import('./format')
+
+    // 2026-09-05T19:00:00Z is 02:00 on 2026-09-06 in Asia/Ho_Chi_Minh (UTC+7).
+    expect(formatKickoff('2026-09-05T19:00:00Z')).toBe('02:00 CN, 06/09')
   })
 })

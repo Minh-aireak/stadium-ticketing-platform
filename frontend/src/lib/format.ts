@@ -38,12 +38,22 @@ export function formatCurrency(amount: number, currency: string): string {
   return `${plainNumberFormatter.format(amount)} ${currency}`
 }
 
+// Pinned to Vietnam rather than left to resolve the process's default zone, for the same reason
+// notification-service's TransactionalEmailService pins DISPLAY_ZONE: every showtime this
+// platform sells is at a Vietnamese stadium, so a kickoff has exactly one correct clock reading,
+// the same way a flight's departure time is conventionally shown in the airport's own zone
+// rather than the traveler's. Without this, an Intl.DateTimeFormat instance freezes whatever the
+// runtime's default zone happened to be at the moment this module was first imported — a
+// developer's machine, a CI runner, or a viewer whose device clock is set somewhere else
+// entirely — and never revisits it, so the same kickoff instant would render as a different
+// clock time depending on nothing to do with the match itself.
 const kickoffFormatter = new Intl.DateTimeFormat('vi-VN', {
   weekday: 'short',
   day: '2-digit',
   month: '2-digit',
   hour: '2-digit',
   minute: '2-digit',
+  timeZone: 'Asia/Ho_Chi_Minh',
 })
 
 export function formatKickoff(iso: string): string {
