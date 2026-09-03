@@ -92,7 +92,7 @@ scrape_configs:
           application: booking-service
 
   # Multi-target probe: one postgres-exporter container serves metrics for all 6
-  # Postgres instances via /probe?target=<host:port>&auth_module=aireak (see
+  # Postgres instances via /probe?target=<host:port>/<dbname>&auth_module=aireak (see
   # infra/postgres-exporter/config.yaml). __address__ is rewritten to the exporter
   # itself; the real DB host:port travels in the "instance" label.
   - job_name: postgres
@@ -119,9 +119,19 @@ scrape_configs:
         labels:
           database: notification_db
     relabel_configs:
-      - source_labels: [__address__]
+      # The probe target has to carry the database name. postgres_exporter builds its whole
+      # DSN out of this one parameter, and lib/pq resolves a missing dbname to the USERNAME --
+      # which here is a role that owns six databases and is the name of none of them, so every
+      # probe answered `pg_up 0` and four metrics instead of 311. Joined on from the `database`
+      # label rather than written into `targets` so the name the alert prints and the name the
+      # probe connects to cannot drift apart.
+      - source_labels: [__address__, database]
+        separator: /
         target_label: __param_target
-      - source_labels: [__param_target]
+      # Set before __address__ is overwritten below, and read from __address__ rather than
+      # __param_target so instance stays host:port -- the database is already its own label.
+      # Without an explicit instance here all six targets collapse onto the exporter's address.
+      - source_labels: [__address__]
         target_label: instance
       - target_label: __address__
         replacement: postgres-exporter:9187
