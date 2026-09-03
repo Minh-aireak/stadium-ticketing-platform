@@ -63,6 +63,17 @@ class SeatInventoryControllerSeatCountLimitTest {
     private static final String ISSUER = "identity-service";
     private static final String AUDIENCE = "stadium-clients";
 
+    /**
+     * The largest booking booking-service will ever reserve in one call — its own
+     * {@code Booking.MAX_TICKETS}. Repeated as a literal on purpose: that constant is private to
+     * booking-service and this module has no dependency on it, so the two numbers are kept in step
+     * by hand and this is the assertion that notices when they stop being. booking-service pins its
+     * side with literals too ({@code BookingTest#createAllowsExactlyMaxTickets} accepts eight,
+     * {@code #createRejectsMoreThanMaxTickets} rejects nine), so the pair is anchored at both ends.
+     * {@code SeatSelectionPage.MAX_SEATS} is the third copy, and the frontend's own concern.
+     */
+    private static final int BOOKING_SERVICE_MAX_TICKETS = 8;
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -124,6 +135,11 @@ class SeatInventoryControllerSeatCountLimitTest {
      * booking-service reserves a whole booking in one call, and its own cap is
      * {@code Booking.MAX_TICKETS}. If this ever fails, the two limits have drifted apart and the
      * largest legitimate booking now dies mid-saga.
+     *
+     * <p>The size is {@link #BOOKING_SERVICE_MAX_TICKETS}, never
+     * {@code SeatRequestLimits.MAX_SEATS_PER_REQUEST}: the endpoint validates against that
+     * constant, so a request derived from it is the same number on both sides of the comparison
+     * and stays green through exactly the drift this test is named for.
      */
     @Test
     void reserveStillAcceptsTheLargestBookingBookingServiceWillSend() throws Exception {
@@ -132,7 +148,7 @@ class SeatInventoryControllerSeatCountLimitTest {
         mockMvc.perform(post("/api/v1/inventory/{showtimeId}/reserve", "showtime-1")
                         .header("Authorization", "Bearer " + customerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(reserveBody(SeatRequestLimits.MAX_SEATS_PER_REQUEST)))
+                        .content(reserveBody(BOOKING_SERVICE_MAX_TICKETS)))
                 .andExpect(status().isOk());
     }
 
