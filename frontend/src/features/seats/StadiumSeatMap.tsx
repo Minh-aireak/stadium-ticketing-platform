@@ -453,9 +453,15 @@ function StadiumSeatMapComponent({ stadium, zones, selected, currency, onToggle,
                               role="button"
                               tabIndex={isVisible && !disabled ? 0 : -1}
                               aria-disabled={disabled}
+                              // A real seat is named by its own code. displayNumber is the
+                              // slot it occupies inside this stand, not its seat number, so
+                              // `${row.label}${displayNumber}` spelled out another seat's code:
+                              // A2, sitting in slot 13 of the north stand, was announced as
+                              // "A14" — a seat that exists, in a different stand of the same
+                              // row. An empty slot has no code, so it keeps naming its position.
                               aria-label={isPlaceholder
                                 ? `Hàng ${positionedRow.label}, vị trí ${displayNumber}, chưa khả dụng`
-                                : `${positionedRow.label}${displayNumber}, mã ghế ${seat.code}, ${seat.tier}, ${seat.status}`}
+                                : `Ghế ${seat.code}, ${seat.tier}, ${seat.status}`}
                               className={disabled ? 'cursor-not-allowed outline-none' : 'cursor-pointer outline-none'}
                               style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
                               animate={{ scale: isSelected ? 1.05 : 1 }}
@@ -471,8 +477,8 @@ function StadiumSeatMapComponent({ stadium, zones, selected, currency, onToggle,
                             >
                               <title>
                                 {isPlaceholder
-                                  ? `${positionedRow.label}${displayNumber} · Chưa khả dụng`
-                                  : `${positionedRow.label}${displayNumber} · Mã ${seat.code} · ${formatCurrency(seat.price, currency)}`}
+                                  ? `Hàng ${positionedRow.label}, vị trí ${displayNumber} · Chưa khả dụng`
+                                  : `${seat.code} · ${seat.tier} · ${formatCurrency(seat.price, currency)}`}
                               </title>
                               <rect
                                 x={x - SEAT_WIDTH / 2}
@@ -504,7 +510,10 @@ function StadiumSeatMapComponent({ stadium, zones, selected, currency, onToggle,
                                   isSelected && 'fill-primary-foreground',
                                 )}
                               >
-                                {displayNumber}
+                                {/* Same reason as the aria-label: the number drawn on a seat is
+                                    its own, matching SeatMap's fallback grid and the code shown
+                                    in the order summary. Only an empty slot shows a position. */}
+                                {seat ? seat.number : displayNumber}
                               </text>
                             </motion.g>
                           </g>
