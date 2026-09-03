@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import { ArrowRight, Sparkles } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 
@@ -66,12 +67,20 @@ export function Hero() {
           transition={{ duration: 0.5, delay: 0.3 }}
           className="flex flex-col gap-3 sm:flex-row"
         >
-          <Button variant="gradient" size="lg">
-            Xem trận đấu sắp diễn ra
-            <ArrowRight className="size-4" />
+          {/*
+            Routed links, not bare buttons: both rendered as plain <button> with no handler, so
+            the two most prominent controls on the landing page did nothing at all when clicked.
+            They target the same two sections the Navbar already links to, and App.tsx scrolls to
+            location.hash once the navigation lands.
+          */}
+          <Button asChild variant="gradient" size="lg">
+            <Link to="/#matches">
+              Xem trận đấu sắp diễn ra
+              <ArrowRight className="size-4" />
+            </Link>
           </Button>
-          <Button variant="outline" size="lg">
-            Tìm hiểu thêm
+          <Button asChild variant="outline" size="lg">
+            <Link to="/#leagues">Tìm hiểu thêm</Link>
           </Button>
         </motion.div>
 
