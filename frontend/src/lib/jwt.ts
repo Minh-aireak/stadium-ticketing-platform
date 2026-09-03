@@ -19,7 +19,16 @@ function base64UrlDecode(input: string): string {
 export function decodeJwt(token: string): JwtPayload | null {
   try {
     const [, payload] = token.split('.')
-    return JSON.parse(base64UrlDecode(payload))
+    const claims: unknown = JSON.parse(base64UrlDecode(payload))
+    // JSON.parse accepts a bare number, string, array or boolean, and every one of those is
+    // truthy enough to survive AuthContext's `if (!payload) return null`. What comes out the
+    // other side is an AuthUser whose `id` is undefined while its type says string — and
+    // CheckoutPage sends that straight on as `customerId`. A payload that is not an object
+    // with a subject is not a token this app can identify anyone by, so it is no token at all.
+    if (typeof claims !== 'object' || claims === null || Array.isArray(claims)) return null
+    const { sub } = claims as { sub?: unknown }
+    if (typeof sub !== 'string' || sub.length === 0) return null
+    return claims as JwtPayload
   } catch {
     return null
   }
