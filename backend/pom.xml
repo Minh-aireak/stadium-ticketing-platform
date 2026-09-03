@@ -48,7 +48,6 @@
 
         <!-- Plugins -->
         <maven-compiler-plugin.version>3.14.0</maven-compiler-plugin.version>
-        <jacoco.version>0.8.13</jacoco.version>
     </properties>
 
     <modules>
@@ -211,12 +210,6 @@
                             </exclude>
                         </excludes>
                     </configuration>
-                </plugin>
-
-                <plugin>
-                    <groupId>org.jacoco</groupId>
-                    <artifactId>jacoco-maven-plugin</artifactId>
-                    <version>${jacoco.version}</version>
                 </plugin>
             </plugins>
         </pluginManagement>
