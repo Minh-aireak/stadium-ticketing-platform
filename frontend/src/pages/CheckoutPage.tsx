@@ -50,6 +50,22 @@ export function CheckoutPage() {
         idempotencyKey,
       )
 
+      // A fresh booking always comes back PENDING_PAYMENT (see BookingOrchestrationService's
+      // note on Step 5: payment confirmation is asynchronous, so this is the only status a
+      // completed create can return). CANCELLED here can only be a replay of a booking whose
+      // saga already failed: booking-service releases the Redis idempotency claim on failure but
+      // leaves the row keyed by this Idempotency-Key, and its findByIdempotencyKey fallback does
+      // not filter by status, so a second POST with the same key answers 201 with the dead
+      // booking. Sending the customer to the payment status screen for it announced a failed
+      // payment for a charge never attempted, and made the retry button look like it had done
+      // something. Nothing can be retried under this key — only a different set of seats will do.
+      if (booking.status === 'CANCELLED') {
+        setError(
+          'Đơn đặt vé cho những ghế này đã bị huỷ. Vui lòng quay lại và chọn ghế khác.',
+        )
+        return
+      }
+
       navigate(`/checkout/${booking.bookingId}/status`, {
         state: { matchLabel, seatCodes },
       })

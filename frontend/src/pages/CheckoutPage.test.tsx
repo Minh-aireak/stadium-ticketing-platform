@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -85,5 +85,34 @@ describe('CheckoutPage', () => {
     renderCheckout({ amount: 12.99, currency: 'USD' })
     expect(screen.getByText(/US\$/)).toBeDefined()
     expect(screen.queryByText(/₫/)).toBeNull()
+  })
+
+  /**
+   * The Idempotency-Key is deliberately stable for the life of this page, so a retried click
+   * after a network error lands on the same booking rather than double-booking. But when the
+   * saga fails, booking-service cancels the booking and releases only the Redis claim — the row
+   * keyed by this Idempotency-Key stays. The next POST therefore falls through to
+   * BookingOrchestrationService's findByIdempotencyKey fallback, which does not filter by
+   * status, and is answered 201 with the already-CANCELLED booking. The page navigated to the
+   * payment status screen regardless, where resolveView reads CANCELLED as 'failed' and tells
+   * the customer "Thanh toán không thành công" about a payment nobody ever attempted — while
+   * the retry button they had just pressed had, in fact, done nothing.
+   */
+  it('does not send the customer to the status screen for an already-cancelled booking', async () => {
+    createBooking.mockResolvedValue({ bookingId: 'b-1', status: 'CANCELLED' })
+
+    renderCheckout()
+    fireEvent.click(screen.getByRole('button', { name: /Xác nhận & Thanh toán/ }))
+
+    await waitFor(() => expect(screen.getByText(/đã bị huỷ/i)).toBeDefined())
+    expect(screen.queryByText('trang trạng thái')).toBeNull()
+    expect(screen.getByRole('button', { name: /Quay lại chọn ghế khác/ })).toBeDefined()
+  })
+
+  it('still goes to the status screen for a booking that is genuinely pending payment', async () => {
+    renderCheckout()
+    fireEvent.click(screen.getByRole('button', { name: /Xác nhận & Thanh toán/ }))
+
+    await waitFor(() => expect(screen.getByText('trang trạng thái')).toBeDefined())
   })
 })
