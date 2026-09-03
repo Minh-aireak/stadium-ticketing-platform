@@ -38,11 +38,6 @@
             <scope>runtime</scope>
         </dependency>
 
-        <!-- OpenAPI Swagger UI -->
-        <dependency>
-            <groupId>org.springdoc</groupId>
-            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-        </dependency>
 
         <!-- Kafka (version managed by Spring Boot 4.1.0 BOM) — consumes catalog-service's
              ShowtimeAddedEvent to generate the seat map (see ShowtimeAddedEventConsumer). -->

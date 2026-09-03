@@ -38,11 +38,6 @@
             <scope>runtime</scope>
         </dependency>
 
-        <!-- OpenAPI Swagger UI -->
-        <dependency>
-            <groupId>org.springdoc</groupId>
-            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-        </dependency>
 
         <!-- Kafka (managed by SB BOM) -->
         <dependency>
@@ -162,8 +157,8 @@
             <artifactId>spring-boot-jdbc-test</artifactId>
             <scope>test</scope>
         </dependency>
-        <!-- H2: Docker-free companion to the Testcontainers/Postgres integration tests, used
-             only to verify generic (dialect-independent) Hibernate/JPA auditing behavior. -->
+        <!-- In-memory DB for BookingJpaAuditingH2Test, which exercises JPA auditing wiring
+             only and has no reason to pay for a Postgres container. -->
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>

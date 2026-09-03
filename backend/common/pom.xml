@@ -39,11 +39,6 @@
             <artifactId>spring-boot-starter-web</artifactId>
             <optional>true</optional>
         </dependency>
-        <dependency>
-            <groupId>org.springdoc</groupId>
-            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-            <optional>true</optional>
-        </dependency>
 
         <!-- Kafka concern: CorrelationIdRecordInterceptor (optional — only services with a
              @KafkaListener pull this; each one already declares spring-kafka itself) -->
