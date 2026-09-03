@@ -32,9 +32,11 @@ class RedissonIdempotencyStore implements IdempotencyStore {
     // 24h retention window for replaying completed booking results on client retries
     private static final Duration COMPLETED_TTL = Duration.ofHours(24);
 
-    // claim() runs on every createBooking request — bounded well below Redisson's own default
-    // command timeout (3s) so a slow/unresponsive Redis fails fast into the fallback below
-    // instead of stalling the request on it.
+    // claim() runs on every createBooking request — bounded well below the platform's own Redis
+    // command budget (redis.command.timeout-ms, 1500ms x 2 attempts, see
+    // RedissonCommandBudgetConfig) so a slow/unresponsive Redis fails fast into the fallback below
+    // instead of stalling the request on it. It used to cite Redisson's library default of 3s,
+    // which stopped being the number this platform runs with when that budget was introduced.
     private static final Duration CLAIM_TIMEOUT = Duration.ofMillis(300);
 
     // Local (per-JVM, NOT shared across pods) cache of COMPLETED claims only — caching

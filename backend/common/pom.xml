@@ -103,6 +103,16 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Redisson — backs com.aireak.common.redis.RedissonCommandBudgetConfig, which bounds how
+             long one Redis command may take (optional: only services that actually talk to Redis
+             need it, and the config class is @ConditionalOnClass so notification-service, which
+             scans this module without Redisson, ignores it entirely). -->
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson-spring-boot-starter</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Nimbus JOSE+JWT — replaces jjwt for JWT generation and validation.
              jjwt 0.12.x uses com.fasterxml.jackson (Jackson 2) and has no Jackson 3 support.
              Nimbus is already the JWT library used by Spring Security internally
