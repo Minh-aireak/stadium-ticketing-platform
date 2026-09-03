@@ -39,6 +39,10 @@ hiccup between "money taken" and "booking confirmed" cannot lose the event.
 | `booking-service` | 8086 | Orchestrates the booking saga across inventory and payment, with compensations and reconciliation jobs. |
 | `frontend` | 5173 | React storefront. |
 
+Those are the services' own ports, and for six of the seven the host publishes the same number.
+`ticket-inventory-service` is the exception: reach it on the host at **8087**, not 8083 — its load
+balancer had to move aside because host 8083 is Kafka Connect (see the table under *Running it*).
+
 `common` is a shared library, not a service: JWT filter, correlation-id filter, the RFC 7807
 exception handler, `KafkaTopics`, the ShedLock configuration, and the transactional outbox — its
 entity, repository, purge job and the publisher base class every service extends with nothing but
@@ -230,9 +234,13 @@ when you run a service locally.
 | service → Kafka | `OutboxEventPublisher` copies the MDC into `EventEnvelope.traceId`, stored on the outbox row |
 | Kafka → consumer | `CorrelationIdRecordInterceptor` puts `traceId` back into the MDC for the record |
 
-Work started by a `@Scheduled` job (the reconcilers, outbox cleanup) has no request to inherit from.
-Outbound REST calls then send no header and the callee mints its own; the Kafka interceptor mints
-one per record so those lines still group together.
+Work started by a `@Scheduled` job (the reconcilers, outbox cleanup) has no request to inherit from,
+so `CorrelationIdSchedulingConfig` mints one per run and puts it in the MDC before the job body
+executes. Everything downstream then behaves exactly as the table above describes: the job's own log
+lines carry it, `CorrelationIdRequestInitializer` puts it on its outbound REST calls, and the outbox
+stamps it on the events it emits. So a booking driven forward by `InventoryConfirmationReconciler`
+can be followed from the job through ticket-inventory-service and on into whatever consumed the
+resulting event, on one ID.
 
 Only the Java services ship logs (nine containers, since two of the seven services are replicated).
 Infrastructure containers — Postgres, Redis, Kafka, the two nginx load balancers, and the Elastic
