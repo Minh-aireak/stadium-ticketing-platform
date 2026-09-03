@@ -19,8 +19,15 @@ public class UnreconciledPaymentPersistenceAdapter implements PaymentReconciliat
     @Override
     public void recordUnpersistedSuccess(String paymentId, String bookingId, String gatewayTransactionId,
                                           BigDecimal amount, String currency, String failureReason) {
-        jpaRepository.save(UnreconciledPaymentJpaEntity.of(
+        jpaRepository.save(UnreconciledPaymentJpaEntity.charge(
                 paymentId, bookingId, gatewayTransactionId, amount, currency, failureReason));
+    }
+
+    @Override
+    public void recordUnpersistedRefund(String paymentId, String bookingId, String gatewayRefundId,
+                                         BigDecimal amount, String currency, String failureReason) {
+        jpaRepository.save(UnreconciledPaymentJpaEntity.refund(
+                paymentId, bookingId, gatewayRefundId, amount, currency, failureReason));
     }
 
     @Override
@@ -41,6 +48,7 @@ public class UnreconciledPaymentPersistenceAdapter implements PaymentReconciliat
                 entity.getCurrency(),
                 entity.getFailureReason(),
                 entity.isResolved(),
+                entity.getKind(),
                 entity.getCreatedAt()
         );
     }

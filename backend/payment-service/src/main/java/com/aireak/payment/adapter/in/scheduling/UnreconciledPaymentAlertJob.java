@@ -59,8 +59,12 @@ public class UnreconciledPaymentAlertJob {
                 unresolvedList.size(), graceMinutes);
 
         for (UnreconciledPayment record : unresolvedList) {
-            log.error("UNRECONCILED PAYMENT ALERT: Payment ID '{}' (Booking ID '{}', Gateway Tx '{}') " +
+            // kind decides what the operator has to do: a stuck CHARGE means the customer paid and
+            // the booking never confirmed; a stuck REFUND means the money already went back but
+            // `payments` still reads SUCCEEDED. Same table, opposite corrections.
+            log.error("UNRECONCILED {} ALERT: Payment ID '{}' (Booking ID '{}', Gateway Tx '{}') " +
                     "amount {} {} created at {} remains UNRESOLVED for more than {} minute(s). Reason: {}",
+                    record.getKind(),
                     record.getPaymentId(),
                     record.getBookingId(),
                     record.getGatewayTransactionId(),

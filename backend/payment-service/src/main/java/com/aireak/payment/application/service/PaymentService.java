@@ -210,11 +210,17 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
     /**
      * Refunds the SUCCEEDED payment for a booking (see {@link RefundPaymentUseCase} javadoc for
      * the no-op cases). Same two-phase shape as {@link #execute}: the gateway refund call runs
-     * with no local transaction held, and only its outcome is persisted — a failure to persist an
-     * already-issued refund is a real gap (unlike {@link #execute}, there is no reconciliation
-     * backstop for it yet), but is left as a known limitation rather than duplicating the whole
-     * of {@link #persistSucceededOutcome}'s retry/reconciliation machinery for a path with no
-     * production traffic yet.
+     * with no local transaction held, and only its outcome is persisted.
+     *
+     * <p>Persisting that outcome gets the same retry-then-reconcile treatment as a successful
+     * charge (see {@link #persistSucceededOutcome}). It used to be a single unguarded call,
+     * documented as an accepted gap on the grounds that the path had no production traffic —
+     * which stopped being true once {@code Booking#cancelDueToMatchCancellation} began raising
+     * {@code RefundRequestedEvent} automatically for every paid booking on a cancelled match.
+     * Stripe's own idempotency key ({@code "refund:" + paymentIntentId}, see
+     * {@code StripeGatewayAdapter#refund}) already prevents a redelivered event from moving money
+     * twice; what was missing was any way to notice a payment left stuck at SUCCEEDED after its
+     * money had in fact been returned.
      */
     @Override
     public Optional<String> refundByBookingId(String bookingId, String reason) {
@@ -235,10 +241,52 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
             throw new RuntimeException("Refund failed for bookingId=" + bookingId, e);
         }
 
-        sagaSteps.markRefunded(payment.getPaymentId(), gatewayRefundId, reason);
-        log.info("Payment refunded: id={}, bookingId={}, gatewayRefundId={}",
-                payment.getPaymentId(), bookingId, gatewayRefundId);
+        persistRefundedOutcome(payment, bookingId, gatewayRefundId, reason);
         return Optional.of(payment.getPaymentId());
+    }
+
+    /**
+     * Mirror of {@link #persistSucceededOutcome} for a refund that the gateway has already issued:
+     * retry a few times, then hand the outcome to {@link PaymentReconciliationPort} rather than
+     * lose it. The money is already back with the customer at this point, so the one thing this
+     * must never do is leave that fact recorded nowhere.
+     */
+    private void persistRefundedOutcome(Payment payment, String bookingId, String gatewayRefundId, String reason) {
+        String paymentId = payment.getPaymentId();
+        for (int attempt = 1; attempt <= PERSIST_MAX_ATTEMPTS; attempt++) {
+            try {
+                sagaSteps.markRefunded(paymentId, gatewayRefundId, reason);
+                log.info("Payment refunded: id={}, bookingId={}, gatewayRefundId={}",
+                        paymentId, bookingId, gatewayRefundId);
+                return;
+            } catch (Exception e) {
+                log.error("Persisting issued refund failed (attempt {}/{}): id={}, gatewayRefundId={}, reason={}",
+                        attempt, PERSIST_MAX_ATTEMPTS, paymentId, gatewayRefundId, e.getMessage());
+                if (attempt == PERSIST_MAX_ATTEMPTS) {
+                    recordRefundForManualReconciliation(payment, bookingId, gatewayRefundId, e.getMessage());
+                    return;
+                }
+                sleep(PERSIST_RETRY_BACKOFF.multipliedBy(attempt));
+            }
+        }
+    }
+
+    // Same last-resort contract as recordForManualReconciliation: must not itself throw and
+    // abandon the outcome with nothing but a log line.
+    private void recordRefundForManualReconciliation(Payment payment, String bookingId,
+                                                      String gatewayRefundId, String failureReason) {
+        try {
+            reconciliationPort.recordUnpersistedRefund(payment.getPaymentId(), bookingId, gatewayRefundId,
+                    payment.getAmount(), payment.getCurrency(), failureReason);
+            log.error("Refund was issued at the gateway but could not be persisted after {} attempts — " +
+                            "recorded for manual reconciliation: id={}, bookingId={}, gatewayRefundId={}",
+                    PERSIST_MAX_ATTEMPTS, payment.getPaymentId(), bookingId, gatewayRefundId);
+        } catch (Exception e) {
+            log.error("CRITICAL: refund was issued at the gateway but could not be persisted NOR recorded " +
+                            "for reconciliation — id={}, bookingId={}, gatewayRefundId={}, amount={} {}: {}",
+                    payment.getPaymentId(), bookingId, gatewayRefundId,
+                    payment.getAmount(), payment.getCurrency(), e.getMessage(), e);
+        }
     }
 
     private boolean isDeclinedException(Throwable t) {

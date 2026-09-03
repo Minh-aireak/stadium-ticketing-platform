@@ -50,13 +50,24 @@ public class UnreconciledPaymentJpaEntity {
     @Column(name = "resolved", nullable = false)
     private boolean resolved;
 
+    /** {@code CHARGE} or {@code REFUND} — which direction the unpersisted money moved. */
+    @Column(name = "kind", nullable = false, length = 16)
+    private String kind;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
-    public static UnreconciledPaymentJpaEntity of(String paymentId, String bookingId,
+    public static UnreconciledPaymentJpaEntity charge(String paymentId, String bookingId,
             String gatewayTransactionId, BigDecimal amount, String currency, String failureReason) {
         return new UnreconciledPaymentJpaEntity(
                 null, paymentId, bookingId, gatewayTransactionId, amount, currency, failureReason,
-                false, Instant.now());
+                false, "CHARGE", Instant.now());
+    }
+
+    public static UnreconciledPaymentJpaEntity refund(String paymentId, String bookingId,
+            String gatewayRefundId, BigDecimal amount, String currency, String failureReason) {
+        return new UnreconciledPaymentJpaEntity(
+                null, paymentId, bookingId, gatewayRefundId, amount, currency, failureReason,
+                false, "REFUND", Instant.now());
     }
 }

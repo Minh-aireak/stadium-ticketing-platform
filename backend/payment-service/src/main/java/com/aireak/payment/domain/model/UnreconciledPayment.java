@@ -22,5 +22,7 @@ public class UnreconciledPayment {
     private final String currency;
     private final String failureReason;
     private final boolean resolved;
+    /** {@code CHARGE} or {@code REFUND} — which direction the unpersisted money moved. */
+    private final String kind;
     private final Instant createdAt;
 }

@@ -74,6 +74,7 @@ class UnreconciledPaymentAlertJobTest {
                 "USD",
                 "DB connection failed",
                 false,
+                "CHARGE",
                 Instant.now().minus(10, ChronoUnit.MINUTES)
         );
 
@@ -123,7 +124,7 @@ class UnreconciledPaymentAlertJobTest {
     private UnreconciledPayment unreconciled(String paymentId) {
         return new UnreconciledPayment(
                 UUID.randomUUID(), paymentId, "book_456", "ch_789",
-                new BigDecimal("150.00"), "USD", "DB connection failed", false,
+                new BigDecimal("150.00"), "USD", "DB connection failed", false, "CHARGE",
                 Instant.now().minus(10, ChronoUnit.MINUTES));
     }
 }

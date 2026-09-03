@@ -54,7 +54,7 @@ class UnreconciledPaymentPersistenceAdapterTest {
         Instant cutoff = Instant.now();
         UnreconciledPaymentJpaEntity entity = new UnreconciledPaymentJpaEntity(
                 UUID.randomUUID(), "pay_1", "book_1", "pi_1",
-                new BigDecimal("50.00"), "USD", "Connection drop", false, cutoff.minusSeconds(300)
+                new BigDecimal("50.00"), "USD", "Connection drop", false, "CHARGE", cutoff.minusSeconds(300)
         );
 
         when(jpaRepository.findByResolvedFalseAndCreatedAtBefore(eq(cutoff), eq(PageRequest.of(0, 10))))
