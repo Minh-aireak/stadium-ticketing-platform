@@ -26,6 +26,14 @@ import org.springframework.stereotype.Component;
  * <p><strong>Log + alert only, no auto-retry</strong>, for the same reason booking-service's
  * dead-letter consumer takes that stance: a poison-pill payload replays identically forever, and
  * re-running dispatch here would re-send any email that did go out before the failure.
+ *
+ * <p>The topic list below must name the {@code -dlt} counterpart of EVERY topic the three
+ * consumers in this package subscribe to — a topic missing from it is a customer email that
+ * vanishes exactly as silently as before this class existed, which is the one failure it was
+ * written to rule out. Two had already gone missing that way: {@code BOOKING_CREATED} from the
+ * start, and {@code PAYMENT_REFUNDED} the moment the refund email was added to
+ * {@code PaymentEventConsumer}. {@code NotificationDeadLetterCoverageTest} now compares the two
+ * sides so the next addition cannot repeat it.
  */
 @Slf4j
 @Component
@@ -37,6 +45,8 @@ public class NotificationDeadLetterConsumer {
                     KafkaTopics.ACCOUNT_ACTIVATED + "-dlt",
                     KafkaTopics.PASSWORD_RESET_REQUESTED + "-dlt",
                     KafkaTopics.PAYMENT_SUCCEEDED + "-dlt",
+                    KafkaTopics.PAYMENT_REFUNDED + "-dlt",
+                    KafkaTopics.BOOKING_CREATED + "-dlt",
                     KafkaTopics.BOOKING_CONFIRMED + "-dlt",
                     KafkaTopics.BOOKING_CANCELLED + "-dlt"
             },
