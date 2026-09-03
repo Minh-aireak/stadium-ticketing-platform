@@ -34,10 +34,11 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
     private final PaymentPort paymentPort;
     private final IdempotencyStore idempotencyStore;
 
-    // `amount` is only ever used as a placeholder for the draft row created in Step 1, below —
-    // it is overwritten in Step 2b with the price ticket-inventory-service computes from each
-    // seat's tier before markPendingPayment/initiatePayment or any event that carries the amount
-    // ever runs. Never trust `amount` for the actual charge; see Step 2b and Booking#applyReservedPrice.
+    // `amount` and `currency` are only ever placeholders for the draft row created in Step 1,
+    // below — both are overwritten in Step 2b with what ticket-inventory-service reports (the
+    // price it computes from each seat's tier, and the currency that price is quoted in) before
+    // markPendingPayment/initiatePayment or any event carrying them ever runs. Never trust either
+    // for the actual charge; see Step 2b and Booking#applyReservedPrice.
     @Override
     public BookingCreationResult createBooking(String idempotencyKey, String customerId, String customerEmail,
                                 String showtimeId, List<String> seatCodes, BigDecimal amount, String currency) {
@@ -89,23 +90,33 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
         log.info("Booking created: id={}, customerId={}", bookingId, customerId);
 
         // Step 2: reserve seats (REST call, no local transaction). ticket-inventory-service
-        // computes and returns the authoritative total price from each seat's tier — the
-        // client-supplied `amount` above was only ever a placeholder for the draft row.
-        BigDecimal serverComputedAmount;
+        // computes and returns the authoritative total price from each seat's tier, AND the
+        // currency that price is denominated in — the client-supplied `amount`/`currency` above
+        // were only ever placeholders for the draft row.
+        TicketInventoryPort.ReservedPrice reserved;
         try {
-            serverComputedAmount = ticketInventoryPort.reserveSeats(showtimeId, bookingId, seatCodes);
+            reserved = ticketInventoryPort.reserveSeats(showtimeId, bookingId, seatCodes);
         } catch (Exception e) {
             log.error("Seat reservation failed for booking {}: {}", bookingId, e.getMessage());
+            // Release too, exactly like every step below. "reserveSeats threw" does not mean "no
+            // hold was placed": reserveSeats carries @Retry, so a read timeout on a call the
+            // server actually completed leaves the hold in place and still surfaces an exception
+            // here. Without this the seats stayed locked out for the full hold TTL behind a
+            // booking that had just been cancelled. releaseSeats is idempotent and swallows its
+            // own failures (see TicketInventoryRestAdapter#releaseSeatsFallback), so calling it
+            // when there genuinely is no hold costs nothing.
+            ticketInventoryPort.releaseSeats(showtimeId, bookingId, seatCodes);
             sagaSteps.cancelBooking(bookingId, "Seat reservation failed: " + e.getMessage());
             releaseIdempotencyClaim(idempotencyKey);
             throw e;
         }
 
-        // Step 2b: persist that server-computed price, overwriting the client-supplied
-        // placeholder, before any charge-relevant step. Seats are already held at this point,
-        // so a failure here must release them like any other post-reservation failure.
+        // Step 2b: persist that server-computed price AND its server-supplied currency,
+        // overwriting the client-supplied placeholders, before any charge-relevant step. Seats are
+        // already held at this point, so a failure here must release them like any other
+        // post-reservation failure.
         try {
-            sagaSteps.applyReservedPrice(bookingId, serverComputedAmount, currency);
+            sagaSteps.applyReservedPrice(bookingId, reserved.amount(), reserved.currency());
         } catch (Exception e) {
             log.error("Persisting server-computed price failed for booking {}: {}", bookingId, e.getMessage());
             ticketInventoryPort.releaseSeats(showtimeId, bookingId, seatCodes);
@@ -125,9 +136,12 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
             throw e;
         }
 
-        // Step 4: initiate payment (REST call, no local transaction) — server-computed amount only.
+        // Step 4: initiate payment (REST call, no local transaction) — server-computed amount and
+        // currency only. The currency matters as much as the amount: payment-service multiplies by
+        // 100 for some currencies and not others, so taking it from the client would hand them
+        // control of the charge's magnitude even though the number itself is ours.
         try {
-            paymentPort.initiatePayment(bookingId, serverComputedAmount, currency);
+            paymentPort.initiatePayment(bookingId, reserved.amount(), reserved.currency());
         } catch (Exception e) {
             // Compatibility guard for older payment-service instances: during the tiny window
             // between acquiring the Redis idempotency key and committing the Payment row, a

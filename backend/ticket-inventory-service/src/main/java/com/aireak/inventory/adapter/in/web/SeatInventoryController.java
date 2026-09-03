@@ -20,6 +20,7 @@ import com.aireak.inventory.application.port.in.command.UnholdSeatsCommand;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
@@ -47,6 +48,21 @@ public class SeatInventoryController {
     private final UnholdSeatsUseCase unholdSeatsUseCase;
 
     /**
+     * The currency this deployment prices seats in, returned alongside every price below.
+     *
+     * <p>Seat rows carry a bare {@code NUMERIC} price with no currency of their own, so until now
+     * the only party naming a currency for a booking was the client — booking-service took it
+     * straight from the request body and carried it all the way to the Stripe charge, where it
+     * decides whether the amount is multiplied by 100 (see payment-service's
+     * {@code StripeGatewayAdapter#toSmallestUnit}, which treats VND/JPY/KRW as zero-decimal). A
+     * client choosing that was a client choosing the size of its own charge. Pairing the currency
+     * with the price at the one place that computes the price removes the client from the question
+     * entirely, which no allowlist on the client's value could do.
+     */
+    @Value("${inventory.pricing.currency}")
+    private String pricingCurrency;
+
+    /**
      * POST /api/v1/inventory/{showtimeId}/reserve — places a TTL hold (see SeatHoldPort), no DB write.
      * Returns the authoritative total price computed from each seat's tier — booking-service uses
      * this to charge, never a client-supplied amount. Confirms the caller's own standalone
@@ -59,7 +75,7 @@ public class SeatInventoryController {
                                         @Valid @RequestBody ReserveSeatsRequest request) {
         BigDecimal totalPrice = reserveSeatsUseCase.execute(
                 new ReserveSeatsCommand(showtimeId, request.bookingId(), currentUserId(), request.seatCodes()));
-        return ResponseEntity.ok(new ReserveSeatsResponse(totalPrice));
+        return ResponseEntity.ok(new ReserveSeatsResponse(totalPrice, pricingCurrency));
     }
 
     /**
@@ -72,7 +88,7 @@ public class SeatInventoryController {
                                         @Valid @RequestBody HoldSeatsRequest request) {
         BigDecimal totalPrice = holdSeatsUseCase.execute(
                 new HoldSeatsCommand(showtimeId, currentUserId(), request.seatCodes()));
-        return ResponseEntity.ok(new HoldSeatsResponse(totalPrice));
+        return ResponseEntity.ok(new HoldSeatsResponse(totalPrice, pricingCurrency));
     }
 
     /** DELETE /api/v1/inventory/{showtimeId}/hold — releases the caller's own standalone pre-booking hold. */
@@ -196,8 +212,8 @@ public class SeatInventoryController {
 
     record SeatResponse(String code, String row, int number, String status, String tier, BigDecimal price) {}
     record SeatMapResponse(String showtimeId, List<SeatResponse> seats) {}
-    record ReserveSeatsResponse(BigDecimal totalPrice) {}
-    record HoldSeatsResponse(BigDecimal totalPrice) {}
+    record ReserveSeatsResponse(BigDecimal totalPrice, String currency) {}
+    record HoldSeatsResponse(BigDecimal totalPrice, String currency) {}
     record BlockResponse(String id, String name, List<String> seatCodes) {}
     record SectionResponse(String id, String name, List<BlockResponse> blocks) {}
     record LayoutResponse(String showtimeId, List<SectionResponse> sections) {}

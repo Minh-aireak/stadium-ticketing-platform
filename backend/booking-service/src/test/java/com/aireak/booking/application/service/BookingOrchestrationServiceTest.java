@@ -84,7 +84,8 @@ class BookingOrchestrationServiceTest {
     }
 
     private void stubReserveSeats() {
-        when(ticketInventoryPort.reserveSeats(SHOWTIME_ID, BOOKING_ID, SEAT_CODES)).thenReturn(SERVER_AMOUNT);
+        when(ticketInventoryPort.reserveSeats(SHOWTIME_ID, BOOKING_ID, SEAT_CODES))
+                .thenReturn(new TicketInventoryPort.ReservedPrice(SERVER_AMOUNT, CURRENCY));
     }
 
     @Test

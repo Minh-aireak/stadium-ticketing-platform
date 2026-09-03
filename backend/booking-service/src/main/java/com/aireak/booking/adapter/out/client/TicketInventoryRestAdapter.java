@@ -38,10 +38,14 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
     @Bulkhead(name = "ticket-inventory", type = Bulkhead.Type.SEMAPHORE)
     @CircuitBreaker(name = "ticket-inventory", fallbackMethod = "reserveSeatsFallback")
     @Retry(name = "ticket-inventory")
-    public BigDecimal reserveSeats(String showtimeId, String bookingId, List<String> seatCodes) {
+    public ReservedPrice reserveSeats(String showtimeId, String bookingId, List<String> seatCodes) {
         log.debug("Reserving seats: showtime={}, booking={}", showtimeId, bookingId);
-        // bookingId doubles as the Idempotency-Key so @Retry re-sends dedupe instead of
-        // reserving the seats twice.
+        // Idempotency-Key is informational only — ticket-inventory-service does not read this
+        // header. What actually makes a @Retry re-send safe is that the hold it places is keyed
+        // by this same bookingId, so SeatHoldPort#confirmHold recognises a hold this booking
+        // already owns and treats the replay as success instead of a conflict. (It did not: a
+        // replay used to come back 409 "seats not available" for the booking's own seats, which
+        // cancelled the booking and left the seats locked out until the hold's TTL expired.)
         ReserveResponse response = restClient.post()
                 .uri(baseUrl + "/api/v1/inventory/{showtimeId}/reserve", showtimeId)
                 .header("Idempotency-Key", bookingId)
@@ -49,7 +53,7 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
                 .body(new ReservationRequest(bookingId, seatCodes))
                 .retrieve()
                 .body(ReserveResponse.class);
-        return response.totalPrice();
+        return new ReservedPrice(response.totalPrice(), response.currency());
     }
 
     @Override
@@ -93,7 +97,7 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
     }
 
     // Fallback: propagate as RuntimeException so saga compensates
-    private BigDecimal reserveSeatsFallback(String showtimeId, String bookingId,
+    private ReservedPrice reserveSeatsFallback(String showtimeId, String bookingId,
                                        List<String> seatCodes, Throwable t) {
         log.error("Circuit open / retry exhausted for reserveSeats: {}", t.getMessage());
         throw new RuntimeException("Ticket inventory service unavailable", t);
@@ -119,5 +123,5 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
     }
 
     record ReservationRequest(String bookingId, List<String> seatCodes) {}
-    record ReserveResponse(BigDecimal totalPrice) {}
+    record ReserveResponse(BigDecimal totalPrice, String currency) {}
 }

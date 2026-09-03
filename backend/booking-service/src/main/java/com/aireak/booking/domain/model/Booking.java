@@ -112,6 +112,18 @@ public class Booking {
                 seatSelection.seatCodes(), amount));
     }
 
+    /**
+     * Cancels a booking that has not been paid for.
+     *
+     * <p>Raises {@link BookingCancelledEvent} from DRAFT as well as PENDING_PAYMENT, deliberately —
+     * see {@code BookingTest#cancelFromDraftRaisesBookingCancelledEventWithReason}. A DRAFT booking
+     * has never had {@link BookingCreatedEvent} published for it ({@link #recordCreationSucceeded}
+     * is the saga's last step), so the cancellation is the first and only event a consumer sees for
+     * it. That asymmetry is intentional: BOOKING_CREATED has no notification template at all (see
+     * notification-service's {@code NotificationDispatchService#dispatch}), so the cancellation is
+     * not an orphan of a confirmation the customer was expecting — it is the record that the
+     * attempt existed and ended.
+     */
     public void cancel(String reason) {
         if (status == BookingStatus.CONFIRMED || status == BookingStatus.CANCELLED) {
             throw new InvalidBookingStatusException(

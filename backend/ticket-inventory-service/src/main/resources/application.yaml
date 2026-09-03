@@ -76,13 +76,15 @@ jwt:
     - /actuator/health
     - /actuator/info
     - /actuator/prometheus
-    - /v3/api-docs/**
-    - /swagger-ui/**
-    - /swagger-ui.html
 
 inventory:
   hold:
     ttl-minutes: ${INVENTORY_HOLD_TTL_MINUTES:10}
+  pricing:
+    # The currency every seat price in this deployment is denominated in. Seat rows store a bare
+    # NUMERIC, so this is the only place that says what those numbers mean — and it is returned
+    # with every quoted price so no downstream service has to take a client's word for it.
+    currency: ${INVENTORY_PRICING_CURRENCY:VND}
 
 services:
   catalog:

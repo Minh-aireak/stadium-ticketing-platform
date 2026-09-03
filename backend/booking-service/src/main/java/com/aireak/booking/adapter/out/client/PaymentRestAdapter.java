@@ -43,9 +43,11 @@ public class PaymentRestAdapter implements PaymentPort {
     @Retry(name = "payment")
     public void initiatePayment(String bookingId, BigDecimal amount, String currency) {
         log.debug("Initiating payment: bookingId={}, amount={} {}", bookingId, amount, currency);
-        // bookingId doubles as the Idempotency-Key so @Retry re-sends dedupe instead of
-        // starting a second charge. Always called from within the caller's own HTTP request
-        // (createBooking), so a real end-user token is always available to forward.
+        // Idempotency-Key is informational only — payment-service does not read this header. What
+        // actually dedupes a @Retry re-send is its own Redis guard keyed on the same bookingId
+        // (PaymentService#execute), backed by the unique constraint on payments.booking_id.
+        // Always called from within the caller's own HTTP request (createBooking), so a real
+        // end-user token is always available to forward.
         restClient.post()
                 .uri(baseUrl + "/api/v1/payments")
                 .header("Idempotency-Key", bookingId)
