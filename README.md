@@ -143,8 +143,15 @@ Everything runs in Docker Compose.
 
 ```bash
 cp .env.example .env      # then fill in the [REQUIRED] values
+cp infra/postgres-exporter/config.yaml.example infra/postgres-exporter/config.yaml
 docker compose up -d
 ```
+
+Two files to copy, not one. postgres_exporter's `auth_modules` block has no environment-variable
+substitution, so its database credentials can neither come from `.env` nor be committed — the
+template exists to be filled in with the same `DB_USERNAME`/`DB_PASSWORD` you just put there.
+`docker-compose.yaml` bind-mounts that exact path, so skipping the copy leaves Docker inventing a
+directory where the file should be and the exporter never starts.
 
 `docker-compose.yaml` is a **development stack, not a deployable topology**. Kafka runs PLAINTEXT
 with no authentication, and Postgres, Redis and Elasticsearch are protected by nothing but the
@@ -326,12 +333,14 @@ backend/
   */infra/debezium/           outbox connector config, per service
 frontend/                     React storefront
 infra/
-  prometheus/                 scrape config + alerting rules
+  prometheus/                 scrape config, alerting rules, promtool tests for them
   grafana/                    dashboards & datasources
-  elasticsearch/              cluster settings
+  elasticsearch/              cluster settings + security provisioning
   logstash/                   log shipping pipeline + node settings
   kibana/                     server settings
   kafka-connect/              connector registration script
+  nginx/                      load balancers for the two replicated services
+  postgres-exporter/          multi-target probe credentials (template only)
 docker-compose.yaml           the whole platform
 .env.example                  documented environment contract
 ```
