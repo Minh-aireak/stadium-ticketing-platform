@@ -233,6 +233,32 @@ class BookingOrchestrationServiceTest {
     @Nested
     class Compensation {
 
+        /**
+         * Step 1's own compensation, and the reason {@code createDraftBooking} is wrapped at all.
+         * The claim is taken before Step 1 runs, and only the unique-key race is handled inside
+         * {@code createDraftBooking} — so without the surrounding catch, any other failure there
+         * (MaxTicketsExceededException, a transient DB error) would propagate straight out with
+         * the claim still held. The Redis IN_PROGRESS marker would then stick for its full 90s
+         * TTL and answer the customer's perfectly legitimate retry with a 409, for a booking that
+         * was never created and is not in flight anywhere.
+         */
+        @Test
+        void draftBookingFailureReleasesTheIdempotencyClaimBeforeRethrowing() {
+            when(idempotencyStore.claim("idem-1")).thenReturn(new IdempotencyClaim.Claimed());
+            when(bookingRepository.findByIdempotencyKey("idem-1")).thenReturn(Optional.empty());
+            RuntimeException failure = new RuntimeException("transient failure creating draft booking");
+            when(sagaSteps.createDraftBooking(eq("idem-1"), anyString(), anyString(), anyString(), any(), any(), anyString()))
+                    .thenThrow(failure);
+
+            assertThatThrownBy(() ->
+                    service.createBooking("idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
+                    .isSameAs(failure);
+
+            verify(idempotencyStore).release("idem-1");
+            // Nothing downstream of Step 1 ran, so there is nothing else to compensate.
+            verifyNoInteractions(ticketInventoryPort, paymentPort);
+        }
+
         @Test
         void seatReservationFailureCancelsBookingAndReleasesClaimThenRethrows() {
             when(idempotencyStore.claim("idem-1")).thenReturn(new IdempotencyClaim.Claimed());
@@ -406,35 +432,6 @@ class BookingOrchestrationServiceTest {
             // PaymentResultConsumer or the reconciliation job is the real backstop.
             verify(sagaSteps, never()).cancelBooking(anyString(), anyString());
             verify(ticketInventoryPort, never()).releaseSeats(anyString(), anyString(), any());
-            verify(idempotencyStore).release("idem-1");
-        }
-    }
-
-    @Nested
-    class KnownGap {
-
-        // This currently FAILS against the present implementation: createBooking() claims
-        // the idempotency key BEFORE calling createDraftBooking(), but only wraps that call's
-        // DataIntegrityViolationException case — any other failure (e.g. MaxTicketsExceededException,
-        // a transient DB error) propagates straight out of createBooking() without releasing the
-        // claim. The Redis IN_PROGRESS marker then sticks for its full 90s TTL, so a legitimate
-        // retry with the same Idempotency-Key gets a 409 DuplicateRequestInProgressException even
-        // though nothing is actually in flight. See BookingOrchestrationService#createBooking —
-        // the fix is to wrap the createDraftBooking(...) call in the same
-        // try { ... } catch (Exception e) { releaseIdempotencyClaim(idempotencyKey); throw e; }
-        // shape already used for every later step.
-        @Test
-        void createDraftBookingFailureShouldReleaseTheIdempotencyClaim() {
-            when(idempotencyStore.claim("idem-1")).thenReturn(new IdempotencyClaim.Claimed());
-            when(bookingRepository.findByIdempotencyKey("idem-1")).thenReturn(Optional.empty());
-            RuntimeException failure = new RuntimeException("transient failure creating draft booking");
-            when(sagaSteps.createDraftBooking(eq("idem-1"), anyString(), anyString(), anyString(), any(), any(), anyString()))
-                    .thenThrow(failure);
-
-            assertThatThrownBy(() ->
-                    service.createBooking("idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
-                    .isSameAs(failure);
-
             verify(idempotencyStore).release("idem-1");
         }
     }
