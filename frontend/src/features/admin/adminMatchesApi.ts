@@ -2,9 +2,18 @@ import { api } from '@/lib/api'
 import type { Match, MatchListResponse } from '@/features/matches/types'
 import type { AddShowtimeRequest, CreateMatchRequest, CreateMatchResponse, StadiumSummary } from './types'
 
-// All endpoints below are ADMIN-only on match-catalog-service (see MatchController's
-// requireAdminRole()) — the gateway forwards the bearer token, the service checks the
-// "role" JWT claim itself. A non-admin caller gets a 403 ProblemDetail.
+// The five WRITE endpoints below — createMatch, addShowtime, publishMatch, cancelMatch,
+// completeMatch — are ADMIN-only on match-catalog-service: each one opens with
+// MatchController#requireAdminRole(). The gateway forwards the bearer token and the service
+// checks the "role" JWT claim itself, so a non-admin caller gets a 403 ProblemDetail.
+//
+// The two READS are not, and nothing here makes them so. Neither GET /matches/stadiums nor
+// GET /matches calls requireAdminRole(), and both are exempted from authentication twice over:
+// catalog's jwt.excluded-paths lists "GET:/api/v1/matches" and "GET:/api/v1/matches/*", and the
+// gateway's public paths list "GET:/api/v1/matches/**". They answer anonymous callers, by
+// design — StadiumCatalog's own javadoc calls the stadium list "public stadium discovery". They
+// live in this file because the admin screen is their only caller in this app, not because they
+// are guarded.
 
 export async function createMatch(payload: CreateMatchRequest): Promise<CreateMatchResponse> {
   const { data } = await api.post<CreateMatchResponse>('/matches', payload)
