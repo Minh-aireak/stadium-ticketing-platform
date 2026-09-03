@@ -39,6 +39,30 @@ class BookingTest {
     }
 
     @Test
+    void createRejectsAMissingCustomerEmail() {
+        // The address is denormalized onto the booking here and is the only one the confirmation
+        // and cancellation emails ever go to. A token with no email claim — which is every token
+        // InternalServiceTokenProvider mints — yields a null AuthenticatedUser#email, and a
+        // booking built from one could never tell its customer anything about itself.
+        assertThatThrownBy(() -> Booking.create("customer-1", null, "showtime-1", SEATS, AMOUNT, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("customerEmail");
+
+        assertThatThrownBy(() -> Booking.create("customer-1", "  ", "showtime-1", SEATS, AMOUNT, null))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void reconstituteStillAcceptsARowWrittenBeforeTheEmailWasRequired() {
+        // reconstitute() must stay permissive where create() does not: rows persisted before the
+        // check existed still have to load. Same split SeatSelection's javadoc sets out.
+        Booking booking = Booking.reconstitute("booking-1", "customer-1", null, "showtime-1",
+                SEATS, AMOUNT, BookingStatus.DRAFT, Instant.now(), null, 0L, false);
+
+        assertThat(booking.getCustomerEmail()).isNull();
+    }
+
+    @Test
     void createRejectsMoreThanMaxTickets() {
         List<String> elevenSeats = List.of("A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9", "A10", "A11");
 

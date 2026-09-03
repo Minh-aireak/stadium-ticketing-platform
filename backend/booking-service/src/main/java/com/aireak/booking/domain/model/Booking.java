@@ -58,6 +58,16 @@ public class Booking {
     public static Booking create(String customerId, String customerEmail, String showtimeId,
                                   SeatSelection seatSelection, BookingAmount amount,
                                   String idempotencyKey) {
+        // Required here and deliberately NOT in reconstitute(), which has to keep reading back
+        // rows written before this check existed — the same split SeatSelection's javadoc sets out.
+        // customerEmail is denormalized onto the booking at creation and is the only address the
+        // confirmation and cancellation emails are ever sent to, so a booking without one is a
+        // booking whose customer cannot be told anything about it. AuthenticatedUser#email is null
+        // for a token carrying no email claim, which is every token InternalServiceTokenProvider
+        // mints; no caller can currently reach this with one, and this is what keeps it that way.
+        if (customerEmail == null || customerEmail.isBlank()) {
+            throw new IllegalArgumentException("Booking requires a customerEmail to notify");
+        }
         if (seatSelection.count() > MAX_TICKETS) {
             throw new MaxTicketsExceededException(seatSelection.count(), MAX_TICKETS);
         }
