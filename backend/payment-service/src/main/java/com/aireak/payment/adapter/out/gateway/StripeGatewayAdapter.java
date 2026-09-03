@@ -64,7 +64,7 @@ public class StripeGatewayAdapter implements PaymentGatewayPort {
     @Bulkhead(name = "payment-gateway", type = Bulkhead.Type.SEMAPHORE)
     @CircuitBreaker(name = "payment-gateway", fallbackMethod = "chargeFallback")
     @Retry(name = "payment-gateway")
-    public String charge(String bookingId, BigDecimal amount, String currency) {
+    public String charge(String idempotencyKey, String bookingId, BigDecimal amount, String currency) {
         try {
             PaymentIntentCreateParams params = PaymentIntentCreateParams.builder()
                     .setAmount(toSmallestUnit(amount, currency))
@@ -76,8 +76,12 @@ public class StripeGatewayAdapter implements PaymentGatewayPort {
                     .putMetadata("bookingId", bookingId)
                     .build();
 
+            // Supplied by the caller, not derived from bookingId here: Stripe replays the stored
+            // response for a repeated key for 24 hours, so this value is what decides whether a
+            // retry re-attempts the charge or is handed the previous attempt's answer. Both are
+            // wanted, on different failures -- see PaymentGatewayPort#charge.
             RequestOptions requestOptions = RequestOptions.builder()
-                    .setIdempotencyKey(bookingId)
+                    .setIdempotencyKey(idempotencyKey)
                     .build();
 
             PaymentIntent intent = PaymentIntent.create(params, requestOptions);
@@ -142,7 +146,8 @@ public class StripeGatewayAdapter implements PaymentGatewayPort {
         return amount.multiply(BigDecimal.valueOf(100)).longValueExact();
     }
 
-    private String chargeFallback(String bookingId, BigDecimal amount, String currency, Throwable t) {
+    private String chargeFallback(String idempotencyKey, String bookingId, BigDecimal amount,
+                                  String currency, Throwable t) {
         log.error("Payment gateway unavailable for bookingId={}: {}", bookingId, t.getMessage());
         throw new RuntimeException("Payment gateway unavailable", t);
     }

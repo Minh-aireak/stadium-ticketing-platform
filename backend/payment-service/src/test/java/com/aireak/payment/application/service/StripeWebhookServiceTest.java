@@ -40,7 +40,7 @@ class StripeWebhookServiceTest {
 
     private Payment initiatedPayment(String paymentId) {
         return Payment.reconstitute(paymentId, "booking-1", "buyer@example.com", new BigDecimal("100.00"), "USD",
-                PaymentStatus.INITIATED, null, null, Instant.now(), 0L);
+                PaymentStatus.INITIATED, null, null, Instant.now(), 0, 0L);
     }
 
     @Test
@@ -73,7 +73,7 @@ class StripeWebhookServiceTest {
     void overridesGatewayAmbiguousFailedPaymentToSucceededOnWebhookEvent() {
         newService();
         Payment ambiguousPayment = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"), "USD",
-                PaymentStatus.FAILED, null, Payment.GATEWAY_AMBIGUOUS_PREFIX + "connection timeout", Instant.now(), 0L);
+                PaymentStatus.FAILED, null, Payment.GATEWAY_AMBIGUOUS_PREFIX + "connection timeout", Instant.now(), 0, 0L);
         when(processedWebhookEventRepository.existsByEventId("evt-1")).thenReturn(false);
         when(paymentRepository.findByBookingId("booking-1")).thenReturn(Optional.of(ambiguousPayment));
 

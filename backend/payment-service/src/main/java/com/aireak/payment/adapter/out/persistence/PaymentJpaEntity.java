@@ -46,6 +46,11 @@ public class PaymentJpaEntity extends BaseAuditEntity {
     @Column(name = "failure_reason", length = 500)
     private String failureReason;
 
+    // Which gateway attempt the next charge is, so a retry presents an idempotency key Stripe has
+    // not already answered. See Payment#chargeIdempotencyKey.
+    @Column(name = "charge_attempt", nullable = false)
+    private int chargeAttempt;
+
     @Version
     @Column(name = "version")
     private Long version;

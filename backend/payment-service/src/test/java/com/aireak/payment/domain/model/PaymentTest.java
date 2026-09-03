@@ -248,12 +248,89 @@ class PaymentTest {
                 .isInstanceOf(InvalidPaymentStatusException.class);
     }
 
+    // ----------------------------------------------------------------
+    // Charge idempotency key
+    // ----------------------------------------------------------------
+
+    /**
+     * Pinned because PaymentService#execute hard-codes the bare bookingId for a brand-new payment
+     * rather than reading it off the aggregate. If these two ever disagreed, a fresh payment would
+     * be charged under a key some earlier retry had already used, and Stripe would answer it with
+     * that retry's stored response instead of charging anything.
+     */
+    @Test
+    void aFreshPaymentChargesUnderTheBareBookingId() {
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
+
+        assertThat(payment.getChargeAttempt()).isZero();
+        assertThat(payment.chargeIdempotencyKey()).isEqualTo("booking-1");
+    }
+
+    /**
+     * The bug this exists for: retry used to present the same key as the attempt it was retrying,
+     * and Stripe replays a stored response for 24 hours — so the retry got the original decline
+     * handed back and POST /payments/{id}/retry could not succeed for a day.
+     */
+    @Test
+    void retryAfterADefiniteDeclineChargesUnderAKeyTheGatewayHasNotSeen() {
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
+        payment.markFailed("Your card was declined");
+        String keyOfTheDeclinedAttempt = payment.chargeIdempotencyKey();
+
+        payment.retry();
+
+        assertThat(payment.getChargeAttempt()).isEqualTo(1);
+        assertThat(payment.chargeIdempotencyKey())
+                .isEqualTo("booking-1:retry:1")
+                .isNotEqualTo(keyOfTheDeclinedAttempt);
+    }
+
+    /**
+     * And the half that must NOT change. An ambiguous failure may have charged the customer
+     * already, so replaying the same key is how the lost outcome is recovered. Handing this case a
+     * fresh key would turn "retry never works" into "retry can charge twice".
+     */
+    @Test
+    void retryAfterAnAmbiguousFailureKeepsTheKeyThatMayAlreadyHaveCharged() {
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
+        payment.markFailedAmbiguous("Read timed out");
+        String keyOfTheAmbiguousAttempt = payment.chargeIdempotencyKey();
+
+        payment.retry();
+
+        assertThat(payment.getChargeAttempt()).isZero();
+        assertThat(payment.chargeIdempotencyKey()).isEqualTo(keyOfTheAmbiguousAttempt);
+    }
+
+    /** Each definite decline moves the key on again, so a third attempt is not answered by the second. */
+    @Test
+    void everyDefiniteDeclineMovesTheKeyOnAgain() {
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
+
+        payment.markFailed("declined once");
+        payment.retry();
+        payment.markFailed("declined twice");
+        payment.retry();
+
+        assertThat(payment.chargeIdempotencyKey()).isEqualTo("booking-1:retry:2");
+    }
+
+    /** The counter is durable state, so a reload mid-flow must not silently reset the key. */
+    @Test
+    void theAttemptCounterSurvivesReconstitution() {
+        Payment reloaded = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", AMOUNT, "USD",
+                PaymentStatus.INITIATED, null, null, Instant.now(), 2, 5L);
+
+        assertThat(reloaded.getChargeAttempt()).isEqualTo(2);
+        assertThat(reloaded.chargeIdempotencyKey()).isEqualTo("booking-1:retry:2");
+    }
+
     @Test
     void reconstitutePreservesVersionStatusAndRaisesNoEvents() {
         Instant createdAt = Instant.parse("2024-01-01T00:00:00Z");
 
         Payment payment = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", AMOUNT, "USD",
-                PaymentStatus.SUCCEEDED, "gw-tx-1", null, createdAt, 3L);
+                PaymentStatus.SUCCEEDED, "gw-tx-1", null, createdAt, 0, 3L);
 
         assertThat(payment.getVersion()).isEqualTo(3L);
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.SUCCEEDED);
@@ -267,7 +344,7 @@ class PaymentTest {
         // version is only ever null for an in-memory initiate()-d payment; reconstitute() just
         // carries whatever persistence handed it through unchanged (see Payment.version javadoc).
         Payment payment = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", AMOUNT, "USD",
-                PaymentStatus.INITIATED, null, null, Instant.now(), 0L);
+                PaymentStatus.INITIATED, null, null, Instant.now(), 0, 0L);
 
         assertThat(payment.getVersion()).isEqualTo(0L);
     }

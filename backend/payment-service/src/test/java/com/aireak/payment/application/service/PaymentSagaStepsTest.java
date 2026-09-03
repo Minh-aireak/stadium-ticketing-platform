@@ -66,7 +66,7 @@ class PaymentSagaStepsTest {
     void markSucceededSavesAndPublishesPaymentSucceededEvent() {
         newSagaSteps();
         Payment existing = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"),
-                "USD", PaymentStatus.INITIATED, null, null, Instant.now(), 0L);
+                "USD", PaymentStatus.INITIATED, null, null, Instant.now(), 0, 0L);
         when(paymentRepository.findById("payment-1")).thenReturn(Optional.of(existing));
 
         sagaSteps.markSucceeded("payment-1", "gw-tx-1");
@@ -90,7 +90,7 @@ class PaymentSagaStepsTest {
     void markFailedSavesAndPublishesPaymentFailedEvent() {
         newSagaSteps();
         Payment existing = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"),
-                "USD", PaymentStatus.INITIATED, null, null, Instant.now(), 0L);
+                "USD", PaymentStatus.INITIATED, null, null, Instant.now(), 0, 0L);
         when(paymentRepository.findById("payment-1")).thenReturn(Optional.of(existing));
 
         sagaSteps.markFailed("payment-1", "gateway timeout");
@@ -109,7 +109,7 @@ class PaymentSagaStepsTest {
     void markFailedAmbiguousSavesAndPublishesAmbiguousPaymentFailedEvent() {
         newSagaSteps();
         Payment existing = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"),
-                "USD", PaymentStatus.INITIATED, null, null, Instant.now(), 0L);
+                "USD", PaymentStatus.INITIATED, null, null, Instant.now(), 0, 0L);
         when(paymentRepository.findById("payment-1")).thenReturn(Optional.of(existing));
 
         sagaSteps.markFailedAmbiguous("payment-1", "gateway connection timeout");
@@ -129,7 +129,7 @@ class PaymentSagaStepsTest {
     void markRefundedSavesAndPublishesPaymentRefundedEvent() {
         newSagaSteps();
         Payment existing = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"),
-                "USD", PaymentStatus.SUCCEEDED, "gw-tx-1", null, Instant.now(), 1L);
+                "USD", PaymentStatus.SUCCEEDED, "gw-tx-1", null, Instant.now(), 0, 1L);
         when(paymentRepository.findById("payment-1")).thenReturn(Optional.of(existing));
 
         sagaSteps.markRefunded("payment-1", "gw-refund-1", "Match cancelled");
@@ -158,7 +158,7 @@ class PaymentSagaStepsTest {
     void retryReopensAFailedPaymentAndSavesButDoesNotPublish() {
         newSagaSteps();
         Payment existing = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"),
-                "USD", PaymentStatus.FAILED, null, "gateway timeout", Instant.now(), 0L);
+                "USD", PaymentStatus.FAILED, null, "gateway timeout", Instant.now(), 0, 0L);
         when(paymentRepository.findById("payment-1")).thenReturn(Optional.of(existing));
 
         Payment result = sagaSteps.retry("payment-1");

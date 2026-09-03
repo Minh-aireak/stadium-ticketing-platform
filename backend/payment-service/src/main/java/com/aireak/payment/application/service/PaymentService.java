@@ -100,7 +100,10 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
         // the charge itself never went through (or was definitively declined) — safe to mark FAILED.
         String gatewayTxId;
         try {
-            gatewayTxId = paymentGatewayPort.charge(bookingId, command.amount(), command.currency());
+            // A payment this method just created is always on attempt 0, whose key is the bare
+            // bookingId (Payment#chargeIdempotencyKey) -- pinned by PaymentTest so the two cannot
+            // drift apart into charging a fresh payment under a key a retry has already used.
+            gatewayTxId = paymentGatewayPort.charge(bookingId, bookingId, command.amount(), command.currency());
         } catch (Exception e) {
             log.error("Payment charge failed: id={}, reason={}", paymentId, e.getMessage());
             if (isDeclinedException(e)) {
@@ -192,7 +195,8 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
 
         String gatewayTxId;
         try {
-            gatewayTxId = paymentGatewayPort.charge(payment.getBookingId(), payment.getAmount(), payment.getCurrency());
+            gatewayTxId = paymentGatewayPort.charge(payment.chargeIdempotencyKey(), payment.getBookingId(),
+                    payment.getAmount(), payment.getCurrency());
         } catch (Exception e) {
             log.error("Payment retry charge failed: id={}, reason={}", paymentId, e.getMessage());
             if (isDeclinedException(e)) {

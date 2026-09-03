@@ -43,6 +43,9 @@ public class Payment {
     // save, and Spring Data JPA treats any entity with a null @Version as new — markSucceeded()/
     // markFailed() would then try to INSERT a row whose id already exists instead of updating it.
     private final Long version;
+    // Which gateway attempt this payment is on, and therefore which idempotency key its next
+    // charge presents. See #chargeIdempotencyKey and #retry.
+    private int chargeAttempt;
     private final List<Object> domainEvents = new ArrayList<>();
 
     private Payment(String paymentId, String bookingId, String customerEmail, BigDecimal amount,
@@ -72,10 +75,11 @@ public class Payment {
     public static Payment reconstitute(String paymentId, String bookingId, String customerEmail,
                                         BigDecimal amount, String currency, PaymentStatus status,
                                         String gatewayTransactionId, String failureReason,
-                                        Instant createdAt, Long version) {
+                                        Instant createdAt, int chargeAttempt, Long version) {
         Payment p = new Payment(paymentId, bookingId, customerEmail, amount, currency, status, createdAt, version);
         p.gatewayTransactionId = gatewayTransactionId;
         p.failureReason = failureReason;
+        p.chargeAttempt = chargeAttempt;
         return p;
     }
 
@@ -163,8 +167,43 @@ public class Payment {
      */
     public void retry() {
         requireStatus(PaymentStatus.FAILED, "retry");
+        // Read before failureReason is cleared, since that string is what carries the distinction.
+        boolean ambiguous = isAmbiguousFailure();
         this.status = PaymentStatus.INITIATED;
         this.failureReason = null;
+        if (!ambiguous) {
+            this.chargeAttempt++;
+        }
+    }
+
+    /**
+     * The idempotency key the next gateway charge must present.
+     *
+     * <p>Stripe saves the response of the first request made with a given key and replays it for
+     * every later request presenting that key, for 24 hours, whether that response was a success
+     * or an error. So the key decides what a retry is even capable of doing, and the two kinds of
+     * failure need opposite answers:
+     *
+     * <ul>
+     *   <li><b>A definitive decline</b> provably moved no money. Retrying under the same key gets
+     *       the decline replayed and nothing else, which is what {@link #retry} used to do: the
+     *       key was the bare bookingId on every attempt, so
+     *       {@code POST /api/v1/payments/{id}/retry} could not succeed for a full day after the
+     *       first failure. {@link #retry} bumps the attempt, and this returns a key Stripe has
+     *       not seen.</li>
+     *   <li><b>An ambiguous failure</b> may have charged the customer already — the request
+     *       reached Stripe and the response was lost. There the old key is the point: replaying
+     *       it returns whatever really happened, so a lost success is recovered instead of made a
+     *       second time. {@link #retry} leaves the attempt alone, and this returns the same key.
+     *       Handing that case a fresh key would turn "retry never works" into "retry can charge
+     *       twice", which is the worse of the two by a distance.</li>
+     * </ul>
+     *
+     * <p>Attempt 0 is the bare bookingId rather than a suffixed form, so the key a payment already
+     * in flight was charged under does not change underneath it on deploy.
+     */
+    public String chargeIdempotencyKey() {
+        return chargeAttempt == 0 ? bookingId : bookingId + ":retry:" + chargeAttempt;
     }
 
     // ----------------------------------------------------------------
@@ -181,6 +220,7 @@ public class Payment {
     public String getFailureReason()          { return failureReason; }
     public Instant getCreatedAt()             { return createdAt; }
     public Long getVersion()                  { return version; }
+    public int getChargeAttempt()             { return chargeAttempt; }
 
     public List<Object> pullDomainEvents() {
         List<Object> events = Collections.unmodifiableList(new ArrayList<>(domainEvents));
