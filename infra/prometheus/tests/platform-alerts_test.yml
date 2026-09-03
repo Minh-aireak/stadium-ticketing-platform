@@ -1,0 +1,56 @@
+# ============================================================================
+# promtool unit tests for infra/prometheus/rules/platform-alerts.yml.
+#
+# Deliberately NOT in rules/ — prometheus.yml globs /etc/prometheus/rules/*.yml
+# as rule files, and a test file landing in that glob fails Prometheus startup.
+# Nothing in CI runs this yet; run it by hand from the repo root:
+#
+#   docker run --rm --entrypoint promtool \
+#     -v "$PWD/infra/prometheus/rules:/rules:ro" \
+#     -v "$PWD/infra/prometheus/tests:/tests:ro" \
+#     prom/prometheus:v3.13.2 test rules /tests/platform-alerts_test.yml
+#
+# Only BulkheadNearExhaustion is covered, because it is the only rule here whose
+# expression divides two separate metrics: that division silently produces an
+# empty vector — an alert that can never fire — if the two ever stop sharing a
+# label set. The healthy bulkhead in the fixture is what pins that down. The
+# other rules are single-series thresholds with nothing comparable to get wrong.
+# ============================================================================
+
+rule_files:
+  - /rules/platform-alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # catalog-read wedged behind a stalled Elasticsearch: 198 of its 200 permits
+  # taken and not coming back (see ElasticsearchClientConfig for how that used to
+  # last ten minutes). seat-inventory is healthy at 90/100 in the same scrape,
+  # and must stay quiet — if the division cross-joined the two bulkheads instead
+  # of matching them on `name`, it would not.
+  - interval: 1m
+    input_series:
+      - series: 'resilience4j_bulkhead_available_concurrent_calls{job="match-catalog-service",name="catalog-read"}'
+        values: "2x10"
+      - series: 'resilience4j_bulkhead_max_allowed_concurrent_calls{job="match-catalog-service",name="catalog-read"}'
+        values: "200x10"
+      - series: 'resilience4j_bulkhead_available_concurrent_calls{job="ticket-inventory-service",name="seat-inventory"}'
+        values: "90x10"
+      - series: 'resilience4j_bulkhead_max_allowed_concurrent_calls{job="ticket-inventory-service",name="seat-inventory"}'
+        values: "100x10"
+    alert_rule_test:
+      # Below the rule's `for: 5m`, so a brief flash-sale saturation stays silent.
+      - eval_time: 4m
+        alertname: BulkheadNearExhaustion
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: BulkheadNearExhaustion
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: match-catalog-service
+              name: catalog-read
+            exp_annotations:
+              summary: "match-catalog-service bulkhead catalog-read is nearly out of permits"
+              description: >-
+                Fewer than 10% of the permits on catalog-read have been free for 5 minutes, so match-catalog-service is shedding requests with 503 (BulkheadFullException). A bulkhead guards more than the call that filled it: catalog-read is held by the Elasticsearch search but also gates getMatch, getShowtime and the no-query browse, and seat-inventory is held by the catalog lookup but also gates every hold and reserve. So the endpoint users complain about is usually not the one that is actually stuck -- look for a slow dependency behind it first.

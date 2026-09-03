@@ -107,6 +107,26 @@ groups:
             {{ $labels.job }} has held more than 90% of its connections active for 5 minutes.
             Requests will start blocking on connection acquisition.
 
+      - alert: BulkheadNearExhaustion
+        expr: >-
+          resilience4j_bulkhead_available_concurrent_calls
+          /
+          resilience4j_bulkhead_max_allowed_concurrent_calls
+          < 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} bulkhead {{ $labels.name }} is nearly out of permits"
+          description: >-
+            Fewer than 10% of the permits on {{ $labels.name }} have been free for 5 minutes, so
+            {{ $labels.job }} is shedding requests with 503 (BulkheadFullException). A bulkhead
+            guards more than the call that filled it: catalog-read is held by the Elasticsearch
+            search but also gates getMatch, getShowtime and the no-query browse, and
+            seat-inventory is held by the catalog lookup but also gates every hold and reserve.
+            So the endpoint users complain about is usually not the one that is actually stuck --
+            look for a slow dependency behind it first.
+
       - alert: JvmHeapPressure
         expr: >-
           sum by (job) (jvm_memory_used_bytes{area="heap"})

@@ -15,6 +15,16 @@
     vs 0). Pass -Url "http://host.docker.internal:8082/api/v1/matches" -Network "" to go
     back to testing through that path, e.g. to measure what an out-of-Docker client sees.
 
+    The default has no ?q=, so it exercises the Guava/Redis/Postgres browse path and never
+    touches Elasticsearch -- MatchCatalogService only calls the search adapter when a query is
+    present. That blind spot is how the Elasticsearch connection-pool queue went unnoticed:
+    see ElasticsearchClientConfig, where 200 concurrent searches against a wedged cluster took
+    601s each because the pool leases only ten connections per route. Sweep the search path too:
+        ./ramp-test.ps1 -Url "http://match-catalog-service:8082/api/v1/matches?q=united"
+    Both are worth running. They saturate on completely different resources, and the search one
+    shares the catalog-read bulkhead with the browse one, so whichever saturates first takes the
+    other down with it.
+
 .PARAMETER Network
     Docker network to attach the wrk container to, so it can resolve the target by
     service name instead of hopping out to the host and back in. Empty string runs wrk
