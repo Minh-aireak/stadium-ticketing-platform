@@ -74,7 +74,7 @@ jobs:
       - name: Typecheck & build
         run: npm run build
 
-  # ── Stage 2: Docker image build (per service) ─────────────────────
+  # ── Stage 2: Docker image build (per backend service) ─────────────
   docker-build:
     needs: build-and-test
     runs-on: ubuntu-latest
@@ -101,3 +101,46 @@ jobs:
             -t aireak/${{ matrix.service }}:${{ github.sha }} \
             -f backend/${{ matrix.service }}/Dockerfile \
             backend/
+
+  # ── Stage 2b: Docker image build (frontend) ───────────────────────
+  # The matrix above covers the seven backend services only, so nothing built the
+  # storefront image: frontend/Dockerfile and frontend/nginx.conf could break and CI
+  # would stay green, because `npm run build` in the `frontend` job exercises neither.
+  #
+  # Its own job rather than an eighth matrix entry, because that job needs
+  # build-and-test and this image shares no input with the Maven reactor — the same
+  # reasoning that keeps the `frontend` job off the backend's critical path.
+  #
+  # VITE_API_BASE_URL is left at the Dockerfile's default. It is baked into the bundle,
+  # so the value only matters for an image someone actually deploys; what is being
+  # checked here is that the two stages build and that nginx gets its config.
+  frontend-docker-build:
+    needs: frontend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image — frontend
+        run: |
+          docker build \
+            -t aireak/frontend:${{ github.sha }} \
+            -f frontend/Dockerfile \
+            frontend/
+
+      # A built image still says nothing about whether nginx will serve the SPA. This
+      # catches a broken nginx.conf, and the try_files fallback specifically: without it
+      # every client-side route 404s on reload, which no other check in this pipeline
+      # would notice.
+      - name: Smoke-test the served SPA
+        run: |
+          docker run -d --name fe-ci -p 8088:80 aireak/frontend:${{ github.sha }}
+          for i in $(seq 1 15); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8088/)" = "200" ] && break
+            sleep 1
+          done
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8088/)" = "200"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8088/account)" = "200"
+          curl -s http://localhost:8088/ | grep -q 'assets/index-.*\.js'
+          docker rm -f fe-ci
