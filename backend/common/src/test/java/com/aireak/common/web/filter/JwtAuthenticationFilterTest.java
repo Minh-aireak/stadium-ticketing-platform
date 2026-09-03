@@ -305,6 +305,95 @@ class JwtAuthenticationFilterTest {
         assertThat(response.getStatus()).isEqualTo(200);
     }
 
+    // ── internal-service tokens ─────────────────────────────────────────────
+    // isInternalService() opens POST /inventory/{id}/confirm and lets
+    // DELETE /inventory/{id}/reserve/{bookingId} skip its ownership check, so which key signed a
+    // token claiming that type is the whole question — verification alone accepts any of the three.
+
+    private static final String INTERNAL_SECRET = "internal-secret-at-least-32-bytes-long-hs256!!";
+
+    private static String internalServiceToken(String secret) {
+        return buildToken(new JWTClaimsSet.Builder()
+                .subject("booking-service")
+                .issuer(ISSUER)
+                .audience(List.of(AUDIENCE))
+                .claim("tokenType", AuthenticatedUser.TOKEN_TYPE_INTERNAL_SERVICE)
+                .issueTime(Date.from(Instant.now()))
+                .expirationTime(Date.from(Instant.now().plusSeconds(300)))
+                .build(), secret);
+    }
+
+    @Test
+    void honoursInternalServiceClaimOnATokenSignedWithTheInternalSecret() throws Exception {
+        JwtAuthenticationFilter internalAwareFilter = new JwtAuthenticationFilter(new JwtAuthProperties(
+                SECRET, null, INTERNAL_SECRET, ISSUER, AUDIENCE, List.of()));
+
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/inventory/s1/confirm");
+        request.addHeader("Authorization", "Bearer " + internalServiceToken(INTERNAL_SECRET));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        AtomicReference<AuthenticatedUser> seen = new AtomicReference<>();
+        internalAwareFilter.doFilter(request, response,
+                (req, res) -> seen.set(AuthenticatedUserContext.get().orElse(null)));
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(seen.get()).isNotNull();
+        assertThat(seen.get().isInternalService()).isTrue();
+    }
+
+    @Test
+    void rejectsInternalServiceClaimOnATokenSignedWithTheUserFacingSecret() throws Exception {
+        JwtAuthenticationFilter internalAwareFilter = new JwtAuthenticationFilter(new JwtAuthProperties(
+                SECRET, null, INTERNAL_SECRET, ISSUER, AUDIENCE, List.of()));
+
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/inventory/s1/confirm");
+        // Signed with jwt.secret — the key every service and the gateway holds — but claiming to be
+        // the service token that only jwt.internal-secret is supposed to be able to mint.
+        request.addHeader("Authorization", "Bearer " + internalServiceToken(SECRET));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        internalAwareFilter.doFilter(request, response, neverInvokedChain());
+
+        assertThat(response.getStatus()).isEqualTo(401);
+    }
+
+    @Test
+    void stillHonoursInternalServiceClaimWhenNoInternalSecretIsConfigured() throws Exception {
+        // The documented local/dev fallback: InternalServiceTokenProvider signs with jwt.secret
+        // when jwt.internal-secret is unset, so there is no second key to demand.
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/inventory/s1/confirm");
+        request.addHeader("Authorization", "Bearer " + internalServiceToken(SECRET));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        AtomicReference<AuthenticatedUser> seen = new AtomicReference<>();
+        filter.doFilter(request, response,
+                (req, res) -> seen.set(AuthenticatedUserContext.get().orElse(null)));
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(seen.get()).isNotNull();
+        assertThat(seen.get().isInternalService()).isTrue();
+    }
+
+    @Test
+    void ordinaryUserTokenIsUnaffectedWhenAnInternalSecretIsConfigured() throws Exception {
+        JwtAuthenticationFilter internalAwareFilter = new JwtAuthenticationFilter(new JwtAuthProperties(
+                SECRET, null, INTERNAL_SECRET, ISSUER, AUDIENCE, List.of()));
+
+        String userId = UUID.randomUUID().toString();
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/bookings");
+        request.addHeader("Authorization", "Bearer " + validToken(userId, "user@example.com"));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        AtomicReference<AuthenticatedUser> seen = new AtomicReference<>();
+        internalAwareFilter.doFilter(request, response,
+                (req, res) -> seen.set(AuthenticatedUserContext.get().orElse(null)));
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(seen.get()).isNotNull();
+        assertThat(seen.get().userId()).isEqualTo(userId);
+        assertThat(seen.get().isInternalService()).isFalse();
+    }
+
     @Test
     void rejectsUnresolvedPlaceholderSecret() {
         JwtAuthProperties badProps = new JwtAuthProperties(

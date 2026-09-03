@@ -135,6 +135,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String token = authorization.substring("Bearer ".length()).trim();
 
         JWTClaimsSet claims;
+        // Which key actually vouched for this token, not just that some key did — the
+        // internal-service check below turns on the difference.
+        boolean signedByInternalSecret = false;
         try {
             SignedJWT signedJWT = SignedJWT.parse(token);
             boolean verified = signedJWT.verify(primaryVerifier);
@@ -143,6 +146,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
             if (!verified && internalVerifier != null) {
                 verified = signedJWT.verify(internalVerifier);
+                signedByInternalSecret = verified;
             }
 
             if (!verified) {
@@ -178,10 +182,30 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         Object email = claims.getClaim("email");
         Object role = claims.getClaim("role");
         Object tokenType = claims.getClaim("tokenType");
+        String tokenTypeValue = tokenType != null ? String.valueOf(tokenType) : null;
+
+        // The tokenType claim is what AuthenticatedUser#isInternalService answers on, and that
+        // answer opens POST /inventory/{id}/confirm (sell seats with no payment) and lets
+        // DELETE /inventory/{id}/reserve/{bookingId} skip its ownership check. Verification above
+        // is satisfied by ANY of the three keys, so without this the claim was honoured on a token
+        // signed with the user-facing jwt.secret — which is the one 8 services and the gateway all
+        // hold. InternalServiceTokenProvider's promise that "a leak of one secret can never be used
+        // to forge the other kind of token" only holds if the claim is tied to the key that made it.
+        //
+        // Skipped when no internal secret is configured: InternalServiceTokenProvider then signs
+        // with jwt.secret by documented design (local/dev), so there is no second key to demand.
+        if (internalVerifier != null && !signedByInternalSecret
+                && AuthenticatedUser.TOKEN_TYPE_INTERNAL_SERVICE.equals(tokenTypeValue)) {
+            log.warn("Rejected a token claiming tokenType={} that was not signed with jwt.internal-secret (sub={})",
+                    AuthenticatedUser.TOKEN_TYPE_INTERNAL_SERVICE, claims.getSubject());
+            reject(response, "Invalid access token");
+            return;
+        }
+
         AuthenticatedUserContext.set(new AuthenticatedUser(
                 claims.getSubject(), email != null ? String.valueOf(email) : null,
                 role != null ? String.valueOf(role) : null, token,
-                tokenType != null ? String.valueOf(tokenType) : null));
+                tokenTypeValue));
         try {
             filterChain.doFilter(request, response);
         } finally {
