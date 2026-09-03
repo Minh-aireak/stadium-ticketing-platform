@@ -182,9 +182,25 @@ class AccountTest {
     void promoteToAdminEscalatesRoleAndForcesActiveEvenFromPendingVerification() {
         Account account = Account.register(EMAIL, PASSWORD, VERIFICATION_TOKEN);
 
-        account.promoteToAdmin();
+        account.promoteToAdmin(new HashedPassword("$2a$12$operatorSupplied"));
 
         assertThat(account.getRole()).isEqualTo(AccountRole.ADMIN);
         assertThat(account.getStatus()).isEqualTo(AccountStatus.ACTIVE);
+    }
+
+    /**
+     * The password comes with the promotion. An account at the operator's chosen address may
+     * predate the bootstrap and belong to someone else; leaving its password in place would make
+     * "promote to ADMIN" mean "hand ADMIN to whoever registered this address first", which the
+     * forced ACTIVE then completes by skipping email verification too.
+     */
+    @Test
+    void promoteToAdminReplacesThePasswordItFound() {
+        Account account = Account.register(EMAIL, new HashedPassword("$2a$12$whoeverGotHereFirst"),
+                VERIFICATION_TOKEN);
+
+        account.promoteToAdmin(new HashedPassword("$2a$12$operatorSupplied"));
+
+        assertThat(account.getPassword()).isEqualTo(new HashedPassword("$2a$12$operatorSupplied"));
     }
 }

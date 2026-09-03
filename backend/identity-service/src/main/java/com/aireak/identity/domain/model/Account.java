@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 public class Account {
 
@@ -153,11 +154,23 @@ public class Account {
     }
 
     /**
-     * Escalates an existing account to ADMIN and forces it ACTIVE, bypassing the normal status
-     * state machine. Used only by the startup admin-bootstrap process (see
-     * {@code AdminBootstrapRunner}) when the operator-designated email already has an account.
+     * Escalates an existing account to ADMIN, forces it ACTIVE, and replaces its password with the
+     * operator-supplied one, bypassing the normal status state machine. Used only by the startup
+     * admin-bootstrap process (see {@code AdminBootstrapRunner}) when the operator-designated
+     * email already has an account.
+     *
+     * <p>The password is part of the promotion, not an optional extra. The bootstrap's guard is
+     * "no ADMIN exists yet", not "no account exists yet", and registration is public — so the
+     * account found at the operator's chosen address may be one somebody else created there
+     * first. Leaving that account's own password in place would make this method mean "hand ADMIN
+     * to whoever registered this address first", and the forced ACTIVE below would finish the job
+     * by waiving the email verification that is the only proof they control the mailbox. Taking
+     * the password too is what makes promoting an existing account end in the same state as
+     * {@link #registerAdmin} creating a fresh one: the credential the operator supplied is the
+     * credential that opens it.
      */
-    public void promoteToAdmin() {
+    public void promoteToAdmin(HashedPassword newPassword) {
+        this.password = Objects.requireNonNull(newPassword, "Bootstrap password must not be null");
         this.role = AccountRole.ADMIN;
         this.status = AccountStatus.ACTIVE;
     }

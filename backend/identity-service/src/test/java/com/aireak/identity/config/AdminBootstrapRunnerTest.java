@@ -82,6 +82,7 @@ class AdminBootstrapRunnerTest {
         Account existing = Account.register(new Email("admin@example.com"),
                 new HashedPassword("$2a$12$existingHash"), "token");
         when(accountRepository.findByEmail(new Email("admin@example.com"))).thenReturn(Optional.of(existing));
+        when(passwordHashPort.hash(any(RawPassword.class))).thenReturn(new HashedPassword("$2a$12$bootstrapHash"));
 
         runner("admin@example.com", "Bootstrap1").run(null);
 
@@ -89,6 +90,33 @@ class AdminBootstrapRunnerTest {
         verify(accountRepository).save(saved.capture());
         assertThat(saved.getValue().getRole()).isEqualTo(AccountRole.ADMIN);
         assertThat(saved.getValue().getStatus()).isEqualTo(AccountStatus.ACTIVE);
-        verifyNoInteractions(passwordHashPort);
+    }
+
+    /**
+     * The guard is "no ADMIN exists yet", not "no account exists yet", and registration is public
+     * — so the account found here may be one someone else created at the operator's chosen
+     * address before this ever ran. Promoting it while leaving its password alone hands that
+     * person ADMIN, with their own credentials, and the forced ACTIVE skips the email
+     * verification that would otherwise require them to control the mailbox. The operator
+     * supplied a password precisely so that the account they designated ends up reachable with
+     * it; applying it is what makes "promote" mean the same thing as "create".
+     */
+    @Test
+    void aPromotedAccountGetsTheOperatorSuppliedPasswordNotTheOneItAlreadyHad() throws Exception {
+        when(accountRepository.existsByRole(AccountRole.ADMIN)).thenReturn(false);
+        Account squatted = Account.register(new Email("admin@example.com"),
+                new HashedPassword("$2a$12$attackerChosenHash"), "token");
+        when(accountRepository.findByEmail(new Email("admin@example.com"))).thenReturn(Optional.of(squatted));
+        when(passwordHashPort.hash(any(RawPassword.class))).thenReturn(new HashedPassword("$2a$12$bootstrapHash"));
+
+        runner("admin@example.com", "Bootstrap1").run(null);
+
+        ArgumentCaptor<RawPassword> hashed = ArgumentCaptor.forClass(RawPassword.class);
+        verify(passwordHashPort).hash(hashed.capture());
+        assertThat(hashed.getValue().exposeForHashing()).isEqualTo("Bootstrap1");
+
+        ArgumentCaptor<Account> saved = ArgumentCaptor.forClass(Account.class);
+        verify(accountRepository).save(saved.capture());
+        assertThat(saved.getValue().getPassword()).isEqualTo(new HashedPassword("$2a$12$bootstrapHash"));
     }
 }

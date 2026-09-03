@@ -44,14 +44,19 @@ public class AdminBootstrapRunner implements ApplicationRunner {
         }
 
         Email email = new Email(properties.email());
+        // Hashed once, up front, because both branches need it: a promoted account takes the
+        // operator's password exactly as a created one does. See Account#promoteToAdmin for why
+        // an existing account's own password must not survive the promotion.
+        var hashedPassword = passwordHashPort.hash(new RawPassword(properties.password()));
+
         Optional<Account> existing = accountRepository.findByEmail(email);
         if (existing.isPresent()) {
             Account account = existing.get();
-            account.promoteToAdmin();
+            account.promoteToAdmin(hashedPassword);
             accountRepository.save(account);
-            log.info("Admin bootstrap: promoted existing account to ADMIN, accountId={}", account.getId());
+            log.info("Admin bootstrap: promoted existing account to ADMIN and reset its password to the "
+                    + "operator-supplied one, accountId={}", account.getId());
         } else {
-            var hashedPassword = passwordHashPort.hash(new RawPassword(properties.password()));
             Account account = Account.registerAdmin(email, hashedPassword);
             accountRepository.save(account);
             log.info("Admin bootstrap: created new ADMIN account, accountId={}", account.getId());
