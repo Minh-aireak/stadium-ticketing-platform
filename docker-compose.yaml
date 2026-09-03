@@ -3,6 +3,36 @@
 # =============================================================================
 # Usage: docker compose up -d
 # Services use internal 'stadium-net' network.
+#
+# THIS IS A DEVELOPMENT STACK, NOT A DEPLOYABLE TOPOLOGY. The backing services
+# run wide open on purpose, because on one developer's machine that is the
+# cheapest thing that works: Kafka speaks PLAINTEXT with no authentication and
+# no ACLs, Postgres and Redis hold whatever password .env supplies and nothing
+# else, and Elasticsearch's security is only what init-security.sh sets up.
+#
+# So every infrastructure port below publishes to 127.0.0.1, never to
+# 0.0.0.0. This matters most for Kafka: nothing on that topic authenticates a
+# producer, and the consumers downstream of it are past every JWT check the
+# gateway makes — a forged `payment.succeeded` would confirm a booking that was
+# never paid for (PaymentResultConsumer). Published on all interfaces, anyone
+# sharing the network could send one.
+#
+# The individual service ports are on 127.0.0.1 too. Not for authentication —
+# every service wires the shared JwtAuthenticationFilter, so a request arriving
+# on 8086 is checked exactly as one arriving through the gateway. What reaching
+# a service directly skips is everything ELSE the gateway does: the per-IP rate
+# limits (RateLimitingWebFilter, PreAuthRateLimitingWebFilter) and the
+# public-path policy. A valid token would otherwise drive booking-service as
+# fast as it would go, and identity-service's per-account login throttle would
+# lose the per-IP limit it was built to supplement. The 1808x/2808x per-instance
+# ports are for asking one specific replica what it believes, which is a
+# question to ask from this machine.
+#
+# Two ports stay on all interfaces, because they are the front door: 8080 (the
+# gateway) and 5173 (the storefront).
+#
+# Anything beyond one machine needs a real deployment: authenticated,
+# TLS-protected brokers and datastores, and no host port publishing at all.
 # =============================================================================
 
 networks:
@@ -173,7 +203,7 @@ services:
       POSTGRES_USER: ${DB_USERNAME}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_identity:/var/lib/postgresql/data
     healthcheck:
@@ -195,7 +225,7 @@ services:
       POSTGRES_USER: ${DB_USERNAME}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres_inventory:/var/lib/postgresql/data
     healthcheck:
@@ -217,7 +247,7 @@ services:
       POSTGRES_USER: ${DB_USERNAME}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
-      - "5434:5432"
+      - "127.0.0.1:5434:5432"
     volumes:
       - postgres_booking:/var/lib/postgresql/data
     healthcheck:
@@ -239,7 +269,7 @@ services:
       POSTGRES_USER: ${DB_USERNAME}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
-      - "5435:5432"
+      - "127.0.0.1:5435:5432"
     volumes:
       - postgres_payment:/var/lib/postgresql/data
     healthcheck:
@@ -261,7 +291,7 @@ services:
       POSTGRES_USER: ${DB_USERNAME}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
-      - "5436:5432"
+      - "127.0.0.1:5436:5432"
     volumes:
       - postgres_catalog:/var/lib/postgresql/data
     healthcheck:
@@ -284,7 +314,7 @@ services:
       POSTGRES_USER: ${DB_USERNAME}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
-      - "5437:5432"
+      - "127.0.0.1:5437:5432"
     volumes:
       - postgres_notification:/var/lib/postgresql/data
     healthcheck:
@@ -320,7 +350,7 @@ services:
     command:
       - --config.file=/config/config.yaml
     ports:
-      - "9187:9187"
+      - "127.0.0.1:9187:9187"
 
   # ---- Redis (Redisson distributed lock + cache) -----------------------
   redis:
@@ -328,7 +358,7 @@ services:
     container_name: redis_stadium_booking
     networks: [stadium-net]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     # Every consumer (Redisson autoconfig, Spring Data's Lettuce client) sends an AUTH command
@@ -353,7 +383,7 @@ services:
       REDIS_ADDR: redis://redis:6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
     ports:
-      - "9121:9121"
+      - "127.0.0.1:9121:9121"
 
   # ---- Kafka (KRaft mode — no ZooKeeper required) ---------------------
   # Confluent Platform 8.x drops ZooKeeper entirely; KRaft is the only mode.
@@ -366,7 +396,7 @@ services:
     container_name: kafka_stadium_booking
     networks: [stadium-net]
     ports:
-      - "9092:9092"
+      - "127.0.0.1:9092:9092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -403,7 +433,7 @@ services:
       kafka:
         condition: service_healthy
     ports:
-      - "8083:8083"
+      - "127.0.0.1:8083:8083"
     environment:
       BOOTSTRAP_SERVERS: kafka:29092
       GROUP_ID: identity-outbox-connect
@@ -494,7 +524,7 @@ services:
     command:
       - --kafka.server=kafka:29092
     ports:
-      - "9308:9308"
+      - "127.0.0.1:9308:9308"
 
   # ---- Elasticsearch (match catalog read model + log store) ------------
   # 9.5.1 is the current release of the Elastic Stack, and kibana/logstash below are pinned to
@@ -513,7 +543,7 @@ services:
       # elasticsearch-init below — the three real clients each get their own scoped account.
       - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
     ports:
-      - "9200:9200"
+      - "127.0.0.1:9200:9200"
     volumes:
       - ./infra/elasticsearch/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
       - elasticsearch_data:/usr/share/elasticsearch/data
@@ -570,7 +600,7 @@ services:
     ports:
       # Monitoring API — `curl localhost:9600/_node/stats/pipelines` is how you check whether the
       # pipeline is running and how many events it has actually shipped.
-      - "9600:9600"
+      - "127.0.0.1:9600:9600"
     volumes:
       - ./infra/logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
       - ./infra/logstash/pipeline:/usr/share/logstash/pipeline:ro
@@ -601,7 +631,7 @@ services:
       elasticsearch-init:
         condition: service_completed_successfully
     ports:
-      - "5601:5601"
+      - "127.0.0.1:5601:5601"
     environment:
       # Kibana settings live in infra/kibana/kibana.yml. These stay here: NODE_OPTIONS is a Node
       # runtime flag (Kibana's heap defaults high for a container only serving log search), and
@@ -633,7 +663,7 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "8081:8081"
+      - "127.0.0.1:8081:8081"
     volumes:
       - app_logs:/var/log/app
     healthcheck:
@@ -692,7 +722,7 @@ services:
       # Direct access, bypassing the load balancer -- for asking one specific instance what it
       # currently believes while measuring that divergence window. Host port is
       # <instance number><the service's own port>, so a third instance would be 38082.
-      - "18082:8082"
+      - "127.0.0.1:18082:8082"
     environment:
       <<: *match-catalog-service-env
       # Turns on the ECS JSON log file Logstash tails; see the logging block in
@@ -706,7 +736,7 @@ services:
     <<: *match-catalog-service
     container_name: match-catalog-service-2_stadium_booking
     ports:
-      - "28082:8082"
+      - "127.0.0.1:28082:8082"
     environment:
       <<: *match-catalog-service-env
       LOGGING_FILE_NAME: /var/log/app/match-catalog-service-2.log
@@ -726,7 +756,7 @@ services:
     ports:
       # The host port the single match-catalog-service container used to publish, so nothing
       # outside compose has to change.
-      - "8082:8082"
+      - "127.0.0.1:8082:8082"
     volumes:
       - ./infra/nginx/catalog-lb.conf:/etc/nginx/conf.d/default.conf:ro
     healthcheck:
@@ -744,7 +774,7 @@ services:
       # Direct access, bypassing the load balancer -- for hitting one specific instance while
       # debugging ("did instance 2 get any of that load?"). Normal traffic goes to 8087.
       # Host port is <instance number><the service's own port>, so a third instance would be 38083.
-      - "18083:8083"
+      - "127.0.0.1:18083:8083"
     environment:
       <<: *ticket-inventory-service-env
       # Turns on the ECS JSON log file Logstash tails; see the logging block in
@@ -758,7 +788,7 @@ services:
     <<: *ticket-inventory-service
     container_name: ticket-inventory-service-2_stadium_booking
     ports:
-      - "28083:8083"
+      - "127.0.0.1:28083:8083"
     environment:
       <<: *ticket-inventory-service-env
       LOGGING_FILE_NAME: /var/log/app/ticket-inventory-service-2.log
@@ -781,7 +811,7 @@ services:
     ports:
       # Host 8087 avoids clashing with kafka-connect's 8083, and is the same host port the single
       # ticket-inventory-service container used to publish, so nothing outside compose changes.
-      - "8087:8083"
+      - "127.0.0.1:8087:8083"
     volumes:
       - ./infra/nginx/ticket-inventory-lb.conf:/etc/nginx/conf.d/default.conf:ro
     healthcheck:
@@ -809,7 +839,7 @@ services:
       kafka:
         condition: service_healthy
     ports:
-      - "8084:8084"
+      - "127.0.0.1:8084:8084"
     volumes:
       - app_logs:/var/log/app
     healthcheck:
@@ -855,7 +885,7 @@ services:
       kafka:
         condition: service_healthy
     ports:
-      - "8085:8085"
+      - "127.0.0.1:8085:8085"
     volumes:
       - app_logs:/var/log/app
     healthcheck:
@@ -903,7 +933,7 @@ services:
     <<: *booking-service
     container_name: booking-service_stadium_booking
     ports:
-      - "8086:8086"
+      - "127.0.0.1:8086:8086"
     environment:
       <<: *booking-service-env
       # Turns on the ECS JSON log file Logstash tails; see the logging block in
@@ -993,7 +1023,7 @@ services:
     container_name: prometheus_stadium_booking
     networks: [stadium-net]
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./infra/prometheus/rules:/etc/prometheus/rules:ro
@@ -1027,7 +1057,7 @@ services:
       - --path.rootfs=/rootfs
       - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
     ports:
-      - "9100:9100"
+      - "127.0.0.1:9100:9100"
 
   # ---- Grafana (dashboards over Prometheus) ----------------------------
   grafana:
@@ -1038,7 +1068,7 @@ services:
       prometheus:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       # No fallback default: "admin"/"admin" is a well-known weak default that must never ship,
       # even in local dev — set GRAFANA_ADMIN_USER/GRAFANA_ADMIN_PASSWORD in .env.

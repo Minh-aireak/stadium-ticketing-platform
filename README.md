@@ -142,6 +142,19 @@ cp .env.example .env      # then fill in the [REQUIRED] values
 docker compose up -d
 ```
 
+`docker-compose.yaml` is a **development stack, not a deployable topology**. Kafka runs PLAINTEXT
+with no authentication, and Postgres, Redis and Elasticsearch are protected by nothing but the
+passwords in `.env`. Every infrastructure port therefore publishes to `127.0.0.1` only — reachable
+from the machine running Compose and nowhere else. Kafka is the reason that matters: consumers on
+those topics sit past every check the gateway makes, so a forged `payment.succeeded` would confirm
+a booking nobody paid for.
+
+The individual service ports bind to loopback as well. Every service validates its own JWTs, so
+this is not about authentication — it is that reaching a service directly skips the gateway's rate
+limits and public-path policy. **Two ports publish on all interfaces: `8080` (the gateway) and
+`5173` (the storefront).** Everything else in the table below is reachable from the machine running
+Compose, which is where you are.
+
 `.env.example` documents every variable, which are required, and where to get the third-party
 ones. At minimum you need database and Redis passwords, a JWT secret, a Stripe **test** key, and
 Brevo API credentials for outgoing email.
@@ -152,7 +165,6 @@ Once the stack is healthy:
 |---|---|
 | Storefront | http://localhost:5173 |
 | API (through the gateway) | http://localhost:8080 |
-| Swagger UI (per service) | http://localhost:8081/swagger-ui.html |
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 |
 | Kibana | http://localhost:5601 |
