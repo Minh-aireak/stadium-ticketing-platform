@@ -40,16 +40,26 @@ public final class RawPassword {
     }
 
     private void validate(String password) {
+        // length() counts UTF-16 code units, which is deliberate: the frontend gates on
+        // String.prototype.length and that counts the same units, so the two agree by
+        // construction. The character classes below must not use the same unit.
         if (password.length() < 8) {
             throw new InvalidPasswordException("Password must be at least 8 characters");
         }
-        if (!password.chars().anyMatch(Character::isUpperCase)) {
+        // codePoints(), not chars(). Character.isUpperCase/isLowerCase/isDigit take a code
+        // point; chars() hands them UTF-16 code units, so every character above U+FFFF arrived
+        // as two lone surrogates and a lone surrogate is neither a letter nor a digit. A
+        // password whose only uppercase letter is, say, ADLAM CAPITAL ALIF (U+1E900) was
+        // rejected here for having no uppercase letter — while the frontend's /\p{Uppercase}/u
+        // waved it through, which is the direction that costs the customer a broken form
+        // rather than the server a bad row.
+        if (password.codePoints().noneMatch(Character::isUpperCase)) {
             throw new InvalidPasswordException("Password must contain at least one uppercase letter");
         }
-        if (!password.chars().anyMatch(Character::isLowerCase)) {
+        if (password.codePoints().noneMatch(Character::isLowerCase)) {
             throw new InvalidPasswordException("Password must contain at least one lowercase letter");
         }
-        if (!password.chars().anyMatch(Character::isDigit)) {
+        if (password.codePoints().noneMatch(Character::isDigit)) {
             throw new InvalidPasswordException("Password must contain at least one digit");
         }
     }

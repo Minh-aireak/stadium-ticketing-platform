@@ -3,12 +3,16 @@ export const PASSWORD_MIN_LENGTH = 8
 /**
  * The character classes identity-service enforces, spelled the way it spells them.
  *
- * <p>RawPassword.validate asks Character.isUpperCase / isLowerCase / isDigit, and all three are
- * Unicode-aware: isUpperCase is "general category UPPERCASE_LETTER, or the contributory property
- * Other_Uppercase" — which is exactly the Unicode binary property Uppercase — and isDigit is
- * general category DECIMAL_DIGIT_NUMBER, which is Nd. Written as /[A-Z]/, /[a-z]/ and /[0-9]/
- * the frontend was strictly stricter than the service it claims to mirror, and rejected ordinary
- * passwords on a Vietnamese-language product: "Ánhxinh1" has no character in A-Z.
+ * <p>RawPassword.validate walks the password with codePoints() and asks Character.isUpperCase /
+ * isLowerCase / isDigit, and all three are Unicode-aware: isUpperCase is "general category
+ * UPPERCASE_LETTER, or the contributory property Other_Uppercase" — which is exactly the Unicode
+ * binary property Uppercase — and isDigit is general category DECIMAL_DIGIT_NUMBER, which is Nd.
+ * Written as /[A-Z]/, /[a-z]/ and /[0-9]/ the frontend was strictly stricter than the service it
+ * claims to mirror, and rejected ordinary passwords on a Vietnamese-language product: "Ánhxinh1"
+ * has no character in A-Z.
+ *
+ * <p>codePoints() matters to the mirror: while validate used chars() it fed those predicates
+ * UTF-16 code units, so the two sides disagreed about every character above U+FFFF.
  *
  * <p>Exported so PASSWORD_REQUIREMENTS (the checklist) and passwordSchema (the gate) cannot
  * drift apart again — before this they were two independent copies of the same three rules.

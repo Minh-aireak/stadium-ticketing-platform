@@ -22,6 +22,13 @@ const CASES: { password: string; backendAccepts: boolean; why: string }[] = [
   { password: 'Ánhxinh1', backendAccepts: true, why: 'its only uppercase letter is Á (U+00C1)' },
   { password: 'Đường12abc', backendAccepts: true, why: 'its only uppercase letter is Đ (U+0110)' },
   { password: 'мойПароль1', backendAccepts: true, why: 'Cyrillic П is an uppercase letter' },
+  // Above U+FFFF. RawPassword walked the password with String.chars(), which yields UTF-16 code
+  // units, so both of these reached Character.isUpperCase / isDigit as lone surrogates and were
+  // rejected; it walks codePoints() now. Neither row moves on this side — the frontend has
+  // accepted them since the patterns became Unicode properties. They are here because a parity
+  // table with no supplementary-plane row is what let the two sides drift apart unnoticed.
+  { password: '\u{1E900}bcdefg1', backendAccepts: true, why: 'Adlam capital alif U+1E900 is an uppercase letter' },
+  { password: 'Abcdefgh\u{1D7CF}', backendAccepts: true, why: 'mathematical bold digit one U+1D7CF is category Nd' },
   { password: 'ánhxinh12', backendAccepts: false, why: 'no uppercase letter at all' },
   { password: 'ABCDEFGH1', backendAccepts: false, why: 'no lowercase letter' },
   { password: 'Abcdefgh', backendAccepts: false, why: 'no digit' },
