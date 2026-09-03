@@ -10,9 +10,11 @@ import com.aireak.notification.application.port.in.SendNotificationUseCase;
 import com.aireak.notification.application.service.TransactionalEmailService.EmailContent;
 import com.aireak.notification.application.service.TransactionalEmailService.PasswordResetEmail;
 import com.aireak.notification.application.service.TransactionalEmailService.PaymentSuccessEmail;
+import com.aireak.notification.application.service.TransactionalEmailService.RefundIssuedEmail;
 import com.aireak.notification.application.service.TransactionalEmailService.WelcomeEmail;
 import com.aireak.notification.config.AppLinkProperties;
 import com.aireak.notification.domain.model.Notification;
+import com.aireak.payment.domain.event.PaymentRefundedEvent;
 import com.aireak.payment.domain.event.PaymentSucceededEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -65,6 +67,7 @@ public class NotificationDispatchService implements SendNotificationUseCase {
         return switch (eventType) {
             case KafkaTopics.ACCOUNT_REGISTERED -> welcome(payload);
             case KafkaTopics.PAYMENT_SUCCEEDED -> paymentSuccess(payload);
+            case KafkaTopics.PAYMENT_REFUNDED -> refundIssued(payload);
             case KafkaTopics.PASSWORD_RESET_REQUESTED -> passwordReset(payload);
             case KafkaTopics.ACCOUNT_ACTIVATED -> accountActivated(payload);
             case KafkaTopics.BOOKING_CONFIRMED -> bookingConfirmed(payload);
@@ -100,6 +103,31 @@ public class NotificationDispatchService implements SendNotificationUseCase {
         transactionalEmailService.sendPaymentSuccessEmail(new PaymentSuccessEmail(
                 event.customerEmail(), event.bookingId(), event.amount(), event.currency(),
                 event.occurredAt()));
+        return Optional.empty();
+    }
+
+    /**
+     * The cancellation email says the booking is gone; this one says the money is on its way back,
+     * and until it existed the second half was never sent — payment-service published
+     * {@code payment.payment.refunded} to nobody at all.
+     *
+     * <p>No in-app record, for the same reason {@link #paymentSuccess} raises none: the booking
+     * event that preceded this one already wrote one, and two rows for one cancellation reads as a
+     * duplicate rather than as detail.
+     */
+    private Optional<Notification> refundIssued(Object payload) {
+        PaymentRefundedEvent event = (PaymentRefundedEvent) payload;
+        if (event.customerEmail() == null || event.customerEmail().isBlank()) {
+            // Same case as paymentSuccess: a payment initiated with an internal-service token has
+            // no end-user identity, so there is no address to notify — not an error.
+            log.warn("PaymentRefundedEvent has no customerEmail — no refund email sent: paymentId={}, bookingId={}",
+                    event.paymentId(), event.bookingId());
+            return Optional.empty();
+        }
+        // bookingId as the order code, matching the receipt email and the booking screens.
+        transactionalEmailService.sendRefundIssuedEmail(new RefundIssuedEmail(
+                event.customerEmail(), event.bookingId(), event.amount(), event.currency(),
+                event.reason(), event.occurredAt()));
         return Optional.empty();
     }
 

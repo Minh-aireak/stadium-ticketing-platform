@@ -225,6 +225,9 @@ class PaymentTest {
         assertThat(event.gatewayRefundId()).isEqualTo("gw-refund-1");
         assertThat(event.reason()).isEqualTo("Match cancelled");
         assertThat(event.amount()).isEqualTo(AMOUNT);
+        // Carried so notification-service has somewhere to send the refund email. Without it the
+        // event reached a consumer that could not act on it.
+        assertThat(event.customerEmail()).isEqualTo("buyer@example.com");
     }
 
     @Test

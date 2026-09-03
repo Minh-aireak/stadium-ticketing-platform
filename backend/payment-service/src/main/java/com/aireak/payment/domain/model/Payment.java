@@ -145,7 +145,8 @@ public class Payment {
     public void refund(String gatewayRefundId, String reason) {
         requireStatus(PaymentStatus.SUCCEEDED, "refund");
         this.status = PaymentStatus.REFUNDED;
-        domainEvents.add(new PaymentRefundedEvent(paymentId, bookingId, amount, currency, gatewayRefundId, reason));
+        domainEvents.add(new PaymentRefundedEvent(paymentId, bookingId, customerEmail, amount, currency,
+                gatewayRefundId, reason));
     }
 
     public boolean isAmbiguousFailure() {

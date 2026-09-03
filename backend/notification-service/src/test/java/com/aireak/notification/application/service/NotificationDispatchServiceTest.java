@@ -13,6 +13,7 @@ import com.aireak.notification.application.port.out.dto.EmailMessage;
 import com.aireak.notification.config.AppLinkProperties;
 import com.aireak.notification.config.FreeMarkerEscapingConfig;
 import com.aireak.notification.domain.model.Notification;
+import com.aireak.payment.domain.event.PaymentRefundedEvent;
 import com.aireak.payment.domain.event.PaymentSucceededEvent;
 import freemarker.template.Configuration;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,6 +32,7 @@ import static com.aireak.common.kafka.KafkaTopics.ACCOUNT_REGISTERED;
 import static com.aireak.common.kafka.KafkaTopics.BOOKING_CANCELLED;
 import static com.aireak.common.kafka.KafkaTopics.BOOKING_CONFIRMED;
 import static com.aireak.common.kafka.KafkaTopics.PASSWORD_RESET_REQUESTED;
+import static com.aireak.common.kafka.KafkaTopics.PAYMENT_REFUNDED;
 import static com.aireak.common.kafka.KafkaTopics.PAYMENT_SUCCEEDED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -209,6 +211,38 @@ class NotificationDispatchServiceTest {
 
         verifyNoInteractions(emailSenderPort);
         verify(processedEventRepository).markProcessed(envelope.getEventId(), PAYMENT_SUCCEEDED);
+    }
+
+    @Test
+    void send_paymentRefunded_emailsTheCustomerThatTheMoneyIsComingBack() {
+        // payment-service published this topic from the start and nothing subscribed to it, so a
+        // refunded customer got the cancellation email and was never told about the money.
+        PaymentRefundedEvent refunded = new PaymentRefundedEvent(
+                "pay-1", "booking-9", "buyer@example.com",
+                new BigDecimal("450000"), "VND", "re_test_123", "Match cancelled",
+                Instant.parse("2026-08-16T09:30:00Z"));
+
+        dispatch(PAYMENT_REFUNDED, refunded);
+
+        EmailMessage sent = captureSent();
+        assertThat(sent.to()).isEqualTo("buyer@example.com");
+        assertThat(sent.subject()).contains("booking-9");
+        assertThat(sent.htmlBody()).contains("booking-9").contains("450,000 VND").contains("Match cancelled");
+        assertThat(sent.textBody()).contains("450,000 VND").doesNotContain("<html");
+    }
+
+    @Test
+    void send_paymentRefundedWithoutCustomerEmail_isMarkedProcessedWithoutSendingAnything() {
+        PaymentRefundedEvent refunded = new PaymentRefundedEvent(
+                "pay-1", "booking-9", null,
+                new BigDecimal("450000"), "VND", "re_test_123", "Match cancelled", Instant.now());
+
+        EventEnvelope<PaymentRefundedEvent> envelope = EventEnvelope.of(PAYMENT_REFUNDED, refunded, null);
+        when(processedEventRepository.existsByEventId(envelope.getEventId())).thenReturn(false);
+        service.send(envelope.getEventId(), envelope.getEventType(), envelope.getPayload());
+
+        verifyNoInteractions(emailSenderPort);
+        verify(processedEventRepository).markProcessed(envelope.getEventId(), PAYMENT_REFUNDED);
     }
 
     @Test

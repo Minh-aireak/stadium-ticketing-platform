@@ -41,6 +41,7 @@ public class TransactionalEmailService {
     private static final String WELCOME_TEMPLATE = "account-welcome";
     private static final String PAYMENT_SUCCESS_TEMPLATE = "payment-success";
     private static final String PASSWORD_RESET_TEMPLATE = "password-reset";
+    private static final String REFUND_ISSUED_TEMPLATE = "refund-issued";
 
     private static final DateTimeFormatter PAID_AT_FORMAT =
             DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss").withZone(ZoneId.systemDefault());
@@ -83,6 +84,23 @@ public class TransactionalEmailService {
         model.put("currency", data.currency());
         model.put("paidAt", PAID_AT_FORMAT.format(data.paidAt()));
         return sendTemplatedEmail(PAYMENT_SUCCESS_TEMPLATE, "Payment received — order " + data.orderId(),
+                data.to(), model);
+    }
+
+    /**
+     * Sent once a refund has actually been issued by the gateway. The cancellation email tells the
+     * customer their booking is gone; this is the one that tells them the money is coming back,
+     * which is the part they are waiting on.
+     */
+    public Optional<EmailContent> sendRefundIssuedEmail(RefundIssuedEmail data) {
+        Map<String, Object> model = new HashMap<>();
+        model.put("customerName", displayName(data.to()));
+        model.put("orderId", data.orderId());
+        model.put("amount", formatAmount(data.amount(), data.currency()));
+        model.put("currency", data.currency());
+        model.put("reason", data.reason());
+        model.put("refundedAt", PAID_AT_FORMAT.format(data.refundedAt()));
+        return sendTemplatedEmail(REFUND_ISSUED_TEMPLATE, "Refund issued — order " + data.orderId(),
                 data.to(), model);
     }
 
@@ -151,4 +169,8 @@ public class TransactionalEmailService {
                                       Instant paidAt) {}
 
     public record PasswordResetEmail(String to, String resetUrl, long expiresInMinutes) {}
+
+    /** {@code reason} may be null — the template defaults it rather than failing to render. */
+    public record RefundIssuedEmail(String to, String orderId, BigDecimal amount, String currency,
+                                     String reason, Instant refundedAt) {}
 }

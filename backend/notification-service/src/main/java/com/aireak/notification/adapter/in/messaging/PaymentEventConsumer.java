@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Kafka consumer adapter for payment-related domain events — drives the payment-success receipt
- * email. Idempotency is handled by the application service, not here.
+ * email and the refund-issued email. Idempotency is handled by the application service, not here.
  */
 @Slf4j
 @Component
@@ -20,7 +20,7 @@ public class PaymentEventConsumer {
     private final SendNotificationUseCase sendNotificationUseCase;
 
     @KafkaListener(
-            topics = KafkaTopics.PAYMENT_SUCCEEDED,
+            topics = {KafkaTopics.PAYMENT_SUCCEEDED, KafkaTopics.PAYMENT_REFUNDED},
             groupId = "notification-service-payment",
             containerFactory = "kafkaListenerContainerFactory"
     )

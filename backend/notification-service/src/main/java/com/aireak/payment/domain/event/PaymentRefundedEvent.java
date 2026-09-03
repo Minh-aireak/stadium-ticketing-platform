@@ -8,9 +8,9 @@ import java.time.Instant;
  * payment initiated with an internal-service token has no end-user identity behind it. Consumers
  * must treat it as optional — notification-service skips the refund email rather than failing.
  *
- * <p>Mirrored field-for-field in notification-service (see its own copy of this class) —
+ * <p>This is notification-service's copy of payment-service's class, mirrored field-for-field —
  * {@code EventEnvelope} resolves the payload by fully-qualified class name, so the two must stay
- * in sync.
+ * in sync, package included. Same arrangement as {@link PaymentSucceededEvent}.
  */
 public record PaymentRefundedEvent(
         String paymentId, String bookingId, String customerEmail,

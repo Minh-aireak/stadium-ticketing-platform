@@ -93,6 +93,32 @@ class TransactionalEmailServiceTest {
     }
 
     @Test
+    void sendRefundIssuedEmail_carriesTheOrderAmountAndReasonInBothParts() {
+        service.sendRefundIssuedEmail(new TransactionalEmailService.RefundIssuedEmail(
+                "john@example.com", "booking-9", new BigDecimal("249.50"), "USD",
+                "Match cancelled", Instant.parse("2026-08-25T10:15:30Z")));
+
+        EmailMessage sent = captureSent();
+        assertThat(sent.subject()).contains("booking-9");
+        for (String body : new String[]{sent.htmlBody(), sent.textBody()}) {
+            assertThat(body).contains("booking-9");
+            assertThat(body).contains("249.50 USD");
+            assertThat(body).contains("Match cancelled");
+        }
+    }
+
+    @Test
+    void sendRefundIssuedEmail_stillSendsWhenNoReasonWasRecorded() {
+        // reason is the one optional field in this model, defaulted in the template. A refund the
+        // customer is not told about is worse than a refund with a generic reason line.
+        service.sendRefundIssuedEmail(new TransactionalEmailService.RefundIssuedEmail(
+                "john@example.com", "booking-9", new BigDecimal("249.50"), "USD",
+                null, Instant.parse("2026-08-25T10:15:30Z")));
+
+        assertThat(captureSent().textBody()).contains("booking-9");
+    }
+
+    @Test
     void sendPasswordResetEmail_carriesTheResetLinkAndItsExpiryWindow() {
         service.sendPasswordResetEmail(new PasswordResetEmail(
                 "john@example.com", "http://localhost:5173/reset-password?token=reset-tok", 30));
