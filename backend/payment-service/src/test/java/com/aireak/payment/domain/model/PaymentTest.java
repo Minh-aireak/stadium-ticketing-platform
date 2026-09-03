@@ -339,14 +339,20 @@ class PaymentTest {
         assertThat(payment.pullDomainEvents()).isEmpty();
     }
 
+    /**
+     * Zero is not null, and the gap between them is load-bearing. A row that has been inserted
+     * once loads back with version 0, while version stays null only for an in-memory
+     * {@code initiate()}-d payment — and Spring Data reads a null {@code @Version} as "this
+     * aggregate is new". Were reconstitute() ever to default or drop a 0, every later save would
+     * become an INSERT against an id that already exists (see Payment.version's javadoc).
+     */
     @Test
-    void reconstituteWithNullVersionRepresentsAPreExistingRowLoadedBeforeFirstSave() {
-        // version is only ever null for an in-memory initiate()-d payment; reconstitute() just
-        // carries whatever persistence handed it through unchanged (see Payment.version javadoc).
-        Payment payment = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", AMOUNT, "USD",
+    void reconstituteKeepsAZeroVersionDistinctFromTheNullOfANeverSavedPayment() {
+        Payment loaded = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", AMOUNT, "USD",
                 PaymentStatus.INITIATED, null, null, Instant.now(), 0, 0L);
 
-        assertThat(payment.getVersion()).isEqualTo(0L);
+        assertThat(loaded.getVersion()).isEqualTo(0L);
+        assertThat(Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD").getVersion()).isNull();
     }
 
     @Test

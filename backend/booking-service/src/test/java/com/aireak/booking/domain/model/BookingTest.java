@@ -312,15 +312,21 @@ class BookingTest {
         assertThat(booking.pullDomainEvents()).isEmpty();
     }
 
+    /**
+     * Zero is not null, and the gap between them is load-bearing. A row that has been inserted
+     * once loads back with version 0, while version stays null only for an in-memory
+     * {@code create()}-d booking — which is what JPA's isNew() check reads to decide between an
+     * INSERT and an UPDATE. Were reconstitute() ever to default or drop a 0, every later save
+     * would become an INSERT against an id that already exists (see the field's javadoc).
+     */
     @Test
-    void reconstituteWithNullVersionRepresentsAPreExistingRowLoadedBeforeFirstSave() {
-        // version is only ever null for an in-memory create()-d booking; reconstitute()
-        // just carries whatever persistence handed it through unchanged (see the field's
-        // javadoc on why that distinction matters for JPA's isNew() check).
-        Booking booking = Booking.reconstitute("booking-1", "customer-1", "customer-1@example.com", "showtime-1",
+    void reconstituteKeepsAZeroVersionDistinctFromTheNullOfANeverSavedBooking() {
+        Booking loaded = Booking.reconstitute("booking-1", "customer-1", "customer-1@example.com", "showtime-1",
                 SEATS, AMOUNT, BookingStatus.DRAFT, Instant.now(), null, 0L, false);
 
-        assertThat(booking.getVersion()).isEqualTo(0L);
+        assertThat(loaded.getVersion()).isEqualTo(0L);
+        assertThat(Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null)
+                .getVersion()).isNull();
     }
 
     @Test
