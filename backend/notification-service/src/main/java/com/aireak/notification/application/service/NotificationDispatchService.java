@@ -149,7 +149,6 @@ public class NotificationDispatchService implements SendNotificationUseCase {
         Map<String, Object> model = new HashMap<>();
         model.put("accountId", event.accountId().value());
         model.put("email", event.email().value());
-        model.put("occurredAt", event.occurredAt());
         Optional<EmailContent> content = transactionalEmailService.sendTemplatedEmail(
                 "account-activated", "Your account is now active", event.email().value(), model);
         return inAppRecord(event.accountId().value(), content);
@@ -158,13 +157,14 @@ public class NotificationDispatchService implements SendNotificationUseCase {
     private Optional<Notification> bookingConfirmed(Object payload) {
         BookingConfirmedEvent event = (BookingConfirmedEvent) payload;
         Map<String, Object> model = new HashMap<>();
+        // customerId is not in the model: it addresses the in-app record below, and the template
+        // never showed a customer their own id. Same for occurredAt, which no template renders --
+        // see noTemplateRendersTheCustomerIdOrOccurredAtThatUsedToBePutIntoItsModel.
         model.put("bookingId", event.bookingId());
-        model.put("customerId", event.customerId());
         model.put("showtimeId", event.showtimeId());
         model.put("seatCodes", event.seatCodes());
         model.put("amount", event.amount().amount());
         model.put("currency", event.amount().currency());
-        model.put("occurredAt", event.occurredAt());
         Optional<EmailContent> content = transactionalEmailService.sendTemplatedEmail(
                 "booking-confirmed", "Your booking is confirmed!", event.customerEmail(), model);
         return inAppRecord(event.customerId(), content);
@@ -174,10 +174,8 @@ public class NotificationDispatchService implements SendNotificationUseCase {
         BookingCancelledEvent event = (BookingCancelledEvent) payload;
         Map<String, Object> model = new HashMap<>();
         model.put("bookingId", event.bookingId());
-        model.put("customerId", event.customerId());
         model.put("showtimeId", event.showtimeId());
         model.put("reason", event.reason());
-        model.put("occurredAt", event.occurredAt());
         Optional<EmailContent> content = transactionalEmailService.sendTemplatedEmail(
                 "booking-cancelled", "Your booking has been cancelled", event.customerEmail(), model);
         return inAppRecord(event.customerId(), content);

@@ -169,7 +169,6 @@ class TransactionalEmailServiceTest {
         // where a missing value means a real bug that should fail loudly.
         Map<String, Object> model = new HashMap<>();
         model.put("bookingId", "booking-1");
-        model.put("customerId", "cust-1");
         model.put("showtimeId", "showtime-1");
         model.put("reason", null);
 
@@ -209,7 +208,6 @@ class TransactionalEmailServiceTest {
     void aCancellationReasonIsWhatStillPushesARenderedBodyPastTheOldCeiling() {
         Map<String, Object> model = new HashMap<>();
         model.put("bookingId", "booking-1");
-        model.put("customerId", "cust-1");
         model.put("showtimeId", "showtime-1");
         model.put("reason", "x".repeat(5_000));
 
@@ -224,19 +222,72 @@ class TransactionalEmailServiceTest {
     void aConfirmationCarryingEverySeatABookingMayHoldFitsWellInsideTheOldCeiling() {
         Map<String, Object> model = new HashMap<>();
         model.put("bookingId", "booking-1");
-        model.put("customerId", "cust-1");
         model.put("showtimeId", "showtime-1");
         // Booking.MAX_TICKETS seats, the most one booking can ever carry into this template.
         model.put("seatCodes", List.of("A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8"));
         model.put("amount", new BigDecimal("1250000"));
         model.put("currency", "VND");
-        model.put("occurredAt", Instant.parse("2026-08-31T10:00:00Z"));
 
         Optional<EmailContent> content = service.sendTemplatedEmail(
                 "booking-confirmed", "Your booking is confirmed!", "john@example.com", model);
 
         assertThat(content).isPresent();
         assertThat(content.get().textBody()).hasSizeLessThan(PRE_V4_BODY_COLUMN_WIDTH);
+    }
+
+    /**
+     * Why {@code NotificationDispatchService} no longer puts {@code customerId} or
+     * {@code occurredAt} into the models for these three templates: not one of them renders
+     * either. Five model entries across three messages went into FreeMarker and came back out
+     * again untouched.
+     *
+     * <p>Green both before that removal and after it, and it has to be -- a model entry no
+     * template reads has no observable effect, which is exactly why nothing caught it. This is the
+     * executable form of the grep that justified removing them, kept so the claim is rechecked on
+     * every run rather than on the day somebody thinks to grep again.
+     *
+     * <p>The values supplied here are ones a real model would no longer carry, on purpose. If a
+     * template ever starts rendering one, this fails, and the put has to come back with it.
+     */
+    @Test
+    void noTemplateRendersTheCustomerIdOrOccurredAtThatUsedToBePutIntoItsModel() {
+        String customerId = "cust-should-not-appear";
+        String occurredAt = "2026-08-31T10:00:00Z";
+
+        Map<String, Object> confirmed = new HashMap<>();
+        confirmed.put("bookingId", "booking-1");
+        confirmed.put("showtimeId", "showtime-1");
+        confirmed.put("seatCodes", List.of("A1"));
+        confirmed.put("amount", new BigDecimal("1250000"));
+        confirmed.put("currency", "VND");
+        confirmed.put("customerId", customerId);
+        confirmed.put("occurredAt", occurredAt);
+
+        Map<String, Object> cancelled = new HashMap<>();
+        cancelled.put("bookingId", "booking-1");
+        cancelled.put("showtimeId", "showtime-1");
+        cancelled.put("reason", "Match cancelled");
+        cancelled.put("customerId", customerId);
+        cancelled.put("occurredAt", occurredAt);
+
+        Map<String, Object> activated = new HashMap<>();
+        activated.put("accountId", "acc-1");
+        activated.put("email", "john@example.com");
+        activated.put("occurredAt", occurredAt);
+
+        assertRendersWithout("booking-confirmed", confirmed, customerId, occurredAt);
+        assertRendersWithout("booking-cancelled", cancelled, customerId, occurredAt);
+        assertRendersWithout("account-activated", activated, customerId, occurredAt);
+    }
+
+    private void assertRendersWithout(String templateBase, Map<String, Object> model, String... absent) {
+        Optional<EmailContent> content = service.sendTemplatedEmail(
+                templateBase, "Subject", "john@example.com", model);
+
+        assertThat(content).as("%s must still render", templateBase).isPresent();
+        for (String body : new String[]{content.get().htmlBody(), content.get().textBody()}) {
+            assertThat(body).doesNotContain(absent);
+        }
     }
 
     private EmailMessage captureSent() {
