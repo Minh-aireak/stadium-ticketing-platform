@@ -694,13 +694,14 @@ services:
       JWT_INTERNAL_SECRET: ${JWT_INTERNAL_SECRET}
       JWT_ISSUER: ${JWT_ISSUER}
       JWT_AUDIENCE: ${JWT_AUDIENCE}
-      # These seven are commented out in .env.example on purpose — they are optional overrides.
-      # Each therefore needs its default spelled out HERE with `:-`, because a bare ${VAR} on an
-      # unset variable still defines the variable in the container, as an empty string. Spring's
-      # own `${VAR:default}` in application.yaml only fires when the property is *absent*, so an
-      # empty one wins over the default: a fresh clone would get a blank cookie name and a blank
-      # expiry, and identity-service would fail to start. Keep these in sync with
-      # identity-service/src/main/resources/application.yaml.
+      # Every optional override below — the eleven that follow, whether commented out in
+      # .env.example or declared there empty — spells its default out HERE with `:-`, and any new
+      # one must too. A bare ${VAR} on an unset variable still defines the variable in the
+      # container, as an empty string, and Spring's own `${VAR:default}` in application.yaml only
+      # fires when the property is *absent* — so an empty one wins over the default: a fresh clone
+      # would get a blank cookie name and a blank expiry, and identity-service would fail to start.
+      # Keep them in sync with identity-service/src/main/resources/application.yaml.
+      # (CORS_ALLOWED_ORIGINS sits among them but is required, not optional, hence no `:-`.)
       JWT_EXPIRATION_SECONDS: ${JWT_EXPIRATION_SECONDS:-900}
       REFRESH_TOKEN_ABSOLUTE_TTL_SECONDS: ${REFRESH_TOKEN_ABSOLUTE_TTL_SECONDS:-2592000}
       AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-refresh_token}
