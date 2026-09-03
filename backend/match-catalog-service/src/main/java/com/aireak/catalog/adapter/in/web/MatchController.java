@@ -7,6 +7,7 @@ import com.aireak.catalog.application.port.in.CreateMatchUseCase;
 import com.aireak.catalog.application.port.in.GetMatchUseCase;
 import com.aireak.catalog.application.port.in.ListMatchesUseCase;
 import com.aireak.catalog.application.port.in.PublishMatchUseCase;
+import com.aireak.catalog.application.port.out.MatchSearchException;
 import com.aireak.catalog.domain.model.Match;
 import com.aireak.catalog.domain.model.StadiumCatalog;
 import com.aireak.common.exception.ForbiddenException;
@@ -19,15 +20,20 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
+import java.net.URI;
 import java.time.Instant;
 import java.util.List;
 
 /** Inbound REST adapter: match catalog management endpoints. */
+@Slf4j
 @RestController
 @RequestMapping("/api/v1/matches")
 @RequiredArgsConstructor
@@ -37,6 +43,7 @@ public class MatchController {
     private static final int MAX_PAGE_SIZE = 100;
     private static final int DEFAULT_PAGE_SIZE = 20;
     private static final String ROLE_ADMIN = "ADMIN";
+    private static final String RETRY_AFTER_SECONDS = "1";
 
     // matches.home_team, away_team and competition are each VARCHAR(100) (V1__init_schema.sql),
     // and CreateMatchRequest carried only @NotBlank. A longer name therefore travelled all the way
@@ -147,6 +154,36 @@ public class MatchController {
         return getMatchUseCase.getMatch(matchId)
                 .map(m -> ResponseEntity.ok(toResponse(m)))
                 .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    /**
+     * An unreachable Elasticsearch cluster becomes 503 with a Retry-After, not the 500 a bare
+     * RuntimeException would otherwise collect from {@code GlobalExceptionHandler}. 500 tells the
+     * caller this service is broken and retrying is pointless; the cluster being down is neither.
+     * Only the {@code q=} branch of {@link #list} touches it — the unfiltered browse beside it
+     * reads Postgres and keeps working — so what fails here is the search box, not the catalog.
+     *
+     * <p>Controller-local rather than another {@code @ControllerAdvice}: a handler on the
+     * controller wins over every advice whatever its order, which is the whole problem
+     * {@code CatalogOverloadExceptionHandler}'s javadoc exists to describe.
+     *
+     * <p>Logs here because nothing else does — the adapter throws without logging, and moving this
+     * off {@code handleGenericException} takes away the only {@code log.error} the failure had.
+     * The detail is a constant for the same reason the handlers for a malformed body and a
+     * constraint violation use one: {@link MatchSearchException}'s message embeds the customer's
+     * query and its cause embeds the cluster's host and port.
+     */
+    @ExceptionHandler(MatchSearchException.class)
+    public ResponseEntity<ProblemDetail> handleSearchUnavailable(MatchSearchException ex) {
+        log.error("Match search is unavailable", ex);
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.SERVICE_UNAVAILABLE, "Match search is temporarily unavailable");
+        problem.setType(URI.create("https://aireak.com/errors/search-unavailable"));
+        problem.setTitle("Search Unavailable");
+        problem.setProperty("timestamp", Instant.now());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, RETRY_AFTER_SECONDS)
+                .body(problem);
     }
 
     private MatchListResponse toListResponse(ListMatchesUseCase.MatchPage result) {

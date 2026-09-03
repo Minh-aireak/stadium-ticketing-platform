@@ -2,6 +2,7 @@ package com.aireak.catalog.adapter.out.search;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
+import com.aireak.catalog.application.port.out.MatchSearchException;
 import com.aireak.catalog.application.port.out.MatchSearchPort;
 import com.aireak.catalog.domain.model.Match;
 import com.aireak.catalog.domain.model.MatchStatus;
