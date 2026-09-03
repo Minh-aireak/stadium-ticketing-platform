@@ -34,6 +34,14 @@ public class BookingController {
     // ultimately parses these; a code this rejects is one the saga would fail on later.
     private static final String SEAT_CODE_PATTERN = "^[A-Z]\\d{1,3}$";
 
+    private static final String IDEMPOTENCY_KEY_SEPARATOR = ":";
+
+    // bookings.idempotency_key is VARCHAR(255) and now stores the caller's account id (a 36-char
+    // UUID) plus a separator ahead of the client's key. Rejecting an over-long key here answers
+    // 400 saying so, instead of letting it become a "value too long" at commit that
+    // GlobalExceptionHandler can only report as 409 "The request conflicts with existing data".
+    private static final int MAX_IDEMPOTENCY_KEY_LENGTH = 200;
+
     private static final int MIN_PAGE_SIZE = 1;
     private static final int MAX_PAGE_SIZE = 100;
     private static final int DEFAULT_PAGE_SIZE = 20;
@@ -52,7 +60,7 @@ public class BookingController {
         // the JWT identity-service issued for it (see JwtTokenGeneratorAdapter) — not client input,
         // and no extra call to identity-service needed (see CreateBookingUseCase javadoc).
         BookingCreationResult result = createBookingUseCase.createBooking(
-                idempotencyKey,
+                scopedIdempotencyKey(idempotencyKey),
                 request.customerId(),
                 currentUser().email(),
                 request.showtimeId(),
@@ -121,6 +129,32 @@ public class BookingController {
                 booking.getBookingId(), booking.getShowtimeId(), booking.getSeatSelection().seatCodes(),
                 booking.getAmount().amount(), booking.getAmount().currency(),
                 booking.getStatus().name(), booking.getCreatedAt());
+    }
+
+    /**
+     * Namespaces the client's Idempotency-Key under the account that presented it.
+     *
+     * <p>Both stores that key it — Redis's {@code booking:idempotency:<key>} and the
+     * {@code ux_bookings_idempotency_key} unique index — took the header verbatim, so they were a
+     * single namespace shared by every customer on the platform. A second customer presenting a
+     * key a first customer had already completed was answered from the first customer's booking:
+     * 201 Created carrying someone else's bookingId and status, with no booking of their own ever
+     * created. Reaching that needed no attack, only a client that derives keys from anything but
+     * a fresh random value — and an empty {@code Idempotency-Key:} header did it outright, since
+     * the partial unique index treats {@code ''} as a value like any other. Blank is now absent.
+     *
+     * <p>The account id goes first and is taken from the validated JWT, never the request, so a
+     * key crafted to look like another customer's prefix still lands under the caller's own.
+     */
+    private String scopedIdempotencyKey(String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            return null;
+        }
+        if (idempotencyKey.length() > MAX_IDEMPOTENCY_KEY_LENGTH) {
+            throw new IllegalArgumentException(
+                    "Idempotency-Key must be at most " + MAX_IDEMPOTENCY_KEY_LENGTH + " characters");
+        }
+        return currentUser().userId() + IDEMPOTENCY_KEY_SEPARATOR + idempotencyKey;
     }
 
     private AuthenticatedUser currentUser() {

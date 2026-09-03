@@ -15,6 +15,7 @@ import com.nimbusds.jose.crypto.MACSigner;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
@@ -33,8 +34,12 @@ import tools.jackson.databind.json.JsonMapper;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -187,6 +192,108 @@ class BookingControllerJwtAuthenticationIntegrationTest {
                 .andExpect(status().isBadRequest());
 
         verifyNoInteractions(createBookingUseCase);
+    }
+
+    /**
+     * An Idempotency-Key is whatever the client sent, and both stores keyed off it —
+     * {@code booking:idempotency:<key>} in Redis and the {@code ux_bookings_idempotency_key}
+     * unique index — were a single namespace shared by every customer on the platform. A second
+     * customer presenting a key a first customer had already completed was handed the FIRST
+     * customer's bookingId and status as a 201, and their own booking was never created. The
+     * caller's own account id is the only thing that can separate the two, and it is not the
+     * client's to supply.
+     */
+    @Test
+    void theIdempotencyKeyIsScopedToTheCallerSoTwoCustomersCannotShareOne() throws Exception {
+        String firstAccountId = UUID.randomUUID().toString();
+        String secondAccountId = UUID.randomUUID().toString();
+        when(createBookingUseCase.createBooking(any(), anyString(), any(), anyString(), any(), any(), anyString()))
+                .thenReturn(new BookingCreationResult("booking-1", BookingStatus.PENDING_PAYMENT));
+
+        postBookingWithIdempotencyKey(firstAccountId, "shared-key");
+        postBookingWithIdempotencyKey(secondAccountId, "shared-key");
+
+        ArgumentCaptor<String> keys = ArgumentCaptor.forClass(String.class);
+        verify(createBookingUseCase, times(2)).createBooking(
+                keys.capture(), anyString(), any(), anyString(), any(), any(), anyString());
+        assertThat(keys.getAllValues().get(0)).isNotEqualTo(keys.getAllValues().get(1));
+        assertThat(keys.getAllValues().get(0)).contains(firstAccountId);
+        assertThat(keys.getAllValues().get(1)).contains(secondAccountId);
+    }
+
+    /** No header, no key — the saga must still see null, not an account id on its own. */
+    @Test
+    void aRequestWithoutAnIdempotencyKeyStillPassesNoneThrough() throws Exception {
+        String accountId = UUID.randomUUID().toString();
+        when(createBookingUseCase.createBooking(any(), anyString(), any(), anyString(), any(), any(), anyString()))
+                .thenReturn(new BookingCreationResult("booking-1", BookingStatus.PENDING_PAYMENT));
+        String body = jsonMapper.writeValueAsString(new BookingController.CreateBookingRequest(
+                accountId, "showtime-1", List.of("A1"), new BigDecimal("50.00"), "USD"));
+
+        mockMvc.perform(post("/api/v1/bookings")
+                        .header("Authorization", "Bearer " + validToken(accountId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated());
+
+        verify(createBookingUseCase).createBooking(
+                isNull(), anyString(), any(), anyString(), any(), any(), anyString());
+    }
+
+    /**
+     * An empty header reached the DB as {@code ''}, and the partial unique index treats that as a
+     * value like any other — so the second customer to send one collided with the first.
+     */
+    @Test
+    void anEmptyIdempotencyKeyHeaderCountsAsNoKeyAtAll() throws Exception {
+        String accountId = UUID.randomUUID().toString();
+        when(createBookingUseCase.createBooking(any(), anyString(), any(), anyString(), any(), any(), anyString()))
+                .thenReturn(new BookingCreationResult("booking-1", BookingStatus.PENDING_PAYMENT));
+        String body = jsonMapper.writeValueAsString(new BookingController.CreateBookingRequest(
+                accountId, "showtime-1", List.of("A1"), new BigDecimal("50.00"), "USD"));
+
+        mockMvc.perform(post("/api/v1/bookings")
+                        .header("Authorization", "Bearer " + validToken(accountId))
+                        .header("Idempotency-Key", "   ")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated());
+
+        verify(createBookingUseCase).createBooking(
+                isNull(), anyString(), any(), anyString(), any(), any(), anyString());
+    }
+
+    /**
+     * The scoped key has to fit bookings.idempotency_key (VARCHAR(255)) with a 36-char account id
+     * and a separator in front of it. Over-long is a bad request, not a 409 manufactured at commit
+     * by a "value too long" the handler can only describe as a conflict with existing data.
+     */
+    @Test
+    void rejectsAnIdempotencyKeyTooLongToStoreAlongsideTheAccountId() throws Exception {
+        String accountId = UUID.randomUUID().toString();
+        String body = jsonMapper.writeValueAsString(new BookingController.CreateBookingRequest(
+                accountId, "showtime-1", List.of("A1"), new BigDecimal("50.00"), "USD"));
+
+        mockMvc.perform(post("/api/v1/bookings")
+                        .header("Authorization", "Bearer " + validToken(accountId))
+                        .header("Idempotency-Key", "k".repeat(201))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(createBookingUseCase);
+    }
+
+    private void postBookingWithIdempotencyKey(String accountId, String idempotencyKey) throws Exception {
+        String body = jsonMapper.writeValueAsString(new BookingController.CreateBookingRequest(
+                accountId, "showtime-1", List.of("A1"), new BigDecimal("50.00"), "USD"));
+
+        mockMvc.perform(post("/api/v1/bookings")
+                        .header("Authorization", "Bearer " + validToken(accountId))
+                        .header("Idempotency-Key", idempotencyKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated());
     }
 
     private String validToken(String subject) {
