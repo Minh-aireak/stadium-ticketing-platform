@@ -302,6 +302,7 @@ cd frontend
 npm ci
 npm run dev     # Vite dev server on 5173
 npm run lint
+npm test        # vitest run
 npm run build   # tsc -b && vite build
 ```
 
@@ -313,8 +314,14 @@ npm run build   # tsc -b && vite build
 
 1. **build-and-test** — `./mvnw verify -fae -B` over the whole reactor (~700 tests), uploading
    surefire reports if anything fails.
-2. **frontend** — `npm ci`, lint, then `tsc -b && vite build`.
-3. **docker-build** — builds an image per service, in a matrix, once the tests pass.
+2. **frontend** — `npm ci`, lint, `npm test`, then `tsc -b && vite build`. Runs alongside the
+   backend rather than after it: the two share no build inputs, and a broken `tsc` should fail
+   the PR without waiting on the Maven reactor.
+3. **docker-build** — builds an image per *backend* service, in a matrix, once the tests pass.
+4. **frontend-docker-build** — builds the storefront image, starts it, and checks nginx actually
+   serves the SPA: `/` and a client-side route (`/account`) must both answer 200. The matrix
+   above covers backend services only, so without this `frontend/Dockerfile` and
+   `frontend/nginx.conf` could break with CI still green — `npm run build` exercises neither.
 
 ---
 
