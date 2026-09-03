@@ -17,8 +17,21 @@ import org.springframework.web.client.RestClient;
 import java.math.BigDecimal;
 import java.util.List;
 
-// Outbound REST adapter: calls ticket-inventory-service. Resilience4j @CircuitBreaker/@Retry
-// live only at this adapter layer (hexagonal rule).
+/**
+ * Outbound REST adapter: calls ticket-inventory-service. Resilience4j @CircuitBreaker/@Retry
+ * live only at this adapter layer (hexagonal rule).
+ *
+ * <p>Every {@code fallbackMethod} below hangs off {@code @Retry}, not {@code @CircuitBreaker},
+ * and has to. {@code FallbackExecutor} wraps the aspect it is declared on from the OUTSIDE and
+ * {@code DefaultFallbackDecorator} catches {@code Throwable} — not just a rejected call — so a
+ * fallback declared on {@code @CircuitBreaker} fired on the first failure of any kind. The Retry
+ * aspect sits outside the CircuitBreaker aspect (orders 2147483642 vs 2147483643), so from there
+ * on it only ever saw the fallback's replacement exception, and
+ * {@code PredicateCreator.makePredicate} matches {@code ignoreExceptions} with a bare
+ * {@code isAssignableFrom} and no cause traversal: every entry in this service's retry ignore list
+ * was dead config. Declared here, the fallback runs where its own log line has always claimed it
+ * did — once, after the retries are spent or the circuit is open.
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -36,8 +49,8 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
 
     @Override
     @Bulkhead(name = "ticket-inventory", type = Bulkhead.Type.SEMAPHORE)
-    @CircuitBreaker(name = "ticket-inventory", fallbackMethod = "reserveSeatsFallback")
-    @Retry(name = "ticket-inventory")
+    @CircuitBreaker(name = "ticket-inventory")
+    @Retry(name = "ticket-inventory", fallbackMethod = "reserveSeatsFallback")
     public ReservedPrice reserveSeats(String showtimeId, String bookingId, List<String> seatCodes) {
         log.debug("Reserving seats: showtime={}, booking={}", showtimeId, bookingId);
         // Idempotency-Key is informational only — ticket-inventory-service does not read this
@@ -58,8 +71,8 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
 
     @Override
     @Bulkhead(name = "ticket-inventory", type = Bulkhead.Type.SEMAPHORE)
-    @CircuitBreaker(name = "ticket-inventory", fallbackMethod = "releaseSeatsFallback")
-    @Retry(name = "ticket-inventory")
+    @CircuitBreaker(name = "ticket-inventory")
+    @Retry(name = "ticket-inventory", fallbackMethod = "releaseSeatsFallback")
     public void releaseSeats(String showtimeId, String bookingId, List<String> seatCodes) {
         log.debug("Releasing seats: showtime={}, booking={}", showtimeId, bookingId);
         restClient.delete()
@@ -72,8 +85,8 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
 
     @Override
     @Bulkhead(name = "ticket-inventory", type = Bulkhead.Type.SEMAPHORE)
-    @CircuitBreaker(name = "ticket-inventory", fallbackMethod = "confirmReservationFallback")
-    @Retry(name = "ticket-inventory")
+    @CircuitBreaker(name = "ticket-inventory")
+    @Retry(name = "ticket-inventory", fallbackMethod = "confirmReservationFallback")
     public void confirmReservation(String showtimeId, String bookingId, List<String> seatCodes) {
         log.debug("Confirming reservation: showtime={}, booking={}", showtimeId, bookingId);
         // Always the internal service token: confirmReservation only ever runs from

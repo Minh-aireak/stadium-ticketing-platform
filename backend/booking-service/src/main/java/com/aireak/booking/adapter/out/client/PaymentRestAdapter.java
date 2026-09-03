@@ -20,6 +20,9 @@ import java.math.BigDecimal;
 import java.util.Optional;
 
 // Outbound REST adapter: calls payment-service, decorated with @CircuitBreaker + @Retry.
+// The fallback rides @Retry rather than @CircuitBreaker for the reason spelled out on
+// TicketInventoryRestAdapter: declared on the breaker it fires on the first failure of any
+// kind, before @Retry has had a chance to match its own ignoreExceptions against it.
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -39,8 +42,8 @@ public class PaymentRestAdapter implements PaymentPort {
 
     @Override
     @Bulkhead(name = "payment", type = Bulkhead.Type.SEMAPHORE)
-    @CircuitBreaker(name = "payment", fallbackMethod = "initiatePaymentFallback")
-    @Retry(name = "payment")
+    @CircuitBreaker(name = "payment")
+    @Retry(name = "payment", fallbackMethod = "initiatePaymentFallback")
     public void initiatePayment(String bookingId, BigDecimal amount, String currency) {
         log.debug("Initiating payment: bookingId={}, amount={} {}", bookingId, amount, currency);
         // Idempotency-Key is informational only — payment-service does not read this header. What

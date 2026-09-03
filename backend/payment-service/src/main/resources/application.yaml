@@ -107,6 +107,8 @@ resilience4j:
           - com.aireak.payment.application.port.out.PaymentDeclinedException
           # Bulkhead already full locally — an immediate retry has zero chance of a free slot.
           - io.github.resilience4j.bulkhead.BulkheadFullException
+          # Circuit already open — the retry would be refused by the same breaker, twice over.
+          - io.github.resilience4j.circuitbreaker.CallNotPermittedException
 
 management:
   endpoints:

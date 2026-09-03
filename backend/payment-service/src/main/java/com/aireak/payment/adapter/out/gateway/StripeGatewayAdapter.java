@@ -27,6 +27,13 @@ import java.util.Set;
  *
  * <p>@Bulkhead + @CircuitBreaker + @Retry applied here — hexagonal rule: only adapter layer
  * uses Resilience4j annotations.
+ *
+ * <p>The fallbacks hang off {@code @Retry}, not {@code @CircuitBreaker}: a fallback is applied
+ * from OUTSIDE the aspect it is declared on and fires on any {@code Throwable}, so declared on the
+ * breaker it replaced the exception on the very first failure — before the Retry aspect (which
+ * sits outside the CircuitBreaker aspect) could match it against {@code ignoreExceptions}. That is
+ * what made {@code retry.instances.payment-gateway.ignoreExceptions} dead config and charged every
+ * declined card a second time. See TicketInventoryRestAdapter for the same note on the other side.
  */
 @Slf4j
 @Component
@@ -62,8 +69,8 @@ public class StripeGatewayAdapter implements PaymentGatewayPort {
 
     @Override
     @Bulkhead(name = "payment-gateway", type = Bulkhead.Type.SEMAPHORE)
-    @CircuitBreaker(name = "payment-gateway", fallbackMethod = "chargeFallback")
-    @Retry(name = "payment-gateway")
+    @CircuitBreaker(name = "payment-gateway")
+    @Retry(name = "payment-gateway", fallbackMethod = "chargeFallback")
     public String charge(String idempotencyKey, String bookingId, BigDecimal amount, String currency) {
         try {
             PaymentIntentCreateParams params = PaymentIntentCreateParams.builder()
@@ -106,8 +113,8 @@ public class StripeGatewayAdapter implements PaymentGatewayPort {
 
     @Override
     @Bulkhead(name = "payment-gateway", type = Bulkhead.Type.SEMAPHORE)
-    @CircuitBreaker(name = "payment-gateway", fallbackMethod = "refundFallback")
-    @Retry(name = "payment-gateway")
+    @CircuitBreaker(name = "payment-gateway")
+    @Retry(name = "payment-gateway", fallbackMethod = "refundFallback")
     public String refund(String gatewayTransactionId, BigDecimal amount, String currency) {
         try {
             RefundCreateParams params = RefundCreateParams.builder()

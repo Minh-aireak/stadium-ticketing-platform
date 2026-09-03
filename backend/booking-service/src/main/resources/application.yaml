@@ -129,6 +129,8 @@ resilience4j:
           - org.springframework.web.client.HttpServerErrorException$ServiceUnavailable
           # Bulkhead already full locally — an immediate retry has zero chance of a free slot.
           - io.github.resilience4j.bulkhead.BulkheadFullException
+          # Circuit already open — the retry would be refused by the same breaker, three times.
+          - io.github.resilience4j.circuitbreaker.CallNotPermittedException
       payment:
         maxAttempts: 3
         waitDuration: 500ms
@@ -136,6 +138,7 @@ resilience4j:
           - org.springframework.web.client.HttpClientErrorException
           - org.springframework.web.client.HttpServerErrorException$ServiceUnavailable
           - io.github.resilience4j.bulkhead.BulkheadFullException
+          - io.github.resilience4j.circuitbreaker.CallNotPermittedException
 
 management:
   endpoints:
