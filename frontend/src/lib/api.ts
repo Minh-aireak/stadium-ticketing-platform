@@ -67,8 +67,13 @@ api.interceptors.request.use((config) => {
   }
   // /auth/logout is cookie-authenticated (no bearer token), so it needs the CSRF header.
   // Other POST/PUT/DELETE endpoints stay bearer-authenticated and must NOT get this header.
+  // .set(), not Object.assign: config.headers is an AxiosHeaders instance, and assigning own
+  // properties onto it bypasses the name normalization every other write here goes through.
   if (config.url?.includes('/auth/logout')) {
-    Object.assign(config.headers, buildCsrfHeaders())
+    const csrfToken = getCookie('XSRF-TOKEN')
+    if (csrfToken) {
+      config.headers.set('X-XSRF-TOKEN', csrfToken)
+    }
   }
   return config
 })
