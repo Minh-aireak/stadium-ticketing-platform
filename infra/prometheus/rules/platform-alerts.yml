@@ -68,17 +68,34 @@ groups:
             {{ $labels.topic }} for 10 minutes. Bookings may be confirming without their side
             effects (emails, inventory release) landing.
 
+      # This read spring_kafka_listener_seconds_count{result="failure"} until the metric was
+      # measured rather than assumed. That timer is recorded once per listener INVOCATION, and
+      # DefaultErrorHandler retries by seeking the record back for redelivery -- so every attempt
+      # in a retry sequence lands another failure sample. With `for: 0m` the alert therefore fired
+      # on the first transient throw, the Postgres blip or Redis reconnect the next retry cleared,
+      # and sent the operator looking for a record on a -dlt that nothing had written. It was not
+      # measuring dead letters at all; it was measuring that a listener had a bad second.
+      #
+      # The broker's own end offset for the -dlt topic is the thing the alert name claims, and
+      # kafka-exporter already publishes it -- the Kafka dashboard reads the same series. A record
+      # is on the topic or it is not, and retries that eventually succeed leave it untouched.
+      #
+      # sum by (topic), not by partition: every topic has one partition today, and a topic that
+      # later grows more should still read as one alert rather than one per partition.
       - alert: DeadLetterRecordsAppearing
-        expr: increase(spring_kafka_listener_seconds_count{result="failure"}[15m]) > 0
+        expr: sum by (topic) (increase(kafka_topic_partition_current_offset{topic=~".+-dlt"}[15m])) > 0
         for: 0m
         labels:
           severity: warning
         annotations:
-          summary: "{{ $labels.job }} failed to process a Kafka record"
+          summary: "a record was dead-lettered onto {{ $labels.topic }}"
           description: >-
-            A listener in {{ $labels.job }} threw and, after retries, the record goes to a
-            <topic>-dlt. Nothing replays a dead-lettered record automatically — grep the logs
-            for "ALERT:" to see which one and why.
+            A listener exhausted its retries and the record was republished to
+            {{ $labels.topic }}. Nothing replays a dead-lettered record automatically — grep the
+            logs for "ALERT:" to find which one and why. This reads the broker's own end offset
+            via kafka-exporter rather than the services' spring_kafka_listener timer, which
+            counts every failed ATTEMPT and so fires on a blip the next retry clears, well
+            before anything is actually dead-lettered.
 
   # ── Application health ──────────────────────────────────────────────
   - name: application

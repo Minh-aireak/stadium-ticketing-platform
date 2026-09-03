@@ -24,6 +24,13 @@
 # label set — consumergroup/topic/partition — so a future edit back to a
 # client-side metric name fails here instead of in production silence.
 #
+# DeadLetterRecordsAppearing selects its series by a topic-name suffix, which is a
+# way of being wrong that no single-series fixture can show: a regex that stops
+# matching selects nothing and the alert goes quiet, and a regex that matches too
+# much turns every busy topic into a dead-letter alert. The fixture carries a live
+# topic and a quiet dead-letter topic alongside the one that fires, so both
+# directions fail here.
+#
 # The other rules are single-series thresholds with nothing comparable to get wrong.
 # ============================================================================
 
@@ -93,3 +100,34 @@ tests:
               summary: "notification-service is falling behind on booking.booking.confirmed"
               description: >-
                 Consumer group notification-service has held a backlog above 1000 records on booking.booking.confirmed for 10 minutes. Bookings may be confirming without their side effects (emails, inventory release) landing.
+
+  # One record is dead-lettered: the -dlt partition's end offset steps from 0 to 1 at t=10m.
+  # Two decoys share the fixture. payment.payment.succeeded is the live topic the DLT belongs
+  # to, running 500 records/min — far more growth than the alert's threshold, and silent only
+  # because the suffix match excludes it. inventory.seats.sold-dlt already holds a record from
+  # some earlier incident and takes none during the window: a standing backlog somebody has
+  # already been told about is not a new failure, so a flat offset must not alert however high
+  # it sits.
+  - interval: 1m
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{topic="payment.payment.succeeded-dlt",partition="0"}'
+        values: "0+0x9 1+0x10"
+      - series: 'kafka_topic_partition_current_offset{topic="payment.payment.succeeded",partition="0"}'
+        values: "0+500x20"
+      - series: 'kafka_topic_partition_current_offset{topic="inventory.seats.sold-dlt",partition="0"}'
+        values: "7+0x20"
+    alert_rule_test:
+      # Before the record lands, with the live topic already 4500 records into the window.
+      - eval_time: 9m
+        alertname: DeadLetterRecordsAppearing
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: DeadLetterRecordsAppearing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              topic: payment.payment.succeeded-dlt
+            exp_annotations:
+              summary: "a record was dead-lettered onto payment.payment.succeeded-dlt"
+              description: >-
+                A listener exhausted its retries and the record was republished to payment.payment.succeeded-dlt. Nothing replays a dead-lettered record automatically — grep the logs for "ALERT:" to find which one and why. This reads the broker's own end offset via kafka-exporter rather than the services' spring_kafka_listener timer, which counts every failed ATTEMPT and so fires on a blip the next retry clears, well before anything is actually dead-lettered.
