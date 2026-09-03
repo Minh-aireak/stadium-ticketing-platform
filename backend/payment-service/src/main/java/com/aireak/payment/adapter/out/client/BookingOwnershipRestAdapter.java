@@ -29,7 +29,9 @@ public class BookingOwnershipRestAdapter implements BookingOwnershipPort {
 
     private final RestClient restClient;
 
-    @Value("${services.booking.base-url:http://localhost:8083}")
+    // 8086 is booking-service (application.yaml, server.port). 8083 -- which this used to name --
+    // is ticket-inventory-service.
+    @Value("${services.booking.base-url:http://localhost:8086}")
     private String baseUrl;
 
     @Override
