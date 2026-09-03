@@ -141,7 +141,18 @@ export function AdminPage() {
       const isoStartTime = new Date(startTime).toISOString()
       const price = Number(basePrice)
       const stadium = stadiums.find((item) => item.id === stadiumId)
-      if (!stadium) throw new Error('Vui lòng chọn sân vận động')
+      if (!stadium) {
+        // Said through toast() rather than thrown: getErrorMessage only ever reads an
+        // AxiosError's ProblemDetail `detail`, so a plain Error's message has no path to the
+        // user and the catch block below replaced this sentence with the generic
+        // "Đã có lỗi xảy ra, vui lòng thử lại."
+        toast({
+          title: 'Không thể thêm suất bán vé',
+          description: 'Vui lòng chọn sân vận động',
+          variant: 'error',
+        })
+        return
+      }
       await addShowtime(draft.matchId, {
         startTime: isoStartTime,
         stadiumId,

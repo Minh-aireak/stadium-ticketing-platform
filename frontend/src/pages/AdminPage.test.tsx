@@ -136,3 +136,41 @@ describe('AdminPage match list', () => {
     expect(listActiveMatches.mock.calls.at(-1)?.[0]).toMatchObject({ page: 0 })
   })
 })
+
+describe('AdminPage draft flow', () => {
+  async function openDraft() {
+    fireEvent.change(screen.getByLabelText('Đội nhà'), { target: { value: 'Hà Nội FC' } })
+    fireEvent.change(screen.getByLabelText('Đội khách'), { target: { value: 'SLNA' } })
+    fireEvent.change(screen.getByLabelText('Giải đấu'), { target: { value: 'V.League 1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Tạo trận đấu (nháp)' }))
+    await screen.findByLabelText('Thời gian bắt đầu')
+  }
+
+  /**
+   * getErrorMessage only ever reads an AxiosError's ProblemDetail `detail`; a plain Error's
+   * message has no path to the user. Routing this guard through the catch block's
+   * getErrorMessage therefore replaced its own sentence with the generic fallback.
+   */
+  it('tells the admin to pick a stadium instead of showing the generic failure text', async () => {
+    listStadiums.mockRejectedValue(new Error('stadium list is down'))
+    render(<AdminPage />)
+    await screen.findByText('Trận 1 vs Đối thủ 1')
+    await openDraft()
+
+    fireEvent.change(screen.getByLabelText('Thời gian bắt đầu'), {
+      target: { value: '2026-10-01T19:30' },
+    })
+    fireEvent.change(screen.getByLabelText('Giá vé cơ bản'), { target: { value: '200000' } })
+    // submit() rather than a click on the button: the form's `required` attributes are what
+    // keep this branch out of reach today, and dispatching the event directly is the same
+    // thing a later change that drops one of them would do.
+    fireEvent.submit(screen.getByLabelText('Thời gian bắt đầu').closest('form') as HTMLFormElement)
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(
+        expect.objectContaining({ description: 'Vui lòng chọn sân vận động' }),
+      ),
+    )
+    expect(addShowtime).not.toHaveBeenCalled()
+  })
+})
