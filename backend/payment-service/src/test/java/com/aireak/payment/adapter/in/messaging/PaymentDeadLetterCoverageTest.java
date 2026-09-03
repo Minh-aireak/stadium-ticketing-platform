@@ -1,6 +1,8 @@
 package com.aireak.payment.adapter.in.messaging;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.config.BeanDefinition;
+import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.kafka.annotation.KafkaListener;
 
 import java.util.Arrays;
@@ -23,27 +25,27 @@ import static org.assertj.core.api.Assertions.assertThat;
  * because {@code UnreconciledPaymentAlertJob} only reports refunds that were issued and failed to
  * persist, not refunds that were never attempted.
  *
- * <p>Reads the {@code @KafkaListener} annotations directly instead of restating the topic names,
- * so a new consumer or a new topic on an existing one is caught without this test being touched.
- * Note the Stripe webhook enters through {@code StripeWebhookController} over HTTP, not Kafka, so
- * it is out of scope here by construction rather than by omission.
+ * <p>The consumers are found by scanning this package for {@code @KafkaListener} methods, not by
+ * a list kept here. A hand-kept list is the same invisible gap one level up: a consumer added
+ * without being listed is watched by nothing and pins nothing, and the test still passes. The
+ * scan is what makes "a new consumer" — not just a new topic on an existing one — fail here
+ * without this file being touched.
+ *
+ * <p>Note the Stripe webhook enters through {@code StripeWebhookController} over HTTP, not Kafka,
+ * so it is out of scope here by construction rather than by omission.
  */
 class PaymentDeadLetterCoverageTest {
 
     private static final String DLT_SUFFIX = "-dlt";
-
-    /** Every consumer in this package that reads real events, as opposed to alerting on dead ones. */
-    private static final List<Class<?>> EVENT_CONSUMERS = List.of(RefundRequestedConsumer.class);
-
-    private static final List<Class<?>> DEAD_LETTER_CONSUMERS = List.of(RefundRequestedDeadLetterConsumer.class);
+    private static final String CONSUMER_PACKAGE = PaymentDeadLetterCoverageTest.class.getPackageName();
 
     @Test
     void everyConsumedTopicHasItsDeadLetterTopicWatched() {
-        Set<String> expected = topicsOf(EVENT_CONSUMERS).stream()
+        Set<String> expected = topicsOf(eventConsumers()).stream()
                 .map(topic -> topic + DLT_SUFFIX)
                 .collect(Collectors.toCollection(TreeSet::new));
 
-        assertThat(topicsOf(DEAD_LETTER_CONSUMERS))
+        assertThat(topicsOf(deadLetterConsumers()))
                 .as("every topic this service consumes must have its -dlt topic watched, or a "
                         + "dead-lettered record is reported by nothing")
                 .containsAll(expected);
@@ -52,9 +54,9 @@ class PaymentDeadLetterCoverageTest {
     /** Guards the other direction: a stale entry for a topic no consumer reads any more. */
     @Test
     void watchesNoDeadLetterTopicForAnEventNobodyConsumes() {
-        Set<String> consumed = topicsOf(EVENT_CONSUMERS);
+        Set<String> consumed = topicsOf(eventConsumers());
 
-        assertThat(topicsOf(DEAD_LETTER_CONSUMERS))
+        assertThat(topicsOf(deadLetterConsumers()))
                 .allSatisfy(dltTopic -> {
                     assertThat(dltTopic).endsWith(DLT_SUFFIX);
                     assertThat(consumed)
@@ -63,19 +65,74 @@ class PaymentDeadLetterCoverageTest {
                 });
     }
 
-    /** Fails loudly if a consumer stops declaring topics at all, which would make the above vacuous. */
+    /**
+     * Fails loudly if the scan comes back empty, which would make everything above vacuously
+     * true — the failure mode a package rename or a moved consumer would otherwise cause silently.
+     */
     @Test
-    void theConsumersUnderTestActuallyDeclareTopics() {
-        for (Class<?> consumer : EVENT_CONSUMERS) {
-            assertThat(topicsOf(List.of(consumer)))
-                    .as("%s declares no @KafkaListener topics", consumer.getSimpleName())
-                    .isNotEmpty();
+    void theScanFindsBothHalvesOfThisPackage() {
+        assertThat(eventConsumers())
+                .as("no @KafkaListener event consumer found in %s", CONSUMER_PACKAGE)
+                .isNotEmpty();
+        assertThat(deadLetterConsumers())
+                .as("no @KafkaListener dead-letter consumer found in %s", CONSUMER_PACKAGE)
+                .isNotEmpty();
+    }
+
+    /**
+     * A consumer reading live and {@code -dlt} topics from one method would fall out of both
+     * halves above and be checked by neither — the same silent hole in a new shape.
+     */
+    @Test
+    void noConsumerMixesLiveAndDeadLetterTopics() {
+        for (Class<?> consumer : kafkaListenerClasses()) {
+            Set<String> topics = topicsOf(List.of(consumer));
+            assertThat(isDeadLetterConsumer(consumer) || isEventConsumer(consumer))
+                    .as("%s mixes live and dead-letter topics %s, so neither half of this test "
+                            + "covers it", consumer.getSimpleName(), topics)
+                    .isTrue();
         }
-        for (Class<?> consumer : DEAD_LETTER_CONSUMERS) {
-            assertThat(topicsOf(List.of(consumer)))
-                    .as("%s declares no @KafkaListener topics", consumer.getSimpleName())
-                    .isNotEmpty();
+    }
+
+    /**
+     * Every class in this package declaring at least one {@code @KafkaListener} method, whether
+     * or not anyone remembered it existed.
+     */
+    private static List<Class<?>> kafkaListenerClasses() {
+        ClassPathScanningCandidateComponentProvider scanner =
+                new ClassPathScanningCandidateComponentProvider(false);
+        scanner.addIncludeFilter((metadataReader, metadataReaderFactory) -> true);
+        return scanner.findCandidateComponents(CONSUMER_PACKAGE).stream()
+                .map(BeanDefinition::getBeanClassName)
+                .filter(Objects::nonNull)
+                .map(PaymentDeadLetterCoverageTest::load)
+                .filter(type -> !topicsOf(List.of(type)).isEmpty())
+                .toList();
+    }
+
+    private static Class<?> load(String className) {
+        try {
+            return Class.forName(className);
+        } catch (ClassNotFoundException e) {
+            throw new IllegalStateException("Scanned class is not loadable: " + className, e);
         }
+    }
+
+    private static boolean isDeadLetterConsumer(Class<?> consumer) {
+        return topicsOf(List.of(consumer)).stream().allMatch(topic -> topic.endsWith(DLT_SUFFIX));
+    }
+
+    private static boolean isEventConsumer(Class<?> consumer) {
+        return topicsOf(List.of(consumer)).stream().noneMatch(topic -> topic.endsWith(DLT_SUFFIX));
+    }
+
+    /** Consumers that read real events, as opposed to alerting on dead ones. */
+    private static List<Class<?>> eventConsumers() {
+        return kafkaListenerClasses().stream().filter(PaymentDeadLetterCoverageTest::isEventConsumer).toList();
+    }
+
+    private static List<Class<?>> deadLetterConsumers() {
+        return kafkaListenerClasses().stream().filter(PaymentDeadLetterCoverageTest::isDeadLetterConsumer).toList();
     }
 
     private static Set<String> topicsOf(List<Class<?>> consumers) {
