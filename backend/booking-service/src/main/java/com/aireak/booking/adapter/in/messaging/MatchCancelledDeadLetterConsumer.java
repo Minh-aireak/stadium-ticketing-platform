@@ -11,11 +11,21 @@ import org.springframework.stereotype.Component;
  * could not apply even after {@code KafkaConfig#kafkaErrorHandler}'s retries and were republished
  * to the {@code -dlt} topic.
  *
- * <p>A record here means a match was called off and its bookings were never told. Every active
- * booking for those showtimes stays CONFIRMED or PENDING_PAYMENT, holding seats for a match that
- * will not happen, and the ones already paid for are owed a refund that no longer has anything to
- * trigger it — {@code BookingOrchestrationService#cancelBookingsForShowtime} is the only thing
- * that raises it.
+ * <p>A record here means a match was called off and some of its bookings were never told. Every
+ * booking still active for those showtimes stays CONFIRMED or PENDING_PAYMENT, holding seats for a
+ * match that will not happen, and the ones already paid for are owed a refund that no longer has
+ * anything to trigger it — {@code BookingOrchestrationService#cancelBookingsForShowtime} is the
+ * only thing that raises it.
+ *
+ * <p><strong>Some, not all</strong>, and the distinction is the operator's whole starting point.
+ * Neither {@link MatchCancelledConsumer}'s loop over showtimes nor
+ * {@code cancelBookingsForShowtime}'s loop over bookings has a per-item try/catch — deliberately,
+ * since a swallowed failure here would lose a refund in silence, and throwing is what brings the
+ * record to this class. So a failure part way through leaves everything before it already
+ * CANCELLED with its {@code RefundRequestedEvent} already in the outbox. Working out which
+ * bookings for this match are still active is the first thing to do with this alert, not a
+ * re-drive of the whole event; see
+ * {@code BookingOrchestrationServiceTest#aFailurePartWayThroughLeavesTheBookingsBeforeItAlreadyCancelled}.
  *
  * <p>Unlike a lost payment result, nothing reconciles this on its own.
  * {@code BookingReconciliationJob} asks payment-service for the outcome of a payment; it has no
@@ -39,8 +49,10 @@ public class MatchCancelledDeadLetterConsumer {
     )
     public void onDeadLetter(ConsumerRecord<String, String> record) {
         log.error("ALERT: match-cancelled event landed on dead-letter topic after exhausting retries — "
-                        + "bookings for a cancelled match were NOT cancelled and any refunds they are owed "
-                        + "were NOT requested: topic={}, partition={}, offset={}, key={}, value={}",
+                        + "some bookings for a cancelled match were NOT cancelled and the refunds they are "
+                        + "owed were NOT requested; the event may have been applied part way, so check which "
+                        + "bookings for these showtimes are still active rather than assuming none were: "
+                        + "topic={}, partition={}, offset={}, key={}, value={}",
                 record.topic(), record.partition(), record.offset(), record.key(), record.value());
     }
 }

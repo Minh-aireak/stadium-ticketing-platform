@@ -33,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -651,6 +652,45 @@ class BookingOrchestrationServiceTest {
 
             verify(sagaSteps, never()).cancelBookingDueToMatchCancellation(anyString(), anyString());
             verifyNoInteractions(paymentPort);
+        }
+
+        /**
+         * The loop has no per-booking try/catch, on purpose: a cancellation that fails has to
+         * reach MatchCancelledConsumer so DefaultErrorHandler retries it and, failing that, puts
+         * the record on the dead-letter topic where MatchCancelledDeadLetterConsumer alerts on it.
+         * Swallowing one would lose a refund silently, which is worse.
+         *
+         * <p>What that means, and what this pins, is that the throw leaves PARTIAL progress
+         * behind: bookings earlier in the list are already CANCELLED and have already raised
+         * RefundRequestedEvent. Reachable -- bookings carries a JPA {@code @Version}, so a
+         * PaymentResultConsumer confirming a booking for this same showtime concurrently is enough
+         * to make save() throw ObjectOptimisticLockingFailureException. The dead-letter alert's
+         * wording is corrected in the same commit as this test, because it told the operator that
+         * nothing had happened.
+         */
+        @Test
+        void aFailurePartWayThroughLeavesTheBookingsBeforeItAlreadyCancelled() {
+            when(bookingRepository.findActiveByShowtimeId(SHOWTIME_ID))
+                    .thenReturn(List.of(confirmedBooking("booking-1"), confirmedBooking("booking-2"),
+                            confirmedBooking("booking-3")));
+            // One stub covering every invocation rather than one keyed to "booking-2": under
+            // MockitoExtension's default STRICT_STUBS an argument-specific stub makes the first
+            // call, for booking-1, a stubbing mismatch instead of the plain call it is.
+            doAnswer(invocation -> {
+                if ("booking-2".equals(invocation.getArgument(0))) {
+                    throw new org.springframework.orm.ObjectOptimisticLockingFailureException(
+                            Booking.class, "booking-2");
+                }
+                return null;
+            }).when(sagaSteps).cancelBookingDueToMatchCancellation(anyString(), anyString());
+
+            assertThatThrownBy(() -> service.cancelBookingsForShowtime(SHOWTIME_ID, "Match cancelled"))
+                    .isInstanceOf(org.springframework.orm.ObjectOptimisticLockingFailureException.class);
+
+            // Already done, and already owed a refund -- not "NOT cancelled".
+            verify(sagaSteps).cancelBookingDueToMatchCancellation("booking-1", "Match cancelled");
+            // Never reached, which is the half the alert was right about.
+            verify(sagaSteps, never()).cancelBookingDueToMatchCancellation("booking-3", "Match cancelled");
         }
     }
 
