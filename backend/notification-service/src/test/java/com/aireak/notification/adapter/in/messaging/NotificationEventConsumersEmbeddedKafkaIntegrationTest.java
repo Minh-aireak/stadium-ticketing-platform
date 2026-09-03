@@ -8,6 +8,7 @@ import com.aireak.identity.domain.event.AccountRegisteredEvent;
 import com.aireak.identity.domain.event.PasswordResetRequestedEvent;
 import com.aireak.notification.application.port.in.SendNotificationUseCase;
 import com.aireak.notification.config.KafkaConfig;
+import com.aireak.payment.domain.event.PaymentRefundedEvent;
 import com.aireak.payment.domain.event.PaymentSucceededEvent;
 import tools.jackson.databind.json.JsonMapper;
 import org.apache.kafka.clients.consumer.Consumer;
@@ -42,6 +43,7 @@ import static com.aireak.common.kafka.KafkaTopics.ACCOUNT_REGISTERED;
 import static com.aireak.common.kafka.KafkaTopics.BOOKING_CANCELLED;
 import static com.aireak.common.kafka.KafkaTopics.BOOKING_CONFIRMED;
 import static com.aireak.common.kafka.KafkaTopics.PASSWORD_RESET_REQUESTED;
+import static com.aireak.common.kafka.KafkaTopics.PAYMENT_REFUNDED;
 import static com.aireak.common.kafka.KafkaTopics.PAYMENT_SUCCEEDED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -53,9 +55,10 @@ import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 
 /**
- * Drives {@link BookingEventConsumer} and {@link AccountEventConsumer} through a REAL embedded
- * Kafka broker instead of calling {@code send(eventId, eventType, payload)} on the use case
- * directly (see {@code NotificationDispatchServiceTest} for that unit-level coverage, kept as-is).
+ * Drives {@link BookingEventConsumer}, {@link AccountEventConsumer} and
+ * {@link PaymentEventConsumer} through a REAL embedded Kafka broker instead of calling
+ * {@code send(eventId, eventType, payload)} on the use case directly (see
+ * {@code NotificationDispatchServiceTest} for that unit-level coverage, kept as-is).
  * This is the layer those tests cannot reach: {@code @KafkaListener} container wiring, the real
  * {@link org.springframework.kafka.support.serializer.JacksonJsonDeserializer} configured in
  * {@link KafkaConfig} — including resolving {@code EventEnvelope.payload}'s
@@ -83,9 +86,10 @@ import static org.mockito.Mockito.verify;
         partitions = 1,
         topics = {
                 BOOKING_CONFIRMED, BOOKING_CANCELLED, ACCOUNT_REGISTERED, ACCOUNT_ACTIVATED,
-                PAYMENT_SUCCEEDED, PASSWORD_RESET_REQUESTED,
+                PAYMENT_SUCCEEDED, PAYMENT_REFUNDED, PASSWORD_RESET_REQUESTED,
                 BOOKING_CONFIRMED + "-dlt", BOOKING_CANCELLED + "-dlt", ACCOUNT_REGISTERED + "-dlt",
-                ACCOUNT_ACTIVATED + "-dlt", PAYMENT_SUCCEEDED + "-dlt", PASSWORD_RESET_REQUESTED + "-dlt"
+                ACCOUNT_ACTIVATED + "-dlt", PAYMENT_SUCCEEDED + "-dlt", PAYMENT_REFUNDED + "-dlt",
+                PASSWORD_RESET_REQUESTED + "-dlt"
         },
         bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
@@ -174,9 +178,17 @@ class NotificationEventConsumersEmbeddedKafkaIntegrationTest {
     }
 
     /**
-     * The strongest guard on notification-service's copy of payment-service's event: the payload
-     * is resolved purely by the fully-qualified class name embedded in the JSON, so a package or
-     * field-shape drift between the two copies shows up here and nowhere else.
+     * {@link PaymentSucceededEvent} here is notification-service's own copy of payment-service's
+     * class, and this is the only place it is resolved from real JSON bytes by the fully-qualified
+     * name {@code @JsonTypeInfo(use = Id.CLASS)} writes — through the real trusted-packages check
+     * rather than from a Java object already constructed in memory.
+     *
+     * <p>What it does NOT do is notice the two copies drifting apart, though it used to say so:
+     * the record is written and read here by the same notification-service class, so any change to
+     * its package or its fields is symmetric and stays green. Measured, not assumed — an extra
+     * component added to the copy leaves this whole class 8/8 green. Keeping the pair in step is a
+     * review obligation, and {@link PaymentSucceededEvent}'s own javadoc is where it is written
+     * down.
      */
     @Test
     void consumesRealPaymentSucceededRecord_andDispatchesWithTheDeserializedPayload() {
@@ -187,6 +199,25 @@ class NotificationEventConsumersEmbeddedKafkaIntegrationTest {
 
         verify(sendNotificationUseCase, timeout(10_000))
                 .send(eq(eventId), eq(PAYMENT_SUCCEEDED), any(PaymentSucceededEvent.class));
+    }
+
+    /**
+     * {@link PaymentEventConsumer} reads both payment topics off a single method, so the refund
+     * payload goes through the same deserializer and the same trusted-packages check as the
+     * succeeded one above — and had no round-trip of its own, with {@code PAYMENT_REFUNDED}
+     * missing even from the topic list this test's broker starts with. Same limitation as its
+     * sibling: it cannot see the two copies of the class drift apart.
+     */
+    @Test
+    void consumesRealPaymentRefundedRecord_andDispatchesWithTheDeserializedPayload() {
+        PaymentRefundedEvent refunded = new PaymentRefundedEvent(
+                "pay-1", "booking-9", "buyer@example.com",
+                new java.math.BigDecimal("450000"), "VND", "re_test_123", "Match cancelled",
+                Instant.now());
+        String eventId = publishAsDebeziumWouldForwardTheOutboxRow(PAYMENT_REFUNDED, refunded);
+
+        verify(sendNotificationUseCase, timeout(10_000))
+                .send(eq(eventId), eq(PAYMENT_REFUNDED), any(PaymentRefundedEvent.class));
     }
 
     @Test
