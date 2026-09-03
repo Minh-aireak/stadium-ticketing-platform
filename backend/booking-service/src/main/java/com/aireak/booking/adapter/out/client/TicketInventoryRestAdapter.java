@@ -207,9 +207,10 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
     }
 
     // Rethrows (unlike releaseSeatsFallback) so BookingOrchestrationService#confirmInventoryReservation
-    // can tell the call failed and leave inventoryConfirmed=false — InventoryConfirmationReconciler
-    // is the actual backstop; without a signal here it would never know to retry, and the Redis
-    // hold would just expire via TTL despite payment having succeeded.
+    // can tell the call failed. For a failure that might clear that means leaving
+    // inventoryConfirmed=false — InventoryConfirmationReconciler is the actual backstop; without a
+    // signal here it would never know to retry, and the Redis hold would just expire via TTL
+    // despite payment having succeeded.
     //
     // WHICH failure it was matters as much as that there was one, and until this method
     // distinguished them it did not survive: a permanent refusal and a service that was merely

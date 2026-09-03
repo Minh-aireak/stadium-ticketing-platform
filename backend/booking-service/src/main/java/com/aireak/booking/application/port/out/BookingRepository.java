@@ -18,9 +18,16 @@ public interface BookingRepository {
      * last updated before {@code updatedBefore}. Used by {@code InventoryConfirmationReconciler}
      * to retry only the ones that actually need it, not every CONFIRMED booking ever.
      *
+     * <p>Excludes the ones ticket-inventory-service has refused for good — see
+     * {@link #countInventorySaleRefused}. That exclusion is not a refinement, it is what makes
+     * the cap below work: a booking whose confirm can never succeed would otherwise stay in this
+     * result set for the life of the row.
+     *
      * @param limit caps how many rows a single reconciler run processes — under an extended
      *              ticket-inventory-service outage the backlog could otherwise grow unbounded
-     *              and every scheduled run would re-walk the entire thing.
+     *              and every scheduled run would re-walk the entire thing. The next run picks up
+     *              whatever is left, which only drains because there is no ordering here and
+     *              nothing permanently unresolvable left to fill the batch with.
      */
     List<Booking> findConfirmedAwaitingInventoryConfirmation(Instant updatedBefore, int limit);
 
