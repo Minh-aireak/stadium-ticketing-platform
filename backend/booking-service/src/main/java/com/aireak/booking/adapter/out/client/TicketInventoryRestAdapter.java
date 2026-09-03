@@ -20,6 +20,7 @@ import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Outbound REST adapter: calls ticket-inventory-service. Resilience4j @CircuitBreaker/@Retry
@@ -51,10 +52,14 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
     @Value("${services.ticket-inventory.base-url:http://localhost:8083}")
     private String baseUrl;
 
-    // ticket-inventory-service answers 422 when it will not take these seats: its
-    // SeatsNotAvailableException and ShowtimeBookingClosedException are DomainExceptions, which
-    // GlobalExceptionHandler maps to 422. That is the service answering, not the service failing.
-    private static final int SEATS_REFUSED = 422;
+    // The two statuses ticket-inventory-service uses to say it will not take these seats:
+    //   422 — SeatsNotAvailableException / ShowtimeBookingClosedException, DomainExceptions that
+    //         GlobalExceptionHandler maps there.
+    //   404 — SeatInventoryNotFoundException: the showtime has no seat inventory at all.
+    // Both are the service answering about these seats, not the service failing, so both become a
+    // SeatReservationRejectedException: retrying cannot change either, and neither may count
+    // against a circuit breaker protecting us from a service that is in fact healthy.
+    private static final Set<Integer> SEATS_REFUSED = Set.of(404, 422);
 
     @Override
     @Bulkhead(name = "ticket-inventory", type = Bulkhead.Type.SEMAPHORE)
@@ -78,7 +83,7 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
                     .retrieve()
                     .body(ReserveResponse.class);
         } catch (HttpClientErrorException e) {
-            if (e.getStatusCode().value() != SEATS_REFUSED) {
+            if (!SEATS_REFUSED.contains(e.getStatusCode().value())) {
                 throw e;
             }
             throw new SeatReservationRejectedException(refusalDetail(e), e);

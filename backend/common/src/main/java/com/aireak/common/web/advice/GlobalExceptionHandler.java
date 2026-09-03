@@ -3,6 +3,7 @@ package com.aireak.common.web.advice;
 import com.aireak.common.exception.DomainException;
 import com.aireak.common.exception.ForbiddenException;
 import com.aireak.common.exception.IdentityMismatchException;
+import com.aireak.common.exception.ResourceNotFoundException;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
@@ -59,6 +60,24 @@ public class GlobalExceptionHandler {
                 HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
         problem.setType(URI.create(TYPE_BASE + "domain-error"));
         problem.setTitle("Domain Rule Violation");
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+
+    /**
+     * Handles a resource named in the request that does not exist → 404 Not Found. Distinct from
+     * {@link DomainException} (422): 422 says the request was understood and refused on the
+     * resource's merits, which presumes the resource is there to have merits. Every service here
+     * already answered 404 from the read paths that map an empty {@link java.util.Optional}; this
+     * is what lets the write paths, which throw instead, give the same answer.
+     */
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ProblemDetail handleResourceNotFound(ResourceNotFoundException ex) {
+        log.debug("Resource not found: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setType(URI.create(TYPE_BASE + "not-found"));
+        problem.setTitle("Not Found");
         problem.setProperty("timestamp", Instant.now());
         return problem;
     }

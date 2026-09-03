@@ -219,6 +219,34 @@ class TicketInventoryRestAdapterResilienceTest {
         assertThat(thrown).isInstanceOf(OutboundServiceUnavailableException.class);
     }
 
+    /**
+     * ticket-inventory-service answers 404 when a showtime has no seat inventory at all. That is a
+     * definite answer about these seats from a healthy service -- the same category as the 422 --
+     * so it must reach the customer as a refusal rather than as this service having broken.
+     */
+    @Test
+    void aShowtimeWithNoInventoryIsARefusalNotAFailure() {
+        STUB.respondWith(404, "{\"detail\":\"SeatInventory not found for showtime: showtime-1\"}");
+
+        Throwable thrown = catchThrowable(
+                () -> ticketInventoryPort.reserveSeats("showtime-1", "booking-1", List.of("A1")));
+
+        assertThat(thrown).isInstanceOf(SeatReservationRejectedException.class);
+    }
+
+    /** ...and, like the 422, it must not count against a service that answered correctly. */
+    @Test
+    void aShowtimeWithNoInventoryDoesNotOpenTheCircuit() {
+        STUB.respondWith(404, "{\"detail\":\"SeatInventory not found for showtime: showtime-1\"}");
+
+        for (int i = 0; i < 6; i++) {
+            catchThrowable(() -> ticketInventoryPort.reserveSeats("showtime-1", "booking-1", List.of("A1")));
+        }
+
+        assertThat(circuitBreaker.getMetrics().getNumberOfFailedCalls()).isZero();
+        assertThat(circuitBreaker.getState()).isEqualTo(CircuitBreaker.State.CLOSED);
+    }
+
     /** Retry-exhausted 500s are the same story: no usable answer ever came back. */
     @Test
     void anInventoryThatKeepsFailingIsAlsoReportedAsUnavailable() {

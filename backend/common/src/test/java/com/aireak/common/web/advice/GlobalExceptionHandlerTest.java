@@ -3,6 +3,7 @@ package com.aireak.common.web.advice;
 import com.aireak.common.exception.DomainException;
 import com.aireak.common.exception.ForbiddenException;
 import com.aireak.common.exception.IdentityMismatchException;
+import com.aireak.common.exception.ResourceNotFoundException;
 import jakarta.validation.ConstraintViolationException;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -29,6 +30,21 @@ class GlobalExceptionHandlerTest {
         assertThat(problem.getStatus()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY.value());
         assertThat(problem.getDetail()).isEqualTo("bad state");
         assertThat(problem.getType().toString()).endsWith("domain-error");
+    }
+
+    /**
+     * A resource named in the URI that does not exist is 404, not the 422 it used to collect by
+     * being a DomainException. 422 says the request was understood and refused on its merits,
+     * which is a statement about a resource that exists.
+     */
+    @Test
+    void mapsResourceNotFoundTo404() {
+        ProblemDetail problem = handler.handleResourceNotFound(
+                new ResourceNotFoundException("Match not found: match-1"));
+
+        assertThat(problem.getStatus()).isEqualTo(HttpStatus.NOT_FOUND.value());
+        assertThat(problem.getDetail()).isEqualTo("Match not found: match-1");
+        assertThat(problem.getType().toString()).endsWith("not-found");
     }
 
     @Test
