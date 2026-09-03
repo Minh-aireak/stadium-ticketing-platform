@@ -36,12 +36,24 @@ const GIVE_UP_AFTER_MS = 11 * 60 * 1_000
 
 type ViewState = 'pending' | 'success' | 'failed'
 
+/**
+ * The booking is the order; the payment is one step inside it. So a cancelled booking is
+ * checked first and decides the answer on its own.
+ *
+ * <p>SUCCEEDED-payment-with-CANCELLED-booking is a real pairing, not a contradiction to be
+ * ignored: PAYMENT_SUCCEEDED arriving after the booking was already cancelled makes
+ * booking-service request an idempotent refund and leave the booking CANCELLED (see
+ * BookingOrchestrationService#confirmBooking). Checking the payment first told that customer
+ * "Thanh toán thành công! Vé điện tử của bạn đã sẵn sàng trong tài khoản" about an order that
+ * had been cancelled and was being refunded — and the page then stopped polling, because a
+ * non-pending view ends the schedule, so the wrong answer was also the final one.
+ */
 function resolveView(
   booking: BookingStatusResponse | null,
   payment: PaymentStatusResponse | null,
 ): ViewState {
-  if (payment?.status === 'SUCCEEDED' || booking?.status === 'CONFIRMED') return 'success'
-  if (payment?.status === 'FAILED' || booking?.status === 'CANCELLED') return 'failed'
+  if (booking?.status === 'CANCELLED' || payment?.status === 'FAILED') return 'failed'
+  if (booking?.status === 'CONFIRMED' || payment?.status === 'SUCCEEDED') return 'success'
   return 'pending'
 }
 
