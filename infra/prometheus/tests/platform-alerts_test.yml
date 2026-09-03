@@ -10,11 +10,21 @@
 #     -v "$PWD/infra/prometheus/tests:/tests:ro" \
 #     prom/prometheus:v3.13.2 test rules /tests/platform-alerts_test.yml
 #
-# Only BulkheadNearExhaustion is covered, because it is the only rule here whose
-# expression divides two separate metrics: that division silently produces an
-# empty vector — an alert that can never fire — if the two ever stop sharing a
-# label set. The healthy bulkhead in the fixture is what pins that down. The
-# other rules are single-series thresholds with nothing comparable to get wrong.
+# Two rules are covered, both for the same reason: each can silently evaluate to
+# an empty vector — an alert that can never fire — without anything looking wrong.
+#
+# BulkheadNearExhaustion divides two separate metrics, and that division yields
+# nothing at all if the two ever stop sharing a label set. The healthy bulkhead in
+# the fixture is what pins that down.
+#
+# KafkaConsumerLagGrowing names a metric that has to come from outside the
+# application: it read kafka_consumer_fetch_manager_records_lag until it was found
+# that nothing in the stack publishes that series (see the rule's own comment), so
+# it had been dead since it was written. The fixture uses kafka-exporter's real
+# label set — consumergroup/topic/partition — so a future edit back to a
+# client-side metric name fails here instead of in production silence.
+#
+# The other rules are single-series thresholds with nothing comparable to get wrong.
 # ============================================================================
 
 rule_files:
@@ -54,3 +64,32 @@ tests:
               summary: "match-catalog-service bulkhead catalog-read is nearly out of permits"
               description: >-
                 Fewer than 10% of the permits on catalog-read have been free for 5 minutes, so match-catalog-service is shedding requests with 503 (BulkheadFullException). A bulkhead guards more than the call that filled it: catalog-read is held by the Elasticsearch search but also gates getMatch, getShowtime and the no-query browse, and seat-inventory is held by the catalog lookup but also gates every hold and reserve. So the endpoint users complain about is usually not the one that is actually stuck -- look for a slow dependency behind it first.
+
+  # A consumer group genuinely stuck behind a topic, next to a healthy group in the
+  # same scrape. The healthy one must stay quiet, and so must the partition the
+  # group has never committed an offset for — kafka-exporter reports that as -1,
+  # and a -1 must never read as "caught up" nor drag the comparison around.
+  - interval: 1m
+    input_series:
+      - series: 'kafka_consumergroup_lag{consumergroup="notification-service",topic="booking.booking.confirmed",partition="0"}'
+        values: "5000x15"
+      - series: 'kafka_consumergroup_lag{consumergroup="booking-service",topic="payment.payment.succeeded",partition="0"}'
+        values: "12x15"
+      - series: 'kafka_consumergroup_lag{consumergroup="catalog-service",topic="inventory.seats.sold",partition="0"}'
+        values: "-1x15"
+    alert_rule_test:
+      # Below the rule's `for: 10m`, so a short burst of backlog stays silent.
+      - eval_time: 9m
+        alertname: KafkaConsumerLagGrowing
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: KafkaConsumerLagGrowing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              consumergroup: notification-service
+              topic: booking.booking.confirmed
+            exp_annotations:
+              summary: "notification-service is falling behind on booking.booking.confirmed"
+              description: >-
+                Consumer group notification-service has held a backlog above 1000 records on booking.booking.confirmed for 10 minutes. Bookings may be confirming without their side effects (emails, inventory release) landing.

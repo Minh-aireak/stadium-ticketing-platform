@@ -42,17 +42,31 @@ groups:
   # succeeding while nothing downstream reacts. These are the alerts that surface that.
   - name: messaging
     rules:
+      # kafka_consumergroup_lag comes from kafka-exporter (see prometheus.yml's kafka-exporter
+      # job), which is the only thing in this stack that publishes consumer lag at all. This
+      # used to read kafka_consumer_fetch_manager_records_lag — the client-side Micrometer
+      # metric — which nothing exports: binding it needs a MicrometerConsumerListener on the
+      # ConsumerFactory, and AbstractKafkaConsumerConfig builds its own DefaultKafkaConsumerFactory
+      # with no listeners (Spring Boot's own auto-configured factory, which would have carried
+      # one, backs off as soon as a ConsumerFactory bean is declared). The alert therefore
+      # evaluated an empty vector and could never fire, which is the worst way for an alert about
+      # silent failure to fail. The Kafka dashboard was already reading the exporter's metric.
+      #
+      # max by (consumergroup, topic), not sum: group+topic is the actionable unit, every topic
+      # here has exactly one partition by design, and the exporter reports -1 for a partition the
+      # group has never committed an offset for — max keeps that reading quiet instead of letting
+      # it drag a sum around.
       - alert: KafkaConsumerLagGrowing
-        expr: sum by (job, client_id) (kafka_consumer_fetch_manager_records_lag) > 1000
+        expr: max by (consumergroup, topic) (kafka_consumergroup_lag) > 1000
         for: 10m
         labels:
           severity: warning
         annotations:
-          summary: "{{ $labels.job }} is falling behind on Kafka"
+          summary: "{{ $labels.consumergroup }} is falling behind on {{ $labels.topic }}"
           description: >-
-            Consumer {{ $labels.client_id }} in {{ $labels.job }} has held a backlog above 1000
-            records for 10 minutes. Bookings may be confirming without their side effects
-            (emails, inventory release) landing.
+            Consumer group {{ $labels.consumergroup }} has held a backlog above 1000 records on
+            {{ $labels.topic }} for 10 minutes. Bookings may be confirming without their side
+            effects (emails, inventory release) landing.
 
       - alert: DeadLetterRecordsAppearing
         expr: increase(spring_kafka_listener_seconds_count{result="failure"}[15m]) > 0
