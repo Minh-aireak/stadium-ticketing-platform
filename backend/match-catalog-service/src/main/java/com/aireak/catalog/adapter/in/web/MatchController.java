@@ -17,6 +17,7 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -36,6 +37,14 @@ public class MatchController {
     private static final int MAX_PAGE_SIZE = 100;
     private static final int DEFAULT_PAGE_SIZE = 20;
     private static final String ROLE_ADMIN = "ADMIN";
+
+    // matches.home_team, away_team and competition are each VARCHAR(100) (V1__init_schema.sql),
+    // and CreateMatchRequest carried only @NotBlank. A longer name therefore travelled all the way
+    // to the INSERT, where Postgres answered "value too long for type character varying(100)" — a
+    // DataIntegrityViolationException raised at commit, which GlobalExceptionHandler can only
+    // report as 409 "The request conflicts with existing data". Bounding it here answers 400 and
+    // names the offending field instead.
+    private static final int MAX_NAME_LENGTH = 100;
 
     private final CreateMatchUseCase createMatchUseCase;
     private final AddShowtimeUseCase addShowtimeUseCase;
@@ -161,8 +170,9 @@ public class MatchController {
                 match.getCompetition(), match.getStatus().name(), match.getCreatedAt(), showtimes);
     }
 
-    record CreateMatchRequest(@NotBlank String homeTeam, @NotBlank String awayTeam,
-                              @NotBlank String competition) {}
+    record CreateMatchRequest(@NotBlank @Size(max = MAX_NAME_LENGTH) String homeTeam,
+                              @NotBlank @Size(max = MAX_NAME_LENGTH) String awayTeam,
+                              @NotBlank @Size(max = MAX_NAME_LENGTH) String competition) {}
     record CreateMatchResponse(String matchId) {}
     record AddShowtimeRequest(@NotNull Instant startTime, @NotBlank String stadiumId,
                               @NotNull @DecimalMin(value = "0.0", inclusive = false) BigDecimal basePrice,
