@@ -15,11 +15,16 @@ export function getErrorMessage(
     if (error.code === 'ERR_NETWORK') {
       return 'Không thể kết nối tới máy chủ. Vui lòng kiểm tra lại kết nối hoặc thử lại sau.'
     }
-    if (error.response?.status === 429) {
+    const detail: unknown = error.response?.data?.detail
+    const problemDetail = typeof detail === 'string' && detail.length > 0 ? detail : undefined
+    // The gateway's 429 is the shape described above and has no `detail` at all, so it still
+    // lands on the rate-limit sentence. A 429 that does carry one came through a service's
+    // GlobalExceptionHandler instead, and that sentence describes what actually happened —
+    // replacing it with "wait a few minutes" would explain something the caller never hit.
+    if (error.response?.status === 429 && problemDetail === undefined) {
       return formatRateLimitMessage(error.response)
     }
-    const detail = error.response?.data?.detail
-    if (typeof detail === 'string' && detail.length > 0) return appendCorrelationId(error, detail)
+    if (problemDetail !== undefined) return appendCorrelationId(error, problemDetail)
   }
   return appendCorrelationId(error, fallback)
 }
