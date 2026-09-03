@@ -23,8 +23,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * Exercises {@link RedissonSeatHoldAdapter} against a real Redis (Testcontainers) — the
  * confirmed-hold owner encoding (customerId + bookingId, see the adapter's class javadoc) that
  * backs {@link com.aireak.inventory.application.port.out.SeatHoldPort#isFreeOfHoldsByOtherOwners}
- * (CRIT-2-01: verifying a customer-token release actually owns the reservation) is exactly the
- * kind of string-format detail worth checking against real Redis rather than mocking.
+ * — the check that a customer-token release actually owns the reservation it is releasing — is
+ * exactly the kind of string-format detail worth checking against real Redis rather than mocking.
  */
 @Testcontainers
 class RedissonSeatHoldAdapterTest {

@@ -227,10 +227,10 @@ class SeatInventoryServiceTest {
         assertThat(published.getValue().get(0)).isInstanceOf(SeatsReleasedEvent.class);
     }
 
-    // CRIT-2-01: an internal-service-token release (no requestingCustomerId — see
-    // ReleaseSeatsCommand's 3-arg constructor, exercised by releaseRemovesHoldsAndPublishesEvent
-    // above) is trusted unconditionally and never calls isFreeOfHoldsByOtherOwners. A
-    // customer-token release must own the reservation it's releasing.
+    // An internal-service-token release (no requestingCustomerId — see ReleaseSeatsCommand's
+    // 3-arg constructor, exercised by releaseRemovesHoldsAndPublishesEvent above) is trusted
+    // unconditionally and never calls isFreeOfHoldsByOtherOwners. A customer-token release
+    // must own the reservation it is releasing.
     @Test
     void releaseWithCustomerTokenSucceedsWhenCallerOwnsTheReservation() {
         when(seatHoldPort.isFreeOfHoldsByOtherOwners(SHOWTIME_ID, SEAT_CODES, CUSTOMER_ID, BOOKING_ID))

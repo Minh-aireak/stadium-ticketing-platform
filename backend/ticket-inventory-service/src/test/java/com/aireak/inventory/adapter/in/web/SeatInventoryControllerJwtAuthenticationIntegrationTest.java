@@ -190,9 +190,9 @@ class SeatInventoryControllerJwtAuthenticationIntegrationTest {
                 .andExpect(status().isBadRequest());
     }
 
-    // CRIT-2-01: confirm is only ever called by TicketInventoryRestAdapter#confirmReservation
-    // with a minted internal-service token (never a forwarded customer token) — a customer
-    // calling it directly would finalize a sale without ever paying.
+    // Confirm is only ever called by TicketInventoryRestAdapter#confirmReservation with a
+    // minted internal-service token, never a forwarded customer token — a customer calling
+    // it directly would finalize a sale without ever paying.
     @Test
     void confirmRejectsCustomerToken() throws Exception {
         mockMvc.perform(post("/api/v1/inventory/{showtimeId}/confirm", "showtime-1")
