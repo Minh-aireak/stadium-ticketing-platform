@@ -1,5 +1,6 @@
 package com.aireak.booking.adapter.out.client;
 
+import com.aireak.booking.application.port.out.OutboundServiceUnavailableException;
 import com.aireak.booking.application.port.out.SeatReservationRejectedException;
 import com.aireak.booking.application.port.out.TicketInventoryPort;
 import com.aireak.common.security.AuthenticatedUser;
@@ -144,17 +145,26 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
     }
 
     // Fallback: the saga compensates on any exception out of here, so what this chooses to throw
-    // decides only what the CUSTOMER is told -- see the two branches below.
+    // decides only what the CUSTOMER is told -- see the three branches below.
     private ReservedPrice reserveSeatsFallback(String showtimeId, String bookingId,
                                        List<String> seatCodes, Throwable t) {
-        // A refusal travels unchanged. The saga compensates either way, but only this one may
-        // reach the customer as a 422 saying what happened -- GlobalExceptionHandler maps a
-        // DomainException to 422 and everything else to a 500 "An unexpected error occurred".
+        // A refusal travels unchanged: 422, naming which seats and why.
         if (t instanceof SeatReservationRejectedException refused) {
             throw refused;
         }
+        // Any other 4xx is inventory answering about THIS request -- booking sent something it
+        // will never accept. Waiting and retrying cannot help, so it must not be dressed up as a
+        // temporary outage; it stays a 500, which is the honest report of a bug on this side.
+        if (t instanceof HttpClientErrorException clientError) {
+            throw clientError;
+        }
+        // Everything left is "no usable answer came back": timeout, reset, open circuit, full
+        // bulkhead, or a 5xx that outlived the retries. This used to be a bare RuntimeException,
+        // which GlobalExceptionHandler can only report as 500 "An unexpected error occurred" --
+        // telling a customer the platform is broken when a dependency is merely down. The named
+        // type is what lets BookingController answer 503 with a Retry-After instead.
         log.error("Circuit open / retry exhausted for reserveSeats: {}", t.getMessage());
-        throw new RuntimeException("Ticket inventory service unavailable", t);
+        throw new OutboundServiceUnavailableException("Ticket inventory service unavailable", t);
     }
 
     private void releaseSeatsFallback(String showtimeId, String bookingId,

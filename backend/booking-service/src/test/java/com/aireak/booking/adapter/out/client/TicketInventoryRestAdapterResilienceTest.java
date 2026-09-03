@@ -1,5 +1,6 @@
 package com.aireak.booking.adapter.out.client;
 
+import com.aireak.booking.application.port.out.OutboundServiceUnavailableException;
 import com.aireak.booking.application.port.out.SeatReservationRejectedException;
 import com.aireak.booking.application.port.out.TicketInventoryPort;
 import com.sun.net.httpserver.HttpServer;
@@ -199,6 +200,49 @@ class TicketInventoryRestAdapterResilienceTest {
         catchThrowable(() -> ticketInventoryPort.reserveSeats("showtime-1", "booking-1", List.of("A1")));
 
         assertThat(circuitBreaker.getMetrics().getNumberOfFailedCalls()).isEqualTo(1);
+    }
+
+    /**
+     * The counterpart to {@link #aSeatSomeoneElseTookKeepsSayingSo}. That one fixed the 422
+     * branch; every other failure still left here as a bare {@code RuntimeException}, a type
+     * nothing can map, so {@code GlobalExceptionHandler#handleGenericException} answered the
+     * customer 500 "An unexpected error occurred" whenever ticket-inventory-service was simply
+     * unreachable. A typed exception is what lets BookingController answer 503 instead.
+     */
+    @Test
+    void anUnreachableInventoryIsReportedAsUnavailableNotAsABareRuntimeException() {
+        STUB.respondWith(503, "{\"detail\":\"Inventory is shedding load\"}");
+
+        Throwable thrown = catchThrowable(
+                () -> ticketInventoryPort.reserveSeats("showtime-1", "booking-1", List.of("A1")));
+
+        assertThat(thrown).isInstanceOf(OutboundServiceUnavailableException.class);
+    }
+
+    /** Retry-exhausted 500s are the same story: no usable answer ever came back. */
+    @Test
+    void anInventoryThatKeepsFailingIsAlsoReportedAsUnavailable() {
+        STUB.respondWith(500, "{\"detail\":\"boom\"}");
+
+        Throwable thrown = catchThrowable(
+                () -> ticketInventoryPort.reserveSeats("showtime-1", "booking-1", List.of("A1")));
+
+        assertThat(thrown).isInstanceOf(OutboundServiceUnavailableException.class);
+    }
+
+    /**
+     * ...but a 4xx that is not the 422 refusal is a definite answer about THIS request: booking
+     * sent something inventory will never accept. Retrying later cannot help, so it must not be
+     * dressed up as a temporary outage the customer is invited to wait out.
+     */
+    @Test
+    void aMalformedRequestIsNotDressedUpAsAnOutage() {
+        STUB.respondWith(400, "{\"detail\":\"seatCodes must not be empty\"}");
+
+        Throwable thrown = catchThrowable(
+                () -> ticketInventoryPort.reserveSeats("showtime-1", "booking-1", List.of("A1")));
+
+        assertThat(thrown).isNotInstanceOf(OutboundServiceUnavailableException.class);
     }
 
     /** Minimal stand-in for ticket-inventory-service: answers everything with one canned status. */

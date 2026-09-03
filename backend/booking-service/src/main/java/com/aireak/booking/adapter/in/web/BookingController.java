@@ -4,6 +4,7 @@ import com.aireak.booking.application.port.in.CreateBookingUseCase;
 import com.aireak.booking.application.port.in.GetBookingUseCase;
 import com.aireak.booking.application.port.in.ListBookingsUseCase;
 import com.aireak.booking.application.port.in.dto.BookingCreationResult;
+import com.aireak.booking.application.port.out.OutboundServiceUnavailableException;
 import com.aireak.booking.application.service.DuplicateRequestInProgressException;
 import com.aireak.booking.domain.model.Booking;
 import com.aireak.common.exception.IdentityMismatchException;
@@ -15,16 +16,20 @@ import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.HttpServerErrorException;
 
 import java.math.BigDecimal;
 import java.net.URI;
 import java.time.Instant;
 import java.util.List;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/v1/bookings")
 @RequiredArgsConstructor
@@ -41,6 +46,8 @@ public class BookingController {
     // 400 saying so, instead of letting it become a "value too long" at commit that
     // GlobalExceptionHandler can only report as 409 "The request conflicts with existing data".
     private static final int MAX_IDEMPOTENCY_KEY_LENGTH = 200;
+
+    private static final String RETRY_AFTER_SECONDS = "1";
 
     private static final int MIN_PAGE_SIZE = 1;
     private static final int MAX_PAGE_SIZE = 100;
@@ -208,6 +215,42 @@ public class BookingController {
                                         BigDecimal amount, String currency, String status, Instant createdAt) {}
 
     public record BookingListResponse(List<BookingSummaryResponse> items, long totalElements, int page, int size) {}
+
+    /**
+     * A dependency this booking needs was unreachable, or said so itself → 503 Service Unavailable
+     * with a Retry-After, not the 500 both of these used to collect from
+     * {@code GlobalExceptionHandler}'s catch-all.
+     *
+     * <p>Two types, because there are two ways to learn it.
+     * {@link OutboundServiceUnavailableException} is what both outbound adapters' fallbacks raise
+     * when no usable answer came back at all — timeout, reset, open circuit, full bulkhead,
+     * retries exhausted. {@code HttpServerErrorException.ServiceUnavailable} is a downstream that
+     * answered 503 on its own: payment-service or ticket-inventory-service shedding load, or
+     * inventory reporting that it could not reach match-catalog-service.
+     * {@code initiatePaymentFallback} rethrows an {@code HttpStatusCodeException} unchanged, so it
+     * arrives here as itself.
+     *
+     * <p>Deliberately narrow. A downstream 500 is not covered: that is not a temporary condition
+     * the caller should be invited to wait out, and it has to keep reading as this platform
+     * having failed. Nor is any 4xx, which is a definite answer about this particular request.
+     *
+     * <p>Logs the throwable because this is the last place that still holds one — the adapters'
+     * fallbacks and the saga both log {@code getMessage()} only, so taking these exceptions off
+     * {@code handleGenericException} would otherwise leave an outage with no stack trace in ELK.
+     */
+    @ExceptionHandler({OutboundServiceUnavailableException.class,
+            HttpServerErrorException.ServiceUnavailable.class})
+    public ResponseEntity<ProblemDetail> handleDownstreamUnavailable(Exception ex) {
+        log.error("A service this booking needs is unavailable", ex);
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
+                "A service this booking needs is temporarily unavailable");
+        problem.setType(URI.create("https://aireak.com/errors/service-unavailable"));
+        problem.setTitle("Service Unavailable");
+        problem.setProperty("timestamp", Instant.now());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, RETRY_AFTER_SECONDS)
+                .body(problem);
+    }
 
     // Handles duplicate in-flight requests with 409 Conflict
     @ExceptionHandler(DuplicateRequestInProgressException.class)
