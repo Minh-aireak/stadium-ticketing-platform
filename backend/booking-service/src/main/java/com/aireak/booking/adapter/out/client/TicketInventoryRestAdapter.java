@@ -1,5 +1,6 @@
 package com.aireak.booking.adapter.out.client;
 
+import com.aireak.booking.application.port.out.InventoryConfirmationRefusedException;
 import com.aireak.booking.application.port.out.OutboundServiceUnavailableException;
 import com.aireak.booking.application.port.out.SeatReservationRejectedException;
 import com.aireak.booking.application.port.out.TicketInventoryPort;
@@ -53,12 +54,17 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
     private String baseUrl;
 
     // The two statuses ticket-inventory-service uses to say it will not take these seats:
-    //   422 — SeatsNotAvailableException / ShowtimeBookingClosedException, DomainExceptions that
+    //   422 — SeatsNotAvailableException / ShowtimeBookingClosedException on the reserve path,
+    //         SeatAlreadySoldException on the confirm path. DomainExceptions, which
     //         GlobalExceptionHandler maps there.
     //   404 — SeatInventoryNotFoundException: the showtime has no seat inventory at all.
     // Both are the service answering about these seats, not the service failing, so both become a
-    // SeatReservationRejectedException: retrying cannot change either, and neither may count
-    // against a circuit breaker protecting us from a service that is in fact healthy.
+    // named refusal — SeatReservationRejectedException before payment,
+    // InventoryConfirmationRefusedException after it — rather than something that looks like an
+    // outage: retrying cannot change either, and neither may count against a circuit breaker
+    // protecting us from a service that is in fact healthy. The two types are separate because
+    // what the saga does with the answer is: before payment it tells the customer, after payment
+    // it has to record a booking only a human can now resolve.
     private static final Set<Integer> SEATS_REFUSED = Set.of(404, 422);
 
     @Override
@@ -111,15 +117,36 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
     @Retry(name = "ticket-inventory", fallbackMethod = "confirmReservationFallback")
     public void confirmReservation(String showtimeId, String bookingId, List<String> seatCodes) {
         log.debug("Confirming reservation: showtime={}, booking={}", showtimeId, bookingId);
-        // Always the internal service token: confirmReservation only ever runs from
-        // PaymentResultConsumer (Kafka listener thread) or InventoryConfirmationReconciler
-        // (scheduled thread) — never inside the original caller's HTTP request.
-        restClient.post()
-                .uri(baseUrl + "/api/v1/inventory/{showtimeId}/confirm", showtimeId)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + internalServiceTokenProvider.mintServiceToken())
-                .body(new ReservationRequest(bookingId, seatCodes))
-                .retrieve()
-                .toBodilessEntity();
+        try {
+            // Always the internal service token: confirmReservation only ever runs from
+            // PaymentResultConsumer (Kafka listener thread) or InventoryConfirmationReconciler
+            // (scheduled thread) — never inside the original caller's HTTP request.
+            restClient.post()
+                    .uri(baseUrl + "/api/v1/inventory/{showtimeId}/confirm", showtimeId)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + internalServiceTokenProvider.mintServiceToken())
+                    .body(new ReservationRequest(bookingId, seatCodes))
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (HttpClientErrorException e) {
+            // The same two statuses reserveSeats refuses on, meaning the same thing one step
+            // later: these seats are not this booking's. 404 is a showtime with no inventory at
+            // all; 422 is SeatAlreadySoldException — the hold lapsed and somebody else bought the
+            // seat while this confirm was failing. Every other 4xx (403 on a misconfigured
+            // internal token, 400 on a request shape that drifted) is left alone on purpose: it is
+            // fixable without abandoning a booking that has already been paid for.
+            //
+            // Converted HERE and not in confirmReservationFallback, deliberately. The fallback
+            // hangs off @Retry and so runs outside the circuit-breaker aspect; a type it
+            // introduces is invisible to the breaker, which would go on counting the raw 4xx.
+            // InventoryConfirmationReconciler re-asks every unresolved booking on a fixed
+            // schedule, so refusals arrive in batches large enough to open a breaker that also
+            // guards reserveSeats — taking the buy path down over bookings already lost. Same
+            // placement, and the same reason, as reserveSeats' own conversion above.
+            if (!SEATS_REFUSED.contains(e.getStatusCode().value())) {
+                throw e;
+            }
+            throw new InventoryConfirmationRefusedException(refusalDetail(e), e);
+        }
     }
 
     /**
@@ -183,12 +210,27 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
     // can tell the call failed and leave inventoryConfirmed=false — InventoryConfirmationReconciler
     // is the actual backstop; without a signal here it would never know to retry, and the Redis
     // hold would just expire via TTL despite payment having succeeded.
+    //
+    // WHICH failure it was matters as much as that there was one, and until this method
+    // distinguished them it did not survive: a permanent refusal and a service that was merely
+    // restarting both left here as the same bare RuntimeException carrying the same words, so the
+    // saga left both for a reconciler that re-asked the permanent one every five minutes for the
+    // life of the row.
     private void confirmReservationFallback(String showtimeId, String bookingId,
                                              List<String> seatCodes, Throwable t) {
+        // Travels unchanged, and is already logged by whoever records it — see
+        // BookingOrchestrationService#recordInventorySaleRefused, which is the only caller that
+        // can say what happens to the booking next.
+        if (t instanceof InventoryConfirmationRefusedException refused) {
+            throw refused;
+        }
         log.error("Failed to confirm reservation after payment success — left for reconciliation: " +
                         "showtime={}, booking={}, seats={}: {}",
                 showtimeId, bookingId, seatCodes, t.getMessage());
-        throw new RuntimeException("Ticket inventory service unavailable for confirmReservation", t);
+        // Named rather than bare for the same reason reserveSeatsFallback's is, one step earlier:
+        // a type nothing can tell apart is a failure nothing can act on differently.
+        throw new OutboundServiceUnavailableException(
+                "Ticket inventory service unavailable for confirmReservation", t);
     }
 
     record ReservationRequest(String bookingId, List<String> seatCodes) {}

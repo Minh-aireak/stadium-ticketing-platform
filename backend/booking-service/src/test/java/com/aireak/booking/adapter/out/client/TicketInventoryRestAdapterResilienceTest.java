@@ -64,6 +64,7 @@ import static org.mockito.Mockito.when;
         "resilience4j.circuitbreaker.instances.ticket-inventory.permittedNumberOfCallsInHalfOpenState=3",
         "resilience4j.circuitbreaker.instances.ticket-inventory.ignoreExceptions[0]=io.github.resilience4j.bulkhead.BulkheadFullException",
         "resilience4j.circuitbreaker.instances.ticket-inventory.ignoreExceptions[1]=com.aireak.booking.application.port.out.SeatReservationRejectedException",
+        "resilience4j.circuitbreaker.instances.ticket-inventory.ignoreExceptions[2]=com.aireak.booking.application.port.out.InventoryConfirmationRefusedException",
         "resilience4j.bulkhead.instances.ticket-inventory.maxConcurrentCalls=50",
         "resilience4j.bulkhead.instances.ticket-inventory.maxWaitDuration=0",
         "resilience4j.retry.instances.ticket-inventory.maxAttempts=3",
@@ -72,7 +73,8 @@ import static org.mockito.Mockito.when;
         "resilience4j.retry.instances.ticket-inventory.ignoreExceptions[1]=org.springframework.web.client.HttpServerErrorException$ServiceUnavailable",
         "resilience4j.retry.instances.ticket-inventory.ignoreExceptions[2]=io.github.resilience4j.bulkhead.BulkheadFullException",
         "resilience4j.retry.instances.ticket-inventory.ignoreExceptions[3]=io.github.resilience4j.circuitbreaker.CallNotPermittedException",
-        "resilience4j.retry.instances.ticket-inventory.ignoreExceptions[4]=com.aireak.booking.application.port.out.SeatReservationRejectedException"
+        "resilience4j.retry.instances.ticket-inventory.ignoreExceptions[4]=com.aireak.booking.application.port.out.SeatReservationRejectedException",
+        "resilience4j.retry.instances.ticket-inventory.ignoreExceptions[5]=com.aireak.booking.application.port.out.InventoryConfirmationRefusedException"
 })
 class TicketInventoryRestAdapterResilienceTest {
 
@@ -271,6 +273,143 @@ class TicketInventoryRestAdapterResilienceTest {
                 () -> ticketInventoryPort.reserveSeats("showtime-1", "booking-1", List.of("A1")));
 
         assertThat(thrown).isNotInstanceOf(OutboundServiceUnavailableException.class);
+    }
+
+    // ------------------------------------------------------------------
+    // confirmReservation — the call that runs AFTER the money has been taken.
+    //
+    // Everything above this line exercises reserveSeats or releaseSeats. confirmReservation had no
+    // coverage here at all, and it is the one whose answers a customer cannot be asked to retry:
+    // by the time it runs the booking is already CONFIRMED and the confirmation email is already
+    // on its way.
+    // ------------------------------------------------------------------
+
+    /**
+     * 422 at confirm time is {@code SeatAlreadySoldException} — the seat is SOLD to a DIFFERENT
+     * booking, which happens when this booking's Redis hold lapsed (TTL 10 minutes) between
+     * reserve and a confirm that had been failing, and another customer bought the seat in the
+     * gap. That answer can never change, however many times it is asked.
+     *
+     * <p>It used to arrive at the saga as {@code new RuntimeException("Ticket inventory service
+     * unavailable for confirmReservation")} — the same object, with the same words, as a 503 from
+     * a service that was merely restarting. {@code BookingOrchestrationService} cannot tell them
+     * apart, so it leaves {@code inventoryConfirmed} false for both and
+     * {@code InventoryConfirmationReconciler} re-asks every five minutes forever.
+     */
+    @Test
+    void aSeatSoldToAnotherBookingIsNotReportedAsAnOutage() {
+        STUB.respondWith(422, "{\"detail\":\"Seat A1 already sold to booking other-booking, "
+                + "cannot confirm for booking booking-1\"}");
+
+        Throwable thrown = catchThrowable(
+                () -> ticketInventoryPort.confirmReservation("showtime-1", "booking-1", List.of("A1")));
+
+        assertThat(thrown).isNotInstanceOf(OutboundServiceUnavailableException.class);
+        assertThat(thrown.getClass()).isNotEqualTo(RuntimeException.class);
+    }
+
+    /** ...and it has to keep naming the booking that actually owns the seat, for whoever unpicks it. */
+    @Test
+    void aSeatSoldToAnotherBookingKeepsSayingWhichBookingOwnsIt() {
+        STUB.respondWith(422, "{\"detail\":\"Seat A1 already sold to booking other-booking, "
+                + "cannot confirm for booking booking-1\"}");
+
+        Throwable thrown = catchThrowable(
+                () -> ticketInventoryPort.confirmReservation("showtime-1", "booking-1", List.of("A1")));
+
+        assertThat(thrown).hasMessageContaining("already sold to booking other-booking");
+    }
+
+    /**
+     * Green before and after: 422 is an {@code HttpClientErrorException} on the retry ignore list
+     * today, and must stay un-retried once it is converted to a type of its own — a conversion
+     * that happens in the method body, so the new type has to be on that list too or the answer
+     * gets asked for three times.
+     */
+    @Test
+    void aRefusedSaleIsAskedForOnceOnly() {
+        STUB.respondWith(422, "{\"detail\":\"Seat A1 already sold to booking other-booking, "
+                + "cannot confirm for booking booking-1\"}");
+
+        catchThrowable(() -> ticketInventoryPort.confirmReservation("showtime-1", "booking-1", List.of("A1")));
+
+        assertThat(STUB.requestCount()).isEqualTo(1);
+    }
+
+    /**
+     * The escalation, and the reason this refusal has to be converted inside the method body the
+     * way reserveSeats converts its own rather than in the fallback. The fallback runs OUTSIDE the
+     * circuit-breaker aspect, so whatever it throws is invisible to the breaker; what the breaker
+     * records is the raw {@code HttpClientErrorException}, and 422 is not on its ignore list.
+     *
+     * <p>{@code InventoryConfirmationReconciler} re-asks every stuck booking every five minutes,
+     * so a handful of permanently-refused bookings is a standing supply of breaker failures. Five
+     * of them are enough (minimumNumberOfCalls=5, failureRateThreshold=50) — and an open
+     * {@code ticket-inventory} breaker takes reserveSeats down with it, which is the whole buy
+     * path, for bookings that are already lost. Exactly the shape
+     * {@link #seatContentionDoesNotOpenTheCircuitOnAServiceThatAnsweredCorrectly} fixed on the
+     * reserve side, in the one place it was not fixed.
+     */
+    @Test
+    void aRefusedSaleDoesNotOpenTheCircuitOnAServiceThatAnsweredCorrectly() {
+        STUB.respondWith(422, "{\"detail\":\"Seat A1 already sold to booking other-booking, "
+                + "cannot confirm for booking booking-1\"}");
+
+        for (int i = 0; i < 6; i++) {
+            catchThrowable(() -> ticketInventoryPort.confirmReservation("showtime-1", "booking-1", List.of("A1")));
+        }
+
+        assertThat(circuitBreaker.getMetrics().getNumberOfFailedCalls()).isZero();
+        assertThat(circuitBreaker.getState()).isEqualTo(CircuitBreaker.State.CLOSED);
+    }
+
+    /**
+     * 404 at confirm time is {@code SeatInventoryNotFoundException}: the showtime has no seat
+     * inventory at all. Like the 422 it is a definite answer about these seats from a service that
+     * is working, so it must not be retried forever as though the service were down. Same pair as
+     * {@link #aShowtimeWithNoInventoryIsARefusalNotAFailure} on the reserve side.
+     */
+    @Test
+    void aShowtimeWithNoInventoryAtConfirmTimeIsARefusalNotAnOutage() {
+        STUB.respondWith(404, "{\"detail\":\"SeatInventory not found for showtime: showtime-1\"}");
+
+        Throwable thrown = catchThrowable(
+                () -> ticketInventoryPort.confirmReservation("showtime-1", "booking-1", List.of("A1")));
+
+        assertThat(thrown).isNotInstanceOf(OutboundServiceUnavailableException.class);
+        assertThat(thrown.getClass()).isNotEqualTo(RuntimeException.class);
+    }
+
+    /**
+     * The other half. A 4xx that is NOT one of those two — a 403 because the internal service
+     * token was misconfigured, a 400 because the request shape drifted — must stay retryable: it
+     * is fixable by an operator without abandoning a booking the customer has already paid for.
+     * Only "these seats are not yours" is permanent.
+     */
+    @Test
+    void aMisconfiguredConfirmIsStillTreatedAsSomethingThatMightRecover() {
+        STUB.respondWith(403, "{\"detail\":\"This operation is restricted to internal service calls\"}");
+
+        Throwable thrown = catchThrowable(
+                () -> ticketInventoryPort.confirmReservation("showtime-1", "booking-1", List.of("A1")));
+
+        assertThat(thrown).isInstanceOf(OutboundServiceUnavailableException.class);
+    }
+
+    /**
+     * And an unreachable inventory keeps the name the saga can act on, instead of the bare
+     * {@code RuntimeException} that made every failure of this call look identical — the same
+     * correction {@link #anUnreachableInventoryIsReportedAsUnavailableNotAsABareRuntimeException}
+     * made for reserveSeats.
+     */
+    @Test
+    void anUnreachableInventoryAtConfirmTimeIsReportedAsUnavailable() {
+        STUB.respondWith(500, "{\"detail\":\"boom\"}");
+
+        Throwable thrown = catchThrowable(
+                () -> ticketInventoryPort.confirmReservation("showtime-1", "booking-1", List.of("A1")));
+
+        assertThat(thrown).isInstanceOf(OutboundServiceUnavailableException.class);
     }
 
     /** Minimal stand-in for ticket-inventory-service: answers everything with one canned status. */

@@ -105,6 +105,11 @@ resilience4j:
           # failing. Contention for a seat is ordinary traffic on a hot match, and counting it
           # would let customers open this breaker on a healthy service just by racing each other.
           - com.aireak.booking.application.port.out.SeatReservationRejectedException
+          # The same answer one step later, at confirm time, and it matters more here:
+          # InventoryConfirmationReconciler re-asks every unresolved booking on a fixed schedule,
+          # so refusals arrive in batches. Counting them would let a handful of bookings that are
+          # already lost open the breaker that also guards reserveSeats -- the whole buy path.
+          - com.aireak.booking.application.port.out.InventoryConfirmationRefusedException
       payment:
         slidingWindowSize: 10
         minimumNumberOfCalls: 5
@@ -137,6 +142,10 @@ resilience4j:
           - io.github.resilience4j.circuitbreaker.CallNotPermittedException
           # Inventory refused these seats — the answer cannot change on a second ask.
           - com.aireak.booking.application.port.out.SeatReservationRejectedException
+          # Same, for the post-payment confirm. Required, not decorative: the raw 4xx above is
+          # never what leaves confirmReservation any more, so without this entry a refusal the
+          # service has already given a final answer to would be re-sent three times.
+          - com.aireak.booking.application.port.out.InventoryConfirmationRefusedException
       payment:
         maxAttempts: 3
         waitDuration: 500ms
