@@ -136,10 +136,12 @@ groups:
             Fewer than 10% of the permits on {{ $labels.name }} have been free for 5 minutes, so
             {{ $labels.job }} is shedding requests with 503 (BulkheadFullException). A bulkhead
             guards more than the call that filled it: catalog-read is held by the Elasticsearch
-            search but also gates getMatch, getShowtime and the no-query browse, and
-            seat-inventory is held by the catalog lookup but also gates every hold and reserve.
-            So the endpoint users complain about is usually not the one that is actually stuck --
-            look for a slow dependency behind it first.
+            search but also gates getMatch and the no-query browse, and seat-inventory is held by
+            the catalog lookup but also gates every hold and reserve. So the endpoint users
+            complain about is usually not the one that is actually stuck -- look for a slow
+            dependency behind it first. catalog-showtime is the exception and reads literally:
+            it wraps one call, the showtime lookup ticket-inventory-service makes before every
+            hold and reserve, so this firing on it means the buy path itself is being shed.
 
       - alert: JvmHeapPressure
         expr: >-

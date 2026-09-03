@@ -199,9 +199,22 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
                 .filter(m -> m.getStatus() != MatchStatus.DRAFT);
     }
 
+    /**
+     * On {@code catalog-showtime}, not {@code catalog-read}, because this is not a browse
+     * endpoint. It is the one call ticket-inventory-service's
+     * {@code ShowtimeCatalogRestAdapter#requireBookable} makes in front of every seat hold and
+     * every reservation, and that adapter has no cache for a positive answer — a rejection here
+     * reaches it as a 503, which it reports to the customer as a closed booking window.
+     *
+     * <p>Sharing browse's budget therefore meant anonymous, unauthenticated traffic could take
+     * the entire buy path down: browse floods first (it is the endpoint a flash sale hammers),
+     * exhausts the shared permits, and every attempt to actually buy a ticket is shed with it.
+     * The two now fail independently, which is the only arrangement where shedding browse is
+     * load-shedding rather than an outage.
+     */
     @Override
-    @Bulkhead(name = "catalog-read", type = Bulkhead.Type.SEMAPHORE)
-    @RateLimiter(name = "catalog-read")
+    @Bulkhead(name = "catalog-showtime", type = Bulkhead.Type.SEMAPHORE)
+    @RateLimiter(name = "catalog-showtime")
     public Optional<ShowtimeDetails> getShowtime(String showtimeId) {
         return matchRepository.findByShowtimeId(showtimeId)
                 .flatMap(match -> match.getShowtimes().stream()

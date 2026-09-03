@@ -48,6 +48,14 @@ import static org.mockito.Mockito.when;
  * <p>Runs against a minimal context holding just Resilience4j's aspects and the service under
  * test: the annotations only do anything through a proxy, so asserting on a plain {@code new
  * MatchCatalogService(...)} would pass no matter where the annotations sat.
+ *
+ * <p>{@code getShowtime} is checked against its own {@code catalog-showtime} instance rather than
+ * alongside browse. It is not a browse endpoint: it is the single lookup
+ * ticket-inventory-service's {@code ShowtimeCatalogRestAdapter#requireBookable} makes in front of
+ * every hold and every reserve, and it has no cache to fall back on for a positive answer. Metered
+ * out of the same budget as anonymous browse, a browse flood turned every buy attempt on the
+ * platform into a 503 from here, which inventory then reports to the customer as a closed booking
+ * window.
  */
 @SpringBootTest(classes = MatchCatalogServiceOverloadTest.OverloadTestConfig.class, properties = {
         // A single permit, so the test can hold the whole bulkhead itself without racing threads.
@@ -57,7 +65,14 @@ import static org.mockito.Mockito.when;
         // must never be what rejects here, or the test would pass for the wrong reason.
         "resilience4j.ratelimiter.instances.catalog-read.limit-for-period=1000000",
         "resilience4j.ratelimiter.instances.catalog-read.limit-refresh-period=1s",
-        "resilience4j.ratelimiter.instances.catalog-read.timeout-duration=0"
+        "resilience4j.ratelimiter.instances.catalog-read.timeout-duration=0",
+        // The buy path's own budget, left wide open here so this test can prove browse exhaustion
+        // does not reach it.
+        "resilience4j.bulkhead.instances.catalog-showtime.max-concurrent-calls=50",
+        "resilience4j.bulkhead.instances.catalog-showtime.max-wait-duration=0",
+        "resilience4j.ratelimiter.instances.catalog-showtime.limit-for-period=1000000",
+        "resilience4j.ratelimiter.instances.catalog-showtime.limit-refresh-period=1s",
+        "resilience4j.ratelimiter.instances.catalog-showtime.timeout-duration=0"
 })
 class MatchCatalogServiceOverloadTest {
 
@@ -104,11 +119,41 @@ class MatchCatalogServiceOverloadTest {
                 .isInstanceOf(BulkheadFullException.class);
         assertThatThrownBy(() -> getMatchUseCase.getMatch("match-1"))
                 .isInstanceOf(BulkheadFullException.class);
-        assertThatThrownBy(() -> getShowtimeUseCase.getShowtime("showtime-1"))
-                .isInstanceOf(BulkheadFullException.class);
 
         // Rejected before the call, not after: nothing downstream was touched.
         verify(matchRepository, org.mockito.Mockito.never()).findById(any());
+    }
+
+    /**
+     * The showtime lookup is what ticket-inventory-service calls before every hold and every
+     * reserve, so shedding it sheds the whole buy path. This assertion used to say the opposite —
+     * it listed {@code getShowtime} among the endpoints a full browse bulkhead rejects, pinning
+     * the coupling as intended behavior.
+     */
+    @Test
+    void theShowtimeLookupThatGatesBookingSurvivesABrowseFlood() {
+        assertThat(bulkhead.tryAcquirePermission()).isTrue();
+
+        assertThatCode(() -> getShowtimeUseCase.getShowtime("showtime-1"))
+                .doesNotThrowAnyException();
+
+        verify(matchRepository).findByShowtimeId("showtime-1");
+    }
+
+    @Test
+    void theShowtimeLookupIsStillShedWhenItsOwnBudgetIsExhausted() {
+        Bulkhead showtimeBulkhead = bulkheadRegistry.bulkhead("catalog-showtime");
+        for (int i = 0; i < 50; i++) {
+            assertThat(showtimeBulkhead.tryAcquirePermission()).isTrue();
+        }
+        try {
+            assertThatThrownBy(() -> getShowtimeUseCase.getShowtime("showtime-1"))
+                    .isInstanceOf(BulkheadFullException.class);
+        } finally {
+            for (int i = 0; i < 50; i++) {
+                showtimeBulkhead.releasePermission();
+            }
+        }
     }
 
     @Test

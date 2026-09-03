@@ -110,16 +110,32 @@ catalog:
 # enough that real browse traffic never sees it, low enough that a flood is cut off here rather
 # than in the JVM's heap. Both wait durations are 0 for the same reason as inventory's -- shed the
 # excess as a 503 immediately instead of turning the limiter into a second queue.
+#
+# catalog-showtime is a SEPARATE budget for GET /api/v1/showtimes/{id}, which is not browse at all:
+# it is the lookup ticket-inventory-service makes before every hold and every reserve, and it has no
+# cache to fall back on for a positive answer. On catalog-read it was metered against anonymous
+# browse traffic, so a browse flood -- the exact thing catalog-read exists to shed -- shed the whole
+# buy path with it, surfacing to customers as "booking closed". Sized above what inventory can even
+# generate (its own seat-inventory limiter allows 200/s x 2 instances of holds+reserves, one lookup
+# each) so catalog is never the binding constraint on buying a ticket; it is a runaway-client
+# backstop, not a shaper.
 resilience4j:
   bulkhead:
     instances:
       catalog-read:
         maxConcurrentCalls: 200
         maxWaitDuration: 0
+      catalog-showtime:
+        maxConcurrentCalls: 100
+        maxWaitDuration: 0
   ratelimiter:
     instances:
       catalog-read:
         limitForPeriod: 600
+        limitRefreshPeriod: 1s
+        timeoutDuration: 0
+      catalog-showtime:
+        limitForPeriod: 400
         limitRefreshPeriod: 1s
         timeoutDuration: 0
 
