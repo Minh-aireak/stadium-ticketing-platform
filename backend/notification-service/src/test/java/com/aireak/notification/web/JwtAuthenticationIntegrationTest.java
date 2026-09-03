@@ -25,15 +25,22 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * notification-service is a pure Kafka consumer with no business REST controller (only
- * actuator, which is excluded — see {@code jwt.excluded-paths} in application.yaml), so there's
- * no real endpoint to assert a 2xx/4xx against. Instead this confirms {@code
- * JwtAuthenticationFilter} (from common) intercepts every non-excluded path regardless: a
- * missing token is rejected with 401 before Spring MVC ever attempts routing, and a valid
- * token is let through to routing instead (whatever it then does with an unmapped path is
- * routing's concern, not this filter's — asserting "not 401" here is deliberately the only
- * claim being made). See {@code JwtAuthenticationFilterTest} in the common module for the
- * filter's own validation-logic coverage.
+ * Confirms {@code JwtAuthenticationFilter} (from common) runs ahead of Spring MVC's dispatch in
+ * this service — not merely that it sits somewhere on the chain.
+ *
+ * <p>The paths below map to no handler on purpose. {@code NotificationController} does exist and
+ * serves {@code GET /api/v1/notifications} and {@code PATCH /api/v1/notifications/{id}/read};
+ * {@code NotificationControllerJwtAuthenticationIntegrationTest} asserts real 200/404 responses
+ * against those. {@code /api/v1/notifications/anything} matches neither, which is what makes it
+ * useful here: an unauthenticated request answered 404 would prove the filter had let it reach
+ * dispatch, so being answered 401 instead is what pins the ordering. For the same reason a valid
+ * token is asserted only to be "not 401" — what routing does with a path it cannot map is
+ * routing's business, not this filter's.
+ *
+ * <p>Uses a bare {@code @WebMvcTest} rather than naming a controller, so the chain under test is
+ * the whole one. See {@code JwtAuthenticationFilterTest} in the common module for the filter's
+ * own validation-logic coverage, and {@code jwt.excluded-paths} in application.yaml for the
+ * actuator paths {@code excludedActuatorPathSkipsValidation} covers.
  */
 @WebMvcTest
 @TestPropertySource(properties = {
