@@ -25,9 +25,11 @@ describe('memoComponent', () => {
    * so `?? 'Component'` can never fire and the label degrades to the empty 'Memo()'.
    */
   it('still produces a readable name for an unnamed component', () => {
-    const Anonymous = (0, function () {
+    // Inside an array literal there is no binding for TypeScript or the engine to infer a
+    // name from, so this really does reach memoComponent with name === ''.
+    const [Anonymous] = [function () {
       return null
-    }) as ComponentType<object>
+    }] as ComponentType<object>[]
     expect(Anonymous.name).toBe('')
     expect(memoComponent(Anonymous).displayName).toBe('Memo(Component)')
   })
