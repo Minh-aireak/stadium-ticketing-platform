@@ -38,12 +38,18 @@ public class Booking {
     // Stays false when that best-effort call failed, so InventoryConfirmationReconciler can
     // find and retry exactly those bookings.
     private boolean inventoryConfirmed;
+    // True once ticket-inventory-service has given a FINAL refusal for these seats — they are
+    // SOLD to a different booking, or the showtime has no seat inventory at all. Distinct from
+    // "inventoryConfirmed is still false" (retry later) because retrying cannot change it: this
+    // is what takes the booking out of InventoryConfirmationReconciler's queue and into a gauge a
+    // human is alerted on. See InventoryConfirmationRefusedException.
+    private boolean inventorySaleRefused;
     private final List<Object> domainEvents = new ArrayList<>();
 
     private Booking(String bookingId, String customerId, String customerEmail, String showtimeId,
                     SeatSelection seatSelection, BookingAmount amount,
                     BookingStatus status, Instant createdAt, String idempotencyKey, Long version,
-                    boolean inventoryConfirmed) {
+                    boolean inventoryConfirmed, boolean inventorySaleRefused) {
         this.bookingId    = bookingId;
         this.customerId   = customerId;
         this.customerEmail = customerEmail;
@@ -55,6 +61,7 @@ public class Booking {
         this.idempotencyKey = idempotencyKey;
         this.version        = version;
         this.inventoryConfirmed = inventoryConfirmed;
+        this.inventorySaleRefused = inventorySaleRefused;
     }
 
     // Creates a new Booking in DRAFT state with invariant checks.
@@ -79,16 +86,17 @@ public class Booking {
         }
         String bookingId = UUID.randomUUID().toString();
         return new Booking(bookingId, customerId, customerEmail, showtimeId,
-                seatSelection, amount, BookingStatus.DRAFT, Instant.now(), idempotencyKey, null, false);
+                seatSelection, amount, BookingStatus.DRAFT, Instant.now(), idempotencyKey, null, false, false);
     }
 
     // Reconstitute from persistence — no events raised.
     public static Booking reconstitute(String bookingId, String customerId, String customerEmail, String showtimeId,
                                         SeatSelection seatSelection, BookingAmount amount,
                                         BookingStatus status, Instant createdAt,
-                                        String idempotencyKey, Long version, boolean inventoryConfirmed) {
+                                        String idempotencyKey, Long version, boolean inventoryConfirmed,
+                                        boolean inventorySaleRefused) {
         return new Booking(bookingId, customerId, customerEmail, showtimeId, seatSelection, amount, status, createdAt,
-                idempotencyKey, version, inventoryConfirmed);
+                idempotencyKey, version, inventoryConfirmed, inventorySaleRefused);
     }
 
     // Overwrites the placeholder amount recorded at draft-creation time with the authoritative
@@ -190,6 +198,19 @@ public class Booking {
         this.inventoryConfirmed = true;
     }
 
+    /**
+     * Records that ticket-inventory-service gave a FINAL refusal for these seats, so nothing
+     * retries the confirm again. The booking stays CONFIRMED: the customer paid, was told so, and
+     * that remains true — what is not true is that the seats are theirs, and no automated step
+     * can fix that. It leaves {@code inventoryConfirmed} false on purpose, because it never was.
+     *
+     * <p>Idempotent, like {@link #markInventoryConfirmed}: the same refusal can arrive twice if
+     * recording it failed the first time.
+     */
+    public void markInventorySaleRefused() {
+        this.inventorySaleRefused = true;
+    }
+
     // Accessors
     public String getBookingId()            { return bookingId; }
     public String getCustomerId()           { return customerId; }
@@ -202,6 +223,7 @@ public class Booking {
     public String getIdempotencyKey()       { return idempotencyKey; }
     public Long getVersion()                { return version; }
     public boolean isInventoryConfirmed()   { return inventoryConfirmed; }
+    public boolean isInventorySaleRefused() { return inventorySaleRefused; }
 
     public List<Object> pullDomainEvents() {
         List<Object> events = Collections.unmodifiableList(new ArrayList<>(domainEvents));

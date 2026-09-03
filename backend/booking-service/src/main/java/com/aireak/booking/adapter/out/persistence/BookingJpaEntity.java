@@ -54,6 +54,14 @@ public class BookingJpaEntity extends BaseAuditEntity {
     @Column(name = "inventory_confirmed", nullable = false)
     private boolean inventoryConfirmed;
 
+    // Final refusal from ticket-inventory-service: these seats are SOLD to another booking, or
+    // the showtime has no inventory at all. Takes the row out of
+    // InventoryConfirmationReconciler's query for good -- see V7 and
+    // InventoryConfirmationRefusedException. Rows written before V7 default to FALSE, which is
+    // right: none of them had ever been asked the question.
+    @Column(name = "inventory_sale_refused", nullable = false)
+    private boolean inventorySaleRefused;
+
     @Version
     @Column(name = "version")
     private Long version;

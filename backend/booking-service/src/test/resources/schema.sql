@@ -15,6 +15,7 @@ CREATE TABLE bookings (
     status VARCHAR(30) NOT NULL,
     idempotency_key VARCHAR(255),
     inventory_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
+    inventory_sale_refused BOOLEAN NOT NULL DEFAULT FALSE,
     version BIGINT,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL

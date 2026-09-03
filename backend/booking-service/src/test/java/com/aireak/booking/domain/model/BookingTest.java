@@ -57,7 +57,7 @@ class BookingTest {
         // reconstitute() must stay permissive where create() does not: rows persisted before the
         // check existed still have to load. Same split SeatSelection's javadoc sets out.
         Booking booking = Booking.reconstitute("booking-1", "customer-1", null, "showtime-1",
-                SEATS, AMOUNT, BookingStatus.DRAFT, Instant.now(), null, 0L, false);
+                SEATS, AMOUNT, BookingStatus.DRAFT, Instant.now(), null, 0L, false, false);
 
         assertThat(booking.getCustomerEmail()).isNull();
     }
@@ -303,7 +303,7 @@ class BookingTest {
         Instant createdAt = Instant.parse("2024-01-01T00:00:00Z");
 
         Booking booking = Booking.reconstitute("booking-1", "customer-1", "customer-1@example.com", "showtime-1",
-                SEATS, AMOUNT, BookingStatus.CONFIRMED, createdAt, "idem-1", 5L, true);
+                SEATS, AMOUNT, BookingStatus.CONFIRMED, createdAt, "idem-1", 5L, true, false);
 
         assertThat(booking.getVersion()).isEqualTo(5L);
         assertThat(booking.getStatus()).isEqualTo(BookingStatus.CONFIRMED);
@@ -322,7 +322,7 @@ class BookingTest {
     @Test
     void reconstituteKeepsAZeroVersionDistinctFromTheNullOfANeverSavedBooking() {
         Booking loaded = Booking.reconstitute("booking-1", "customer-1", "customer-1@example.com", "showtime-1",
-                SEATS, AMOUNT, BookingStatus.DRAFT, Instant.now(), null, 0L, false);
+                SEATS, AMOUNT, BookingStatus.DRAFT, Instant.now(), null, 0L, false, false);
 
         assertThat(loaded.getVersion()).isEqualTo(0L);
         assertThat(Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null)
@@ -343,5 +343,50 @@ class BookingTest {
         booking.markInventoryConfirmed();
 
         assertThat(booking.isInventoryConfirmed()).isTrue();
+    }
+
+    /**
+     * The opposite outcome of the same call, and it must not masquerade as the first one: a
+     * refused sale leaves inventoryConfirmed false, because the seats never were this booking's.
+     * The booking stays CONFIRMED -- the customer paid and has already been emailed a
+     * confirmation, and no automated step can honestly un-say that.
+     */
+    @Test
+    void markInventorySaleRefusedSetsItsOwnFlagWithoutClaimingTheSaleSucceeded() {
+        Booking booking = Booking.reconstitute("booking-1", "customer-1", "customer-1@example.com",
+                "showtime-1", SEATS, AMOUNT, BookingStatus.CONFIRMED, Instant.now(), null, 0L, false, false);
+
+        booking.markInventorySaleRefused();
+
+        assertThat(booking.isInventorySaleRefused()).isTrue();
+        assertThat(booking.isInventoryConfirmed()).isFalse();
+        assertThat(booking.getStatus()).isEqualTo(BookingStatus.CONFIRMED);
+    }
+
+    /** Idempotent, like markInventoryConfirmed: the same refusal can arrive twice. */
+    @Test
+    void markInventorySaleRefusedIsIdempotent() {
+        Booking booking = Booking.reconstitute("booking-1", "customer-1", "customer-1@example.com",
+                "showtime-1", SEATS, AMOUNT, BookingStatus.CONFIRMED, Instant.now(), null, 0L, false, false);
+
+        booking.markInventorySaleRefused();
+        booking.markInventorySaleRefused();
+
+        assertThat(booking.isInventorySaleRefused()).isTrue();
+    }
+
+    /**
+     * Round-trips through reconstitute(), which is the whole point of it being persisted: every
+     * save() rebuilds the JPA entity from the domain object, so a flag the domain object drops on
+     * the way back in is a flag the next save silently clears -- and the booking rejoins
+     * InventoryConfirmationReconciler's queue as though nothing had been decided.
+     */
+    @Test
+    void aRefusedSaleSurvivesReconstitute() {
+        Booking loaded = Booking.reconstitute("booking-1", "customer-1", "customer-1@example.com", "showtime-1",
+                SEATS, AMOUNT, BookingStatus.CONFIRMED, Instant.now(), "idem-1", 5L, false, true);
+
+        assertThat(loaded.isInventorySaleRefused()).isTrue();
+        assertThat(loaded.isInventoryConfirmed()).isFalse();
     }
 }

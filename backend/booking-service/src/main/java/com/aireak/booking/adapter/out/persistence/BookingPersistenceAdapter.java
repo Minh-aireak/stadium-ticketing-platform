@@ -40,7 +40,7 @@ public class BookingPersistenceAdapter implements BookingRepository {
     @Override
     public List<Booking> findConfirmedAwaitingInventoryConfirmation(Instant updatedBefore, int limit) {
         return jpaRepository
-                .findByStatusAndInventoryConfirmedFalseAndUpdatedAtBefore(
+                .findByStatusAndInventoryConfirmedFalseAndInventorySaleRefusedFalseAndUpdatedAtBefore(
                         BookingStatus.CONFIRMED, updatedBefore, Limit.of(limit))
                 .stream()
                 .map(this::toDomain)
@@ -63,6 +63,11 @@ public class BookingPersistenceAdapter implements BookingRepository {
                 .stream()
                 .map(this::toDomain)
                 .toList();
+    }
+
+    @Override
+    public long countInventorySaleRefused() {
+        return jpaRepository.countByInventorySaleRefusedTrue();
     }
 
     @Override
@@ -98,6 +103,7 @@ public class BookingPersistenceAdapter implements BookingRepository {
                 .status(booking.getStatus())
                 .idempotencyKey(booking.getIdempotencyKey())
                 .inventoryConfirmed(booking.isInventoryConfirmed())
+                .inventorySaleRefused(booking.isInventorySaleRefused())
                 .version(booking.getVersion())
                 .build();
     }
@@ -115,7 +121,8 @@ public class BookingPersistenceAdapter implements BookingRepository {
                 entity.getCreatedAt(),
                 entity.getIdempotencyKey(),
                 entity.getVersion(),
-                entity.isInventoryConfirmed()
+                entity.isInventoryConfirmed(),
+                entity.isInventorySaleRefused()
         );
     }
 }

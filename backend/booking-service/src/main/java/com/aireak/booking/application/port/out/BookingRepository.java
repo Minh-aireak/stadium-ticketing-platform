@@ -25,6 +25,16 @@ public interface BookingRepository {
     List<Booking> findConfirmedAwaitingInventoryConfirmation(Instant updatedBefore, int limit);
 
     /**
+     * How many bookings ticket-inventory-service has given a FINAL refusal for -- their seats are
+     * SOLD to a different booking, or the showtime has no inventory at all. These are paid,
+     * CONFIRMED bookings that no retry can resolve, so they are deliberately NOT in
+     * {@link #findConfirmedAwaitingInventoryConfirmation} above; this is what
+     * {@code InventoryConfirmationReconciler} publishes as {@code booking.inventory.sale.refused}
+     * so a human is actually told. Not paged: it is a count, and it should be zero.
+     */
+    long countInventorySaleRefused();
+
+    /**
      * PENDING_PAYMENT bookings last updated before {@code updatedBefore} — a payment result
      * ({@code PaymentSucceededEvent}/{@code PaymentFailedEvent}) was never received for them, or
      * the resulting Kafka consumption failed silently. Used by {@code BookingReconciliationJob}

@@ -105,6 +105,20 @@ class BookingSagaSteps {
         bookingRepository.save(booking);
     }
 
+    /**
+     * Records a seat sale ticket-inventory-service has refused for good, so nothing asks again.
+     * Its own transaction for the same reason every other step here has one, and separate from
+     * {@link #markInventoryConfirmed} because it is the opposite outcome of the same call: that
+     * one says the seats are the booking's, this one says they never will be. See
+     * {@code BookingOrchestrationService#recordInventorySaleRefused}.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markInventorySaleRefused(String bookingId) {
+        Booking booking = findOrThrow(bookingId);
+        booking.markInventorySaleRefused();
+        bookingRepository.save(booking);
+    }
+
     private void saveAndPublish(Booking booking) {
         bookingRepository.save(booking);
         eventPublisher.publishAll(booking.pullDomainEvents());

@@ -125,7 +125,7 @@ class BookingControllerJwtAuthenticationIntegrationTest {
         String someoneElsesAccountId = UUID.randomUUID().toString();
         Booking booking = Booking.reconstitute("booking-1", ownerAccountId, "owner@example.com", "showtime-1",
                 new SeatSelection(List.of("A1")), BookingAmount.of(new BigDecimal("50.00"), "USD"),
-                BookingStatus.PENDING_PAYMENT, Instant.now(), null, 0L, false);
+                BookingStatus.PENDING_PAYMENT, Instant.now(), null, 0L, false, false);
         when(getBookingUseCase.getBooking("booking-1")).thenReturn(Optional.of(booking));
 
         mockMvc.perform(get("/api/v1/bookings/{id}", "booking-1")
@@ -138,7 +138,7 @@ class BookingControllerJwtAuthenticationIntegrationTest {
         String ownerAccountId = UUID.randomUUID().toString();
         Booking booking = Booking.reconstitute("booking-1", ownerAccountId, "owner@example.com", "showtime-1",
                 new SeatSelection(List.of("A1")), BookingAmount.of(new BigDecimal("50.00"), "USD"),
-                BookingStatus.PENDING_PAYMENT, Instant.now(), null, 0L, false);
+                BookingStatus.PENDING_PAYMENT, Instant.now(), null, 0L, false, false);
         when(getBookingUseCase.getBooking("booking-1")).thenReturn(Optional.of(booking));
 
         mockMvc.perform(get("/api/v1/bookings/{id}", "booking-1")

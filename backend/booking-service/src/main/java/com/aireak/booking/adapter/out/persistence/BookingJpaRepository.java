@@ -13,8 +13,10 @@ import java.util.Optional;
 interface BookingJpaRepository extends JpaRepository<BookingJpaEntity, String> {
     Optional<BookingJpaEntity> findByIdempotencyKey(String idempotencyKey);
 
-    List<BookingJpaEntity> findByStatusAndInventoryConfirmedFalseAndUpdatedAtBefore(
+    List<BookingJpaEntity> findByStatusAndInventoryConfirmedFalseAndInventorySaleRefusedFalseAndUpdatedAtBefore(
             BookingStatus status, Instant updatedBefore, Limit limit);
+
+    long countByInventorySaleRefusedTrue();
 
     List<BookingJpaEntity> findByStatusAndUpdatedAtBefore(
             BookingStatus status, Instant updatedBefore, Limit limit);

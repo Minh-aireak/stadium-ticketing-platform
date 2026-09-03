@@ -4,6 +4,7 @@ import com.aireak.booking.application.port.in.dto.BookingCreationResult;
 import com.aireak.booking.application.port.out.BookingRepository;
 import com.aireak.booking.application.port.out.IdempotencyClaim;
 import com.aireak.booking.application.port.out.IdempotencyStore;
+import com.aireak.booking.application.port.out.InventoryConfirmationRefusedException;
 import com.aireak.booking.application.port.out.OutboundServiceUnavailableException;
 import com.aireak.booking.application.port.out.PaymentPort;
 import com.aireak.booking.application.port.out.TicketInventoryPort;
@@ -490,6 +491,52 @@ class BookingOrchestrationServiceTest {
             verify(sagaSteps).markConfirmed(BOOKING_ID);
             // Left false on failure so InventoryConfirmationReconciler picks it up later.
             verify(sagaSteps, never()).markInventoryConfirmed(anyString());
+            // ...but only a failure that might clear. A refusal takes the other branch below.
+            verify(sagaSteps, never()).markInventorySaleRefused(anyString());
+        }
+
+        /**
+         * The seat is SOLD to a different booking, so no number of retries can make it this
+         * booking's. Left as an ordinary failure it stayed in
+         * InventoryConfirmationReconciler's query forever: re-asked every five minutes, logged
+         * identically to a dependency having a bad afternoon, and permanently holding a slot in
+         * that job's capped batch.
+         */
+        @Test
+        void aRefusedSaleIsRecordedInsteadOfBeingLeftForTheReconciler() {
+            Booking pending = pendingPaymentBooking(BOOKING_ID);
+            when(sagaSteps.findOrThrow(BOOKING_ID)).thenReturn(pending);
+            doThrow(new InventoryConfirmationRefusedException(
+                    "Seat A1 already sold to booking other-booking, cannot confirm for booking " + BOOKING_ID, null))
+                    .when(ticketInventoryPort).confirmReservation(SHOWTIME_ID, BOOKING_ID, SEAT_CODES);
+
+            // Still must not throw: the booking is durably CONFIRMED either way.
+            service.confirmBooking(BOOKING_ID);
+
+            verify(sagaSteps).markConfirmed(BOOKING_ID);
+            verify(sagaSteps).markInventorySaleRefused(BOOKING_ID);
+            // Never claimed as confirmed, because it never was.
+            verify(sagaSteps, never()).markInventoryConfirmed(anyString());
+        }
+
+        /**
+         * And recording it is itself best-effort. If that write fails the booking stays in the
+         * reconciler's queue, gets refused again, and comes back here -- which is the right
+         * outcome. Letting it escape would fail the Kafka listener for a booking that is already
+         * durably CONFIRMED.
+         */
+        @Test
+        void aRefusalThatCannotBeRecordedIsStillNotAllowedToFailTheListener() {
+            Booking pending = pendingPaymentBooking(BOOKING_ID);
+            when(sagaSteps.findOrThrow(BOOKING_ID)).thenReturn(pending);
+            doThrow(new InventoryConfirmationRefusedException("Seat A1 already sold", null))
+                    .when(ticketInventoryPort).confirmReservation(SHOWTIME_ID, BOOKING_ID, SEAT_CODES);
+            doThrow(new RuntimeException("database is down"))
+                    .when(sagaSteps).markInventorySaleRefused(BOOKING_ID);
+
+            service.confirmBooking(BOOKING_ID);
+
+            verify(sagaSteps).markInventorySaleRefused(BOOKING_ID);
         }
     }
 
@@ -518,6 +565,27 @@ class BookingOrchestrationServiceTest {
 
             service.retryInventoryConfirmation(alreadyConfirmed);
 
+            verify(sagaSteps, never()).markInventoryConfirmed(anyString());
+            // A retry that failed for a reason that might clear stays in the queue.
+            verify(sagaSteps, never()).markInventorySaleRefused(anyString());
+        }
+
+        /**
+         * The reconciler is where a refusal is most likely to be seen, not confirmBooking: by the
+         * time this job runs the booking's Redis hold (TTL 10 minutes) has usually lapsed, which
+         * is exactly how another customer came to buy the seat. The retry has to be able to give
+         * up, or the job re-asks this booking for the life of the row.
+         */
+        @Test
+        void aRetryThatIsRefusedForGoodStopsBeingRetried() {
+            Booking alreadyConfirmed = confirmedBooking(BOOKING_ID);
+            doThrow(new InventoryConfirmationRefusedException(
+                    "Seat A1 already sold to booking other-booking, cannot confirm for booking " + BOOKING_ID, null))
+                    .when(ticketInventoryPort).confirmReservation(SHOWTIME_ID, BOOKING_ID, SEAT_CODES);
+
+            service.retryInventoryConfirmation(alreadyConfirmed);
+
+            verify(sagaSteps).markInventorySaleRefused(BOOKING_ID);
             verify(sagaSteps, never()).markInventoryConfirmed(anyString());
         }
     }
@@ -627,6 +695,6 @@ class BookingOrchestrationServiceTest {
     private static Booking reconstituted(String bookingId, BookingStatus status) {
         return Booking.reconstitute(bookingId, CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID,
                 new SeatSelection(SEAT_CODES), BookingAmount.of(AMOUNT, CURRENCY),
-                status, java.time.Instant.now(), null, 0L, false);
+                status, java.time.Instant.now(), null, 0L, false, false);
     }
 }

@@ -7,6 +7,7 @@ import com.aireak.booking.application.port.in.dto.BookingCreationResult;
 import com.aireak.booking.application.port.out.BookingRepository;
 import com.aireak.booking.application.port.out.IdempotencyClaim;
 import com.aireak.booking.application.port.out.IdempotencyStore;
+import com.aireak.booking.application.port.out.InventoryConfirmationRefusedException;
 import com.aireak.booking.application.port.out.PaymentPort;
 import com.aireak.booking.application.port.out.TicketInventoryPort;
 import com.aireak.booking.domain.model.Booking;
@@ -348,17 +349,58 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
     }
 
     // Best-effort: confirmReservation is called after the booking is already durably CONFIRMED,
-    // so a failure here must never undo that. On success, records inventoryConfirmed=true; on
-    // failure, logs and leaves it false so InventoryConfirmationReconciler retries later —
-    // the Redis hold otherwise just expires via TTL despite payment having succeeded (see
-    // TicketInventoryRestAdapter#confirmReservationFallback).
+    // so a failure here must never undo that. Three outcomes, not two. On success, records
+    // inventoryConfirmed=true. On a failure that might clear, logs and leaves it false so
+    // InventoryConfirmationReconciler retries later — the Redis hold otherwise just expires via
+    // TTL despite payment having succeeded (see TicketInventoryRestAdapter#confirmReservationFallback).
+    // On a refusal that never will, records that instead and stops — see recordInventorySaleRefused.
     private void confirmInventoryReservation(String bookingId, String showtimeId, List<String> seatCodes) {
         try {
             ticketInventoryPort.confirmReservation(showtimeId, bookingId, seatCodes);
             sagaSteps.markInventoryConfirmed(bookingId);
+        } catch (InventoryConfirmationRefusedException refused) {
+            recordInventorySaleRefused(bookingId, showtimeId, seatCodes, refused);
         } catch (Exception e) {
-            log.error("confirmReservation failed for booking {}; left for reconciliation: {}",
+            // Deliberately does not name confirmReservation: the try above covers
+            // markInventoryConfirmed too, so a database blip on the way to recording a call that
+            // actually succeeded used to be reported as ticket-inventory having failed. Either
+            // way the booking keeps inventoryConfirmed=false and the reconciler re-asks, which is
+            // safe -- confirmReservation is idempotent for a booking that already owns its seats.
+            log.error("Could not finalize the seat sale for booking {}; left for reconciliation: {}",
                     bookingId, e.getMessage());
+        }
+    }
+
+    /**
+     * ticket-inventory-service will never sell these seats to this booking. The usual handling --
+     * leave {@code inventoryConfirmed} false and let {@link
+     * com.aireak.booking.adapter.in.scheduling.InventoryConfirmationReconciler} retry -- is wrong
+     * here in a way that hides the problem rather than solving it: the answer cannot change, so
+     * the booking is re-asked every five minutes for the life of the row, indistinguishable in the
+     * logs from a dependency having a bad afternoon, and it permanently occupies a slot in that
+     * job's capped batch.
+     *
+     * <p>The booking stays CONFIRMED. The customer paid, and BookingConfirmedEvent went out with
+     * the same transaction as markConfirmed, so they have already been emailed a confirmation --
+     * none of which can be honestly un-said by an automated step. What CAN be done is stop
+     * pretending a retry will fix it and put it where somebody sees it, which is the same stance
+     * payment-service takes on the mirror-image failure (see {@code UnreconciledPaymentAlertJob}:
+     * "this needs a human, not a retry").
+     */
+    private void recordInventorySaleRefused(String bookingId, String showtimeId, List<String> seatCodes,
+                                            InventoryConfirmationRefusedException refused) {
+        log.error("ALERT: ticket-inventory-service will not sell seats {} to booking {} and never will " +
+                        "-- the booking is CONFIRMED and paid for, so it needs a refund or a reseat by hand: " +
+                        "showtime={}: {}",
+                seatCodes, bookingId, showtimeId, refused.getMessage());
+        try {
+            sagaSteps.markInventorySaleRefused(bookingId);
+        } catch (Exception e) {
+            // Left for the reconciler on purpose: it will re-ask, be refused again, and come back
+            // here. The alternative -- letting this escape -- would fail the Kafka listener for a
+            // booking that is already durably CONFIRMED.
+            log.error("Could not record the refused seat sale for booking {}; it stays in the " +
+                    "reconciler's queue until this succeeds: {}", bookingId, e.getMessage());
         }
     }
 
