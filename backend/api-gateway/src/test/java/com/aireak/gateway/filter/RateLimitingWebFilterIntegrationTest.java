@@ -130,9 +130,13 @@ class RateLimitingWebFilterIntegrationTest {
     void forwardedForAndSpoofedUserIdHeadersAreIgnoredOnPublicIpKeyedPolicy() {
         InetSocketAddress client = new InetSocketAddress("203.0.113.30", 33345);
 
-        // Same real remote address, different X-Forwarded-For and X-User-Id on every request —
-        // since LOGIN is IP-keyed and a public path, both headers must be ignored: the bucket
-        // is still exhausted after exactly 10 requests, proving neither header changes the key.
+        // Same real remote address, different X-Forwarded-For and X-User-Id on every request, and
+        // the bucket is still exhausted after exactly 10 — so neither header changed the key. The
+        // two are ignored for different reasons, and only one of them has to do with LOGIN:
+        // X-User-Id because this is a public path, where JwtAuthenticationWebFilter never sets it
+        // and this filter therefore refuses to trust it; X-Forwarded-For because 203.0.113.30 is
+        // not in gateway.trusted-proxies. From an address that IS trusted, XFF would decide the
+        // key — RateLimitingWebFilterTest covers both directions of that.
         for (int i = 0; i < 10; i++) {
             MockServerHttpRequest.BaseBuilder<?> builder = MockServerHttpRequest.post("/api/v1/auth/login")
                     .remoteAddress(client)

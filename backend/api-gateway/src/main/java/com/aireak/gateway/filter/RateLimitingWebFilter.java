@@ -50,10 +50,15 @@ import java.util.Map;
  * trace is the remaining-tokens header being {@code -1} (see its source). This filter treats
  * that as the fail-open signal: log a WARN and increment {@code gateway.ratelimit.redis.unavailable}.
  *
- * <p><b>Key trust:</b> only {@code ip:{clientIp}} (the raw socket remote address — this project
- * has no reverse proxy / trusted-proxy configuration anywhere, so {@code X-Forwarded-For} is
- * deliberately never read) or {@code user:{userId}} sourced from the gateway-verified JWT
- * {@code sub} claim (never the client-supplied {@code X-User-Id} header) are used as keys.
+ * <p><b>Key trust:</b> only {@code ip:{clientIp}} or {@code user:{userId}} are used as keys, and
+ * neither is taken from anything the caller can set for itself. The user id comes from the
+ * gateway-verified JWT {@code sub} claim, never the client-supplied {@code X-User-Id} header. The
+ * client IP is the socket remote address — unless that address is itself one of
+ * {@code gateway.trusted-proxies} (the load balancer or ingress in front of this gateway), in
+ * which case {@code X-Forwarded-For}/{@code Forwarded} is read for the address behind it, since
+ * otherwise every request arriving through the proxy would share one bucket. From any other
+ * remote address those headers are ignored outright, so a caller cannot spoof its own IP into a
+ * fresh bucket. Resolution lives in {@link com.aireak.gateway.util.TrustedProxyUtils}.
  *
  * <p>Migrated from JJWT 0.12.x to Nimbus JOSE+JWT. jjwt-jackson depended on
  * com.fasterxml.jackson (Jackson 2) which conflicts with Spring Boot 4.1's Jackson 3
