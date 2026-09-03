@@ -36,10 +36,31 @@
     Tag prepended to every request's X-Correlation-Id. Defaults to a timestamped value so
     repeated runs don't collide in Kibana.
 
-.PARAMETER CatalogSearchCount / CatalogNotFoundByIdCount / CatalogUnmappedRouteCount /
-           RegisterDuplicateCount / LoginUnknownEmailCount / LoginWrongPasswordCount
-    Per-scenario request counts. Defaults sum to 1000; override any of them to change the mix
-    or total volume.
+    Per-scenario request counts follow. Each needs its own .PARAMETER block: comment-based help
+    reads everything after the tag to end of line as the parameter NAME, so listing several on one
+    line documents a parameter that does not exist and leaves all six of the real ones blank in
+    Get-Help. The defaults below sum to 1000; override any of them to change the mix or the volume.
+
+.PARAMETER CatalogSearchCount
+    Successful catalog searches. Default 500 — the bulk of the run's volume.
+
+.PARAMETER CatalogNotFoundByIdCount
+    Lookups of a random match id, each logged as a 404 with no matching match. Default 100.
+
+.PARAMETER CatalogUnmappedRouteCount
+    Requests to a path with no route at all, a different 404 path through the handler. Default 50.
+
+.PARAMETER RegisterDuplicateCount
+    Registrations of an address that already exists, logging 422
+    EmailAlreadyRegisteredException. Default 100.
+
+.PARAMETER LoginUnknownEmailCount
+    Logins for an address with no account, logging 401 "no account for supplied email".
+    Default 125.
+
+.PARAMETER LoginWrongPasswordCount
+    Logins for an existing account with the wrong password, logging 401 "bad-password".
+    Default 125.
 
 .EXAMPLE
     ./elk-log-test.ps1

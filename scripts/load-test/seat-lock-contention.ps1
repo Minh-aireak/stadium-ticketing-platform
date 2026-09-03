@@ -45,6 +45,22 @@
     ticket-inventory-lb as published on the host. 8087, not 8083 -- that host port belongs to
     kafka-connect (see docker-compose.yaml).
 
+.PARAMETER IdentityUrl
+    identity-service as published on the host, used only for the login in step 1.
+
+.PARAMETER Email
+    Customer account the holds are placed as. Falls back to CONTENTION_TEST_EMAIL; the script
+    refuses to start without one, so this and -Password are effectively required.
+
+.PARAMETER Password
+    Password for -Email. Falls back to CONTENTION_TEST_PASSWORD. Prefer the environment
+    variable: a password passed as an argument lands in the shell's history.
+
+.PARAMETER SkipCleanup
+    Leaves the winner's hold in place instead of releasing it on the way out. Useful when the
+    next thing you want to look at is a seat that is genuinely held; note that the following
+    run then has to pick a different seat (omit -SeatCode and it will).
+
 .NOTES
     X-Upstream carries the container's IP:port rather than its name, since that is all nginx
     knows at that point. To map an address back to an instance:
