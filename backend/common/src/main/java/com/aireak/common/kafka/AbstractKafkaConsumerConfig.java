@@ -59,9 +59,9 @@ public abstract class AbstractKafkaConsumerConfig {
     /**
      * Explicit target type, not {@code new JacksonJsonDeserializer<>()}: the no-arg form has no
      * default type and falls back to reading the {@code __TypeId__} header — but these topics are
-     * populated by Debezium's outbox EventRouter (see {@code infra/debezium/*.json}), which
-     * forwards the outbox payload column as-is and never sets that header. Without a default type
-     * every real record throws {@code SerializationException("No type information in headers and
+     * populated by Debezium's outbox EventRouter (see {@code backend/<service>/infra/debezium/}),
+     * which forwards the outbox payload column as-is and never sets that header. Without a default
+     * type every real record throws {@code SerializationException("No type information in headers and
      * no default type provided")} and ends up on the dead-letter topic.
      *
      * <p>{@code EventEnvelope.payload} is generic (it erases to Object) and carries its own
