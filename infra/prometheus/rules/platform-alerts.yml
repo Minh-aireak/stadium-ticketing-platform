@@ -92,7 +92,12 @@ groups:
           description: >-
             A listener exhausted its retries and the record was republished to
             {{ $labels.topic }}. Nothing replays a dead-lettered record automatically — grep the
-            logs for "ALERT:" to find which one and why. This reads the broker's own end offset
+            logs for {{ $labels.topic }}, which every dead-letter consumer prints alongside the
+            offset and the exception that caused it. Most log that at ERROR behind an "ALERT:"
+            prefix; ticket-inventory-service's bookability-cache consumer logs at WARN without
+            one, because a stale cache costs a round trip rather than a booking. Where two
+            services consume the same topic each reports only its own consumer group's failures,
+            so exactly one line describes this record. This reads the broker's own end offset
             via kafka-exporter rather than the services' spring_kafka_listener timer, which
             counts every failed ATTEMPT and so fires on a blip the next retry clears, well
             before anything is actually dead-lettered.

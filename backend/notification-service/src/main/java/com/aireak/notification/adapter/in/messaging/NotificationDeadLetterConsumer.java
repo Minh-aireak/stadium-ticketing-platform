@@ -1,10 +1,13 @@
 package com.aireak.notification.adapter.in.messaging;
 
+import com.aireak.common.kafka.DeadLetterRecords;
 import com.aireak.common.kafka.KafkaTopics;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
+
+import java.util.Set;
 
 /**
  * Inbound Kafka adapter: alerts on records that the notification consumers could not process even
@@ -34,10 +37,22 @@ import org.springframework.stereotype.Component;
  * start, and {@code PAYMENT_REFUNDED} the moment the refund email was added to
  * {@code PaymentEventConsumer}. {@code NotificationDeadLetterCoverageTest} now compares the two
  * sides so the next addition cannot repeat it.
+ *
+ * <p>The list is also broader than this service's own failures. {@code payment.payment.succeeded}
+ * is consumed by booking-service too, and a {@code -dlt} topic belongs to a topic rather than to a
+ * service, so a booking-service failure on that topic arrives here as well — where "a customer
+ * email was never sent" is false, because this service sent the receipt from its own copy of that
+ * record. {@link DeadLetterRecords} reads the consumer group off the record to tell them apart;
+ * booking-service's own {@code PaymentResultDeadLetterConsumer} is what reports its half.
  */
 @Slf4j
 @Component
 public class NotificationDeadLetterConsumer {
+
+    private static final Set<String> OWN_CONSUMER_GROUPS = Set.of(
+            AccountEventConsumer.GROUP_ID,
+            BookingEventConsumer.GROUP_ID,
+            PaymentEventConsumer.GROUP_ID);
 
     @KafkaListener(
             topics = {
@@ -54,9 +69,19 @@ public class NotificationDeadLetterConsumer {
             containerFactory = "deadLetterKafkaListenerContainerFactory"
     )
     public void onDeadLetter(ConsumerRecord<String, String> record) {
+        if (!DeadLetterRecords.deadLetteredBy(record, OWN_CONSUMER_GROUPS)) {
+            log.info("Dead-lettered record belongs to consumer group {}, not this service's — the "
+                            + "service owning that group reports it: "
+                            + "topic={}, partition={}, offset={}, key={}",
+                    DeadLetterRecords.originalConsumerGroup(record),
+                    record.topic(), record.partition(), record.offset(), record.key());
+            return;
+        }
+
         log.error("ALERT: notification event landed on dead-letter topic after exhausting retries — "
                         + "a customer email was never sent and nothing will retry it: "
-                        + "topic={}, partition={}, offset={}, key={}, value={}",
+                        + "cause={}, topic={}, partition={}, offset={}, key={}, value={}",
+                DeadLetterRecords.failureCause(record),
                 record.topic(), record.partition(), record.offset(), record.key(), record.value());
     }
 }

@@ -1,5 +1,6 @@
 package com.aireak.catalog.adapter.in.messaging;
 
+import com.aireak.common.kafka.DeadLetterRecords;
 import com.aireak.common.kafka.KafkaTopics;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -34,7 +35,8 @@ public class SeatsSoldDeadLetterConsumer {
     public void onDeadLetter(ConsumerRecord<String, String> record) {
         log.error("ALERT: sold-seat event landed on dead-letter topic after exhausting retries — "
                         + "this showtime's available_seats is now permanently short by that sale and needs a "
-                        + "manual replay: topic={}, partition={}, offset={}, key={}, value={}",
+                        + "manual replay: cause={}, topic={}, partition={}, offset={}, key={}, value={}",
+                DeadLetterRecords.failureCause(record),
                 record.topic(), record.partition(), record.offset(), record.key(), record.value());
     }
 }

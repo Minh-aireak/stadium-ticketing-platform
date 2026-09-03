@@ -1,5 +1,6 @@
 package com.aireak.inventory.adapter.in.messaging;
 
+import com.aireak.common.kafka.DeadLetterRecords;
 import com.aireak.common.kafka.KafkaTopics;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -29,7 +30,9 @@ public class ShowtimeAddedDeadLetterConsumer {
     )
     public void onDeadLetter(ConsumerRecord<String, String> record) {
         log.error("ALERT: showtime event landed on dead-letter topic after exhausting retries — "
-                        + "seat map for showtime may not be generated: topic={}, partition={}, offset={}, key={}, value={}",
+                        + "seat map for showtime may not be generated: cause={}, topic={}, partition={}, "
+                        + "offset={}, key={}, value={}",
+                DeadLetterRecords.failureCause(record),
                 record.topic(), record.partition(), record.offset(), record.key(), record.value());
     }
 }

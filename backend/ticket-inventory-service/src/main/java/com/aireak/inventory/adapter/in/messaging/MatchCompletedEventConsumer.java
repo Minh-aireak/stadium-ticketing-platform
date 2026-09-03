@@ -23,7 +23,7 @@ public class MatchCompletedEventConsumer {
 
     @KafkaListener(
             topics = KafkaTopics.MATCH_COMPLETED,
-            groupId = "ticket-inventory-service-catalog",
+            groupId = MatchCancelledEventConsumer.GROUP_ID,
             containerFactory = "kafkaListenerContainerFactory"
     )
     public void consume(EventEnvelope<?> envelope) {

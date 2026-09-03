@@ -1,9 +1,10 @@
-package com.aireak.booking.adapter.in.messaging;
+package com.aireak.notification.adapter.in.messaging;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.aireak.common.kafka.KafkaTopics;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.junit.jupiter.api.AfterEach;
@@ -15,22 +16,22 @@ import org.springframework.kafka.support.KafkaHeaders;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
-import static com.aireak.common.kafka.KafkaTopics.PAYMENT_FAILED;
-import static com.aireak.common.kafka.KafkaTopics.PAYMENT_SUCCEEDED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.InstanceOfAssertFactories.STRING;
 
 /**
- * This consumer's only job is to log + alert (see class javadoc for why it doesn't retry) —
- * these tests confirm it never throws, regardless of whether the dead-lettered value happens to
- * be valid JSON or the raw bytes of a payload that failed to deserialize, and that it only
- * speaks for its own listener: {@code payment.payment.succeeded} is consumed by notification-service
- * too, so its one {@code -dlt} topic carries that service's failures here as well.
+ * Unit test for {@link NotificationDeadLetterConsumer}: it never throws on a dead-lettered
+ * record, and it only speaks for this service's own listeners.
+ *
+ * <p>{@code payment.payment.succeeded} is consumed by booking-service as well, and both services
+ * republish their failures to the one {@code payment.payment.succeeded-dlt} topic. A
+ * booking-service failure there means a booking is stuck, not that a customer email was lost —
+ * the receipt this service sends from its own copy of that record went out fine.
  */
-class PaymentResultDeadLetterConsumerTest {
+class NotificationDeadLetterConsumerTest {
 
-    private final PaymentResultDeadLetterConsumer consumer = new PaymentResultDeadLetterConsumer();
+    private final NotificationDeadLetterConsumer consumer = new NotificationDeadLetterConsumer();
 
     private ListAppender<ILoggingEvent> logged;
     private Logger consumerLogger;
@@ -39,7 +40,7 @@ class PaymentResultDeadLetterConsumerTest {
     void captureLogging() {
         logged = new ListAppender<>();
         logged.start();
-        consumerLogger = (Logger) LoggerFactory.getLogger(PaymentResultDeadLetterConsumer.class);
+        consumerLogger = (Logger) LoggerFactory.getLogger(NotificationDeadLetterConsumer.class);
         consumerLogger.addAppender(logged);
     }
 
@@ -50,40 +51,33 @@ class PaymentResultDeadLetterConsumerTest {
     }
 
     @Test
-    void doesNotThrowForADeadLetteredPaymentSucceededRecord() {
+    void doesNotThrowForADeadLetteredRecordWithUnparsableValue() {
         ConsumerRecord<String, String> record = new ConsumerRecord<>(
-                PAYMENT_SUCCEEDED + "-dlt", 0, 0L, "booking-1", "{\"eventType\":\"payment.payment.succeeded\"}");
+                KafkaTopics.ACCOUNT_REGISTERED + "-dlt", 0, 0L, "account-1", "not valid json");
 
         assertThatCode(() -> consumer.onDeadLetter(record)).doesNotThrowAnyException();
     }
 
     @Test
-    void doesNotThrowForADeadLetteredPaymentFailedRecordWithUnparsableValue() {
-        ConsumerRecord<String, String> record = new ConsumerRecord<>(
-                PAYMENT_FAILED + "-dlt", 0, 0L, "booking-2", "not valid json");
-
-        assertThatCode(() -> consumer.onDeadLetter(record)).doesNotThrowAnyException();
-    }
-
-    /**
-     * notification-service's receipt email failing on {@code payment.payment.succeeded} says
-     * nothing about the booking, which {@code PaymentResultConsumer} confirmed from its own copy
-     * of the same record. Reporting it as a booking stuck in PENDING_PAYMENT sends an operator to
-     * reconcile a saga that already completed.
-     */
-    @Test
-    void doesNotClaimABookingIsStuckWhenAnotherServicesListenerFailed() {
-        consumer.onDeadLetter(deadLetteredBy("notification-service-payment"));
+    void doesNotClaimAnEmailWasLostWhenAnotherServicesListenerFailed() {
+        consumer.onDeadLetter(deadLetteredBy("booking-service-payment"));
 
         assertThat(errorMessages()).isEmpty();
     }
 
-    /** Guard: the failure this consumer does speak for still alerts. */
+    /** Guard: a failure in any of this service's three listener groups still alerts. */
     @Test
-    void stillAlertsForThisServicesOwnFailure() {
-        consumer.onDeadLetter(deadLetteredBy("booking-service-payment"));
+    void stillAlertsForEachOfThisServicesOwnConsumerGroups() {
+        for (String ownGroup : List.of("notification-service-identity", "notification-service-booking",
+                "notification-service-payment")) {
+            logged.list.clear();
 
-        assertThat(errorMessages()).singleElement(STRING).contains("ALERT:");
+            consumer.onDeadLetter(deadLetteredBy(ownGroup));
+
+            assertThat(errorMessages())
+                    .as("a failure in %s is this service's own", ownGroup)
+                    .singleElement(STRING).contains("ALERT:");
+        }
     }
 
     /**
@@ -93,7 +87,7 @@ class PaymentResultDeadLetterConsumerTest {
     @Test
     void stillAlertsWhenTheRecordCannotBeAttributed() {
         ConsumerRecord<String, String> record = new ConsumerRecord<>(
-                PAYMENT_SUCCEEDED + "-dlt", 0, 3L, "booking-4", "{}");
+                KafkaTopics.PAYMENT_SUCCEEDED + "-dlt", 0, 3L, "booking-4", "{}");
 
         consumer.onDeadLetter(record);
 
@@ -108,22 +102,22 @@ class PaymentResultDeadLetterConsumerTest {
      */
     @Test
     void namesTheFailureThatDeadLetteredTheRecord() {
-        ConsumerRecord<String, String> record = deadLetteredBy("booking-service-payment");
+        ConsumerRecord<String, String> record = deadLetteredBy("notification-service-payment");
         record.headers().add(new RecordHeader(KafkaHeaders.DLT_EXCEPTION_CAUSE_FQCN,
-                "java.lang.IllegalStateException".getBytes(StandardCharsets.UTF_8)));
+                "freemarker.template.TemplateException".getBytes(StandardCharsets.UTF_8)));
         record.headers().add(new RecordHeader(KafkaHeaders.DLT_EXCEPTION_MESSAGE,
-                "Booking not found: booking-3".getBytes(StandardCharsets.UTF_8)));
+                "The following has evaluated to null: seatCodes".getBytes(StandardCharsets.UTF_8)));
 
         consumer.onDeadLetter(record);
 
         assertThat(errorMessages()).singleElement(STRING)
-                .contains("java.lang.IllegalStateException")
-                .contains("Booking not found: booking-3");
+                .contains("freemarker.template.TemplateException")
+                .contains("The following has evaluated to null: seatCodes");
     }
 
     private static ConsumerRecord<String, String> deadLetteredBy(String consumerGroup) {
         ConsumerRecord<String, String> record = new ConsumerRecord<>(
-                PAYMENT_SUCCEEDED + "-dlt", 0, 1L, "booking-3", "{}");
+                KafkaTopics.PAYMENT_SUCCEEDED + "-dlt", 0, 1L, "booking-3", "{}");
         record.headers().add(new RecordHeader(KafkaHeaders.DLT_ORIGINAL_CONSUMER_GROUP,
                 consumerGroup.getBytes(StandardCharsets.UTF_8)));
         return record;

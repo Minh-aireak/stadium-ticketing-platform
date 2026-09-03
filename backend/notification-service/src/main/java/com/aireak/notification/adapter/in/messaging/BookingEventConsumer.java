@@ -20,11 +20,14 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class BookingEventConsumer {
 
+    /** Named rather than inlined so {@link NotificationDeadLetterConsumer} can recognise it. */
+    public static final String GROUP_ID = "notification-service-booking";
+
     private final SendNotificationUseCase sendNotificationUseCase;
 
     @KafkaListener(
             topics = {KafkaTopics.BOOKING_CREATED, KafkaTopics.BOOKING_CONFIRMED, KafkaTopics.BOOKING_CANCELLED},
-            groupId = "notification-service-booking",
+            groupId = GROUP_ID,
             containerFactory = "kafkaListenerContainerFactory"
     )
     public void consume(EventEnvelope<?> envelope) {

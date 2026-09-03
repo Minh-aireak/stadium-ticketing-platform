@@ -17,11 +17,18 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class PaymentEventConsumer {
 
+    /**
+     * Named rather than inlined because {@link NotificationDeadLetterConsumer} has to recognise
+     * this group on a dead-lettered record: {@code payment.payment.succeeded} is consumed by
+     * booking-service too and both services share the one {@code -dlt} topic.
+     */
+    public static final String GROUP_ID = "notification-service-payment";
+
     private final SendNotificationUseCase sendNotificationUseCase;
 
     @KafkaListener(
             topics = {KafkaTopics.PAYMENT_SUCCEEDED, KafkaTopics.PAYMENT_REFUNDED},
-            groupId = "notification-service-payment",
+            groupId = GROUP_ID,
             containerFactory = "kafkaListenerContainerFactory"
     )
     public void consume(EventEnvelope<?> envelope) {

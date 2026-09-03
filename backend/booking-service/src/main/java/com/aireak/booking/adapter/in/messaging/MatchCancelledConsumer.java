@@ -18,11 +18,18 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class MatchCancelledConsumer {
 
+    /**
+     * Named rather than inlined because {@link MatchCancelledDeadLetterConsumer} has to recognise
+     * this group on a dead-lettered record: {@code catalog.match.cancelled} is consumed by
+     * ticket-inventory-service too and both services share the one {@code -dlt} topic.
+     */
+    public static final String GROUP_ID = "booking-service-match-cancelled";
+
     private final BookingOrchestrationService bookingOrchestrationService;
 
     @KafkaListener(
             topics = KafkaTopics.MATCH_CANCELLED,
-            groupId = "booking-service-match-cancelled",
+            groupId = GROUP_ID,
             containerFactory = "kafkaListenerContainerFactory"
     )
     public void consume(EventEnvelope<?> envelope) {

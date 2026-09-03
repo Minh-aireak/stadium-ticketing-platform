@@ -1,10 +1,13 @@
 package com.aireak.inventory.adapter.in.messaging;
 
+import com.aireak.common.kafka.DeadLetterRecords;
 import com.aireak.common.kafka.KafkaTopics;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
+
+import java.util.Set;
 
 /**
  * Inbound Kafka adapter: alerts on match cancelled/completed events that
@@ -34,10 +37,21 @@ import org.springframework.stereotype.Component;
  *
  * <p><strong>Log + alert only, no auto-retry</strong>, the stance every dead-letter consumer on
  * the platform takes: a poison payload replays identically forever.
+ *
+ * <p><strong>The WARN level and the "only the cache" reading hold for this service's failures and
+ * not for everything on these topics.</strong> booking-service consumes
+ * {@code catalog.match.cancelled} as well, and cancels every active booking for the match's
+ * showtimes there; a {@code -dlt} topic belongs to a topic rather than to a service, so its
+ * failures arrive here too, and calling one of those a stale cache understates a cancelled match
+ * whose paid bookings were never refunded. {@link DeadLetterRecords} reads the consumer group off
+ * the record to tell them apart; booking-service's own {@code MatchCancelledDeadLetterConsumer} is
+ * what reports its half, at ERROR.
  */
 @Slf4j
 @Component
 public class CatalogCacheDeadLetterConsumer {
+
+    private static final Set<String> OWN_CONSUMER_GROUPS = Set.of(MatchCancelledEventConsumer.GROUP_ID);
 
     @KafkaListener(
             topics = {
@@ -48,10 +62,20 @@ public class CatalogCacheDeadLetterConsumer {
             containerFactory = "deadLetterKafkaListenerContainerFactory"
     )
     public void onDeadLetter(ConsumerRecord<String, String> record) {
+        if (!DeadLetterRecords.deadLetteredBy(record, OWN_CONSUMER_GROUPS)) {
+            log.info("Dead-lettered match lifecycle record belongs to consumer group {}, not this "
+                            + "service's — the service owning that group reports it: "
+                            + "topic={}, partition={}, offset={}, key={}",
+                    DeadLetterRecords.originalConsumerGroup(record),
+                    record.topic(), record.partition(), record.offset(), record.key());
+            return;
+        }
+
         log.warn("Match lifecycle event landed on dead-letter topic after exhausting retries — "
                         + "the local bookability cache was not updated, so holds and reservations for "
                         + "these showtimes fall through to catalog-service until it is: "
-                        + "topic={}, partition={}, offset={}, key={}, value={}",
+                        + "cause={}, topic={}, partition={}, offset={}, key={}, value={}",
+                DeadLetterRecords.failureCause(record),
                 record.topic(), record.partition(), record.offset(), record.key(), record.value());
     }
 }

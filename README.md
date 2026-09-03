@@ -132,8 +132,13 @@ branch where the two disagree rebuilds the counter from the committed row.
 **Idempotency everywhere a retry can reach.** Redis-backed idempotency keys on booking and payment
 initiation; a `processed_events` table in notification-service; consumers assume redelivery.
 
-**Events that exhaust retries go to `<topic>-dlt`** and are logged as `ALERT:` by a dead-letter
-consumer. Nothing replays them automatically — a poison pill would replay identically forever.
+**Events that exhaust retries go to `<topic>-dlt`** and a dead-letter consumer logs one line
+naming the topic, the offset and the exception that caused it — at ERROR behind an `ALERT:`
+prefix, except ticket-inventory-service's bookability-cache consumer, which logs at WARN because
+a stale cache costs a round trip rather than a booking. A `-dlt` topic belongs to a topic, not to
+a service, so where two services consume the same topic each consumer reports only the failures
+of its own consumer group and skips the other's. Nothing replays them automatically — a poison
+pill would replay identically forever.
 
 ---
 

@@ -27,7 +27,7 @@ public class ShowtimeAddedEventConsumer {
 
     @KafkaListener(
             topics = KafkaTopics.SHOWTIME_CREATED,
-            groupId = "ticket-inventory-service-catalog",
+            groupId = MatchCancelledEventConsumer.GROUP_ID,
             containerFactory = "kafkaListenerContainerFactory"
     )
     public void consume(EventEnvelope<?> envelope) {

@@ -18,12 +18,15 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class AccountEventConsumer {
 
+    /** Named rather than inlined so {@link NotificationDeadLetterConsumer} can recognise it. */
+    public static final String GROUP_ID = "notification-service-identity";
+
     private final SendNotificationUseCase sendNotificationUseCase;
 
     @KafkaListener(
             topics = {KafkaTopics.ACCOUNT_REGISTERED, KafkaTopics.ACCOUNT_ACTIVATED,
                     KafkaTopics.PASSWORD_RESET_REQUESTED},
-            groupId = "notification-service-identity",
+            groupId = GROUP_ID,
             containerFactory = "kafkaListenerContainerFactory"
     )
     public void consume(EventEnvelope<?> envelope) {

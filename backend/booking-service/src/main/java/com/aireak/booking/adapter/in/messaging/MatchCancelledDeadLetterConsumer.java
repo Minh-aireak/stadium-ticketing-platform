@@ -1,10 +1,13 @@
 package com.aireak.booking.adapter.in.messaging;
 
+import com.aireak.common.kafka.DeadLetterRecords;
 import com.aireak.common.kafka.KafkaTopics;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
+
+import java.util.Set;
 
 /**
  * Inbound Kafka adapter: alerts on match-cancellation events that {@link MatchCancelledConsumer}
@@ -37,10 +40,21 @@ import org.springframework.stereotype.Component;
  * {@link PaymentResultDeadLetterConsumer} takes that stance: a poison-pill payload replays
  * identically forever, and re-driving cancellations behind
  * {@code BookingOrchestrationService}'s back risks re-issuing refunds.
+ *
+ * <p><strong>Everything above describes {@link MatchCancelledConsumer}'s failures, and this topic
+ * carries more than those.</strong> ticket-inventory-service consumes
+ * {@code catalog.match.cancelled} too, to warm the bookability cache in front of catalog-service,
+ * and a {@code -dlt} topic belongs to a topic rather than to a service — so its failures arrive
+ * here as well, where the sentence above is false about every one of them: no booking of theirs
+ * went uncancelled, no refund of theirs went unrequested, and the cost is a redundant REST call
+ * per hold. {@link DeadLetterRecords} reads the consumer group off the record to tell them apart;
+ * ticket-inventory-service's own {@code CatalogCacheDeadLetterConsumer} is what reports its half.
  */
 @Slf4j
 @Component
 public class MatchCancelledDeadLetterConsumer {
+
+    private static final Set<String> OWN_CONSUMER_GROUPS = Set.of(MatchCancelledConsumer.GROUP_ID);
 
     @KafkaListener(
             topics = KafkaTopics.MATCH_CANCELLED + "-dlt",
@@ -48,11 +62,21 @@ public class MatchCancelledDeadLetterConsumer {
             containerFactory = "deadLetterKafkaListenerContainerFactory"
     )
     public void onDeadLetter(ConsumerRecord<String, String> record) {
+        if (!DeadLetterRecords.deadLetteredBy(record, OWN_CONSUMER_GROUPS)) {
+            log.info("Dead-lettered match-cancelled record belongs to consumer group {}, not this "
+                            + "service's — the service owning that group reports it: "
+                            + "topic={}, partition={}, offset={}, key={}",
+                    DeadLetterRecords.originalConsumerGroup(record),
+                    record.topic(), record.partition(), record.offset(), record.key());
+            return;
+        }
+
         log.error("ALERT: match-cancelled event landed on dead-letter topic after exhausting retries — "
                         + "some bookings for a cancelled match were NOT cancelled and the refunds they are "
                         + "owed were NOT requested; the event may have been applied part way, so check which "
                         + "bookings for these showtimes are still active rather than assuming none were: "
-                        + "topic={}, partition={}, offset={}, key={}, value={}",
+                        + "cause={}, topic={}, partition={}, offset={}, key={}, value={}",
+                DeadLetterRecords.failureCause(record),
                 record.topic(), record.partition(), record.offset(), record.key(), record.value());
     }
 }

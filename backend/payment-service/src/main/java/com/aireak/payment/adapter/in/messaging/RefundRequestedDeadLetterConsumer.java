@@ -1,5 +1,6 @@
 package com.aireak.payment.adapter.in.messaging;
 
+import com.aireak.common.kafka.DeadLetterRecords;
 import com.aireak.common.kafka.KafkaTopics;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -27,8 +28,9 @@ public class RefundRequestedDeadLetterConsumer {
     )
     public void onDeadLetter(ConsumerRecord<String, String> record) {
         log.error("ALERT: refund request landed on dead-letter topic after exhausting retries — "
-                        + "a customer is owed money that was NOT refunded: topic={}, partition={}, "
+                        + "a customer is owed money that was NOT refunded: cause={}, topic={}, partition={}, "
                         + "offset={}, key={}, value={}",
+                DeadLetterRecords.failureCause(record),
                 record.topic(), record.partition(), record.offset(), record.key(), record.value());
     }
 }
