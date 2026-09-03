@@ -2,7 +2,7 @@ import axios from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 import { api, registerSessionExpiredHandler, setAccessToken } from '@/lib/api'
-import { createBooking } from './bookingApi'
+import { createBooking, getBooking } from './bookingApi'
 import type { CreateBookingRequest } from './types'
 
 const payload: CreateBookingRequest = {
@@ -69,5 +69,26 @@ describe('createBooking', () => {
 
     expect(refresh).not.toHaveBeenCalled()
     expect(onSessionExpired).not.toHaveBeenCalled()
+  })
+})
+
+describe('getBooking', () => {
+  /**
+   * BookingStatusResponse carried only { bookingId, status } under a comment claiming it mirrors
+   * booking-service's BookingController DTOs. The record there has carried the server-computed
+   * amount and currency since payment-service needed something to check a charge against, and
+   * its javadoc calls this response the source of truth for that comparison. Reading either
+   * field through the old type was a compile error.
+   */
+  it('surfaces the server-computed amount the booking was charged', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: { bookingId: 'b-1', status: 'CONFIRMED', amount: 400000, currency: 'VND' },
+    })
+
+    const booking = await getBooking('b-1')
+
+    expect(booking.status).toBe('CONFIRMED')
+    expect(booking.amount).toBe(400000)
+    expect(booking.currency).toBe('VND')
   })
 })

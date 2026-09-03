@@ -17,6 +17,13 @@ export interface CreateBookingResponse {
 export interface BookingStatusResponse {
   bookingId: string
   status: BookingStatus
+  /**
+   * The charge booking-service computed server-side from each seat's tier — never the
+   * placeholder amount the client posted with the booking. payment-service reads this same
+   * field off this same endpoint to check the amount it was asked to charge.
+   */
+  amount: number
+  currency: string
 }
 
 export interface BookingSummary {
