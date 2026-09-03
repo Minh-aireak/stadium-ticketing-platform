@@ -8,19 +8,29 @@
     saturation point (where req/s plateaus or errors/timeouts appear) can be spotted.
 
 .PARAMETER Url
-    Target URL to load test. Defaults to the in-network service name (see -Network) --
-    NOT host.docker.internal, which routes through Docker Desktop's host port-forwarding
-    proxy and was measured to roughly halve throughput and inject its own "write" socket
-    errors unrelated to the app (7570 vs 15770 req/s at c=1200, 381 spurious write-errors
-    vs 0). Pass -Url "http://host.docker.internal:8082/api/v1/matches" -Network "" to go
-    back to testing through that path, e.g. to measure what an out-of-Docker client sees.
+    Target URL to load test. Defaults to catalog-lb, the nginx load balancer -- the address
+    every real caller uses (api-gateway for /api/v1/matches/**, ticket-inventory-service for
+    requireBookable), so the number it produces is the one the platform can actually serve.
+    To measure a single JVM instead, point it at one instance:
+        ./ramp-test.ps1 -Url "http://match-catalog-service-1:8082/api/v1/matches"
+    There is no plain "match-catalog-service" host to target: the service has run as
+    match-catalog-service-1/-2 behind catalog-lb since it was replicated, and compose only
+    creates DNS aliases for names it declares.
+
+    NOT host.docker.internal, which routes through Docker Desktop's host port-forwarding proxy
+    and was measured to roughly halve throughput and inject its own "write" socket errors
+    unrelated to the app (7570 vs 15770 req/s at c=1200, 381 spurious write-errors vs 0 --
+    measured against the single container that preceded the two-instance topology, so treat the
+    absolute figures as historical and the ratio as the point). Pass
+    -Url "http://host.docker.internal:8082/api/v1/matches" -Network "" to go back to testing
+    through that path, e.g. to measure what an out-of-Docker client sees.
 
     The default has no ?q=, so it exercises the Guava/Redis/Postgres browse path and never
     touches Elasticsearch -- MatchCatalogService only calls the search adapter when a query is
     present. That blind spot is how the Elasticsearch connection-pool queue went unnoticed:
     see ElasticsearchClientConfig, where 200 concurrent searches against a wedged cluster took
     601s each because the pool leases only ten connections per route. Sweep the search path too:
-        ./ramp-test.ps1 -Url "http://match-catalog-service:8082/api/v1/matches?q=united"
+        ./ramp-test.ps1 -Url "http://catalog-lb:8082/api/v1/matches?q=united"
     Both are worth running. They saturate on completely different resources, and the search one
     shares the catalog-read bulkhead with the browse one, so whichever saturates first takes the
     other down with it.
@@ -54,7 +64,7 @@
 #>
 
 param(
-    [string]$Url = "http://match-catalog-service:8082/api/v1/matches",
+    [string]$Url = "http://catalog-lb:8082/api/v1/matches",
     [string]$Network = "stadium-ticketing-platform_stadium-net",
     [int[]]$Concurrencies = @(50, 100, 200, 400, 800, 1200, 1600, 2000, 3000),
     [int]$Threads = 6,
