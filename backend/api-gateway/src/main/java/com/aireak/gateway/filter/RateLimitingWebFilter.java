@@ -83,6 +83,8 @@ public class RateLimitingWebFilter implements WebFilter, Ordered {
         // an email to an attacker-chosen address.
         PATH_POLICIES.put("/api/v1/auth/forgot-password", RateLimitPolicy.PASSWORD_RESET_REQUEST);
         PATH_POLICIES.put("/api/v1/auth/reset-password", RateLimitPolicy.PASSWORD_RESET_CONFIRM);
+        // Also public, also sends an email per accepted request -- same reason as the two above.
+        PATH_POLICIES.put("/api/v1/auth/resend-verification", RateLimitPolicy.VERIFICATION_RESEND);
         PATH_POLICIES.put("/api/v1/matches/**", RateLimitPolicy.READ_ANONYMOUS);
         PATH_POLICIES.put("/api/v1/inventory/**", RateLimitPolicy.READ_AUTHENTICATED);
         PATH_POLICIES.put("/api/v1/bookings/**", RateLimitPolicy.BOOKING);

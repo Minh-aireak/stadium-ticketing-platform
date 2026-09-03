@@ -5,6 +5,7 @@ import com.aireak.identity.application.port.in.LogoutUseCase;
 import com.aireak.identity.application.port.in.RefreshTokenUseCase;
 import com.aireak.identity.application.port.in.RegisterAccountUseCase;
 import com.aireak.identity.application.port.in.RequestPasswordResetUseCase;
+import com.aireak.identity.application.port.in.ResendVerificationUseCase;
 import com.aireak.identity.application.port.in.ResetPasswordUseCase;
 import com.aireak.identity.application.port.in.VerifyEmailUseCase;
 import com.aireak.identity.application.port.in.dto.AuthResult;
@@ -73,10 +74,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "jwt.excluded-paths[2]=/api/v1/auth/refresh",
         "jwt.excluded-paths[3]=/api/v1/auth/logout",
         "jwt.excluded-paths[4]=/api/v1/auth/verify-email",
-        "jwt.excluded-paths[5]=/api/v1/auth/forgot-password",
-        "jwt.excluded-paths[6]=/api/v1/auth/reset-password",
-        "jwt.excluded-paths[7]=/actuator/health",
-        "jwt.excluded-paths[8]=/actuator/info"
+        "jwt.excluded-paths[5]=/api/v1/auth/resend-verification",
+        "jwt.excluded-paths[6]=/api/v1/auth/forgot-password",
+        "jwt.excluded-paths[7]=/api/v1/auth/reset-password",
+        "jwt.excluded-paths[8]=/actuator/health",
+        "jwt.excluded-paths[9]=/actuator/info"
 })
 class AuthControllerCsrfCookieIntegrationTest {
 
@@ -94,6 +96,8 @@ class AuthControllerCsrfCookieIntegrationTest {
     @MockitoBean
     private VerifyEmailUseCase verifyEmailUseCase;
     @MockitoBean
+    private ResendVerificationUseCase resendVerificationUseCase;
+    @MockitoBean
     private RequestPasswordResetUseCase requestPasswordResetUseCase;
     @MockitoBean
     private ResetPasswordUseCase resetPasswordUseCase;
@@ -107,6 +111,21 @@ class AuthControllerCsrfCookieIntegrationTest {
         mockMvc.perform(post("/api/v1/auth/forgot-password")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"forgetful@example.com\"}"))
+                .andExpect(status().isNoContent());
+    }
+
+    /**
+     * Both halves of the gate, driven end to end, because they are separate lists and missing
+     * either one is a 403 no slice test would show. This endpoint shipped without being on
+     * SecurityConfig's permitAll list OR its CSRF exemptions — dead on arrival for exactly the
+     * accounts it exists to rescue, since an unverified account has no token and no XSRF-TOKEN
+     * cookie to present.
+     */
+    @Test
+    void resendVerificationIsReachableWithoutATokenOrACsrfHeader() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/resend-verification")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"unverified@example.com\"}"))
                 .andExpect(status().isNoContent());
     }
 

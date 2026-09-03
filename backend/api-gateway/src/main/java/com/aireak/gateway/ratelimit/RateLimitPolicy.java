@@ -30,6 +30,12 @@ public enum RateLimitPolicy {
     // Submitting the new password is credential-shaped, not email-shaped: sized like LOGIN so a
     // customer who trips the password policy a few times isn't locked out of their own reset link.
     PASSWORD_RESET_CONFIRM(KeyStrategy.IP, 1, 120, 12),
+    // Resending a verification link is email-shaped, so it gets PASSWORD_RESET_REQUEST's numbers
+    // and its reasoning: one accepted request, one email, to an address the caller alone chose.
+    // A separate constant rather than sharing that one because the two buckets should not drain
+    // each other -- a customer waiting on a verification mail has no way to ask for a password
+    // reset, and vice versa.
+    VERIFICATION_RESEND(KeyStrategy.IP, 1, 3600, 1200),
     REFRESH_TOKEN(KeyStrategy.USER_OR_IP, 1, 60, 3),
     // Stripe's webhook deliveries. Keyed by IP because there is no platform user behind them, and
     // sized for a provider that legitimately bursts (a backlog being flushed, retries of earlier

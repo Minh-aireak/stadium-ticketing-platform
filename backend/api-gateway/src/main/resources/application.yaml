@@ -85,6 +85,8 @@ jwt:
     # Reached by a user who by definition cannot log in, so neither can carry a Bearer token.
     - /api/v1/auth/forgot-password
     - /api/v1/auth/reset-password
+    # Same: an account still awaiting verification cannot log in, so it has no token to send.
+    - /api/v1/auth/resend-verification
     # Catalog browsing is public, but the ADMIN-only mutations live on these same paths
     # (POST /api/v1/matches, PUT /api/v1/matches/{id}/publish|cancel|complete). Scoping to GET
     # keeps those behind token validation AND behind PreAuthRateLimitingWebFilter's per-IP flood

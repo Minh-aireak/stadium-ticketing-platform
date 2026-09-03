@@ -5,12 +5,14 @@ import com.aireak.identity.adapter.in.web.dto.LoginRequest;
 import com.aireak.identity.adapter.in.web.dto.LoginResponse;
 import com.aireak.identity.adapter.in.web.dto.RegisterRequest;
 import com.aireak.identity.adapter.in.web.dto.RegisterResponse;
+import com.aireak.identity.adapter.in.web.dto.ResendVerificationRequest;
 import com.aireak.identity.adapter.in.web.dto.ResetPasswordRequest;
 import com.aireak.identity.application.port.in.LoginUseCase;
 import com.aireak.identity.application.port.in.LogoutUseCase;
 import com.aireak.identity.application.port.in.RefreshTokenUseCase;
 import com.aireak.identity.application.port.in.RegisterAccountUseCase;
 import com.aireak.identity.application.port.in.RequestPasswordResetUseCase;
+import com.aireak.identity.application.port.in.ResendVerificationUseCase;
 import com.aireak.identity.application.port.in.ResetPasswordUseCase;
 import com.aireak.identity.application.port.in.VerifyEmailUseCase;
 import com.aireak.identity.application.port.in.command.LoginCommand;
@@ -71,6 +73,7 @@ public class AuthController {
     private final RefreshTokenUseCase refreshTokenUseCase;
     private final LogoutUseCase logoutUseCase;
     private final VerifyEmailUseCase verifyEmailUseCase;
+    private final ResendVerificationUseCase resendVerificationUseCase;
     private final RequestPasswordResetUseCase requestPasswordResetUseCase;
     private final ResetPasswordUseCase resetPasswordUseCase;
     private final AuthCookieProperties cookieProperties;
@@ -114,6 +117,19 @@ public class AuthController {
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_HTML)
                 .body(verificationPage("Email verified", "Your account is now active — you can log in.", true));
+    }
+
+    /**
+     * POST /api/v1/auth/resend-verification
+     * Re-sends the welcome email's verification link for an account still awaiting verification.
+     * Always 204, whether or not the address has one — see {@code ResendVerificationService}: a
+     * different response would say which addresses are registered, and which of those are still
+     * unverified.
+     */
+    @PostMapping("/resend-verification")
+    public ResponseEntity<Void> resendVerification(@Valid @RequestBody ResendVerificationRequest request) {
+        resendVerificationUseCase.execute(request.email());
+        return ResponseEntity.noContent().build();
     }
 
     /**

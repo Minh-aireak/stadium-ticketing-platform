@@ -46,7 +46,8 @@ public class SecurityConfig {
                 .csrfTokenRepository(csrfTokenRepository(refreshTokenProperties))
                 .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
                 .ignoringRequestMatchers("/api/v1/auth/register", "/api/v1/auth/login",
-                        "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password")
+                        "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password",
+                        "/api/v1/auth/resend-verification")
             )
             // CsrfFilter only defers token resolution to a request attribute; without forcing
             // it here, CookieCsrfTokenRepository never actually writes the XSRF-TOKEN cookie.
@@ -62,6 +63,9 @@ public class SecurityConfig {
                     "/api/v1/auth/refresh",
                     "/api/v1/auth/logout",
                     "/api/v1/auth/verify-email",
+                    // Same for asking that link to be sent again: the account it is for cannot
+                    // log in, which is the entire reason it needs one.
+                    "/api/v1/auth/resend-verification",
                     // Both halves of password reset are reached by a user who by definition
                     // cannot log in, so neither can require a Bearer token; the one-time Redis
                     // token in the request body is the authenticator for reset-password.

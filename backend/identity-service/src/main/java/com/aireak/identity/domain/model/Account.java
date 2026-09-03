@@ -108,6 +108,26 @@ public class Account {
     }
 
     /**
+     * Raises {@link AccountRegisteredEvent} again with a freshly minted verification token, so the
+     * welcome email — the only thing that carries a verification link — is sent a second time.
+     *
+     * <p>Reuses the registration event rather than introducing a topic of its own: what the
+     * customer needs is the same message with a working link, notification-service already turns
+     * that event into exactly that, and the event id differs each time so its idempotency store
+     * does not swallow the resend.
+     *
+     * <p>Refuses anything already ACTIVE. Sending a verification link to a verified account is at
+     * best noise and at worst a link that activates nothing.
+     */
+    public void reissueVerification(String verificationToken) {
+        if (status != AccountStatus.PENDING_VERIFICATION) {
+            throw new InvalidAccountStatusException(
+                    "Verification can only be resent while PENDING_VERIFICATION, current: " + status);
+        }
+        domainEvents.add(new AccountRegisteredEvent(id, email, verificationToken));
+    }
+
+    /**
      * Records a password-reset request. No state changes on the aggregate — the one-time token
      * lives in Redis, not here — but the event belongs to the account, so it is raised here like
      * every other one. Invariant: only an ACTIVE account can reset a password, matching
