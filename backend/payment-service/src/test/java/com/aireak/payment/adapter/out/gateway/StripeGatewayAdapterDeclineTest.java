@@ -40,10 +40,12 @@ import static org.assertj.core.api.Assertions.catchThrowable;
  * <p>A {@code @CircuitBreaker(fallbackMethod = ...)} is applied OUTSIDE the circuit-breaker
  * decoration and fires on any {@code Throwable}, not only on a rejected call. So
  * {@code chargeFallback} ran on the very first decline and replaced
- * {@link PaymentDeclinedException} with a wrapper. The circuit breaker's own
- * {@code ignoreExceptions} still worked (it sees the raw exception), but the Retry aspect sits
- * OUTSIDE the CircuitBreaker aspect and by then only had the wrapper to match its own
- * {@code ignoreExceptions} against — so it charged the declined card a second time.
+ * {@link PaymentDeclinedException} with {@code RuntimeException("Payment gateway unavailable")}.
+ * The circuit breaker's own {@code ignoreExceptions} still worked (it sees the raw exception), but
+ * everything past the fallback saw only the wrapper: the Retry aspect, which sits OUTSIDE the
+ * CircuitBreaker aspect, no longer matched its own {@code ignoreExceptions} and charged the card
+ * again; and {@code PaymentService#execute} recorded {@code e.getMessage()} — the wrapper's — as
+ * the payment's {@code failureReason}.
  */
 @SpringBootTest(classes = StripeGatewayAdapterDeclineTest.Config.class, properties = {
         "stripe.secret-key=sk_test_stub",
@@ -101,6 +103,23 @@ class StripeGatewayAdapterDeclineTest {
         circuitBreaker = circuitBreakerRegistry.circuitBreaker("payment-gateway");
         circuitBreaker.reset();
         STUB.reset();
+    }
+
+    /**
+     * The reason does not stay in payment-service: it rides {@code PaymentFailedEvent} to
+     * booking-service, becomes the booking's cancellation reason, and is rendered into the
+     * customer's cancellation email as {@code ${reason}} (see {@code Payment#markFailed}). A
+     * customer whose card was declined was told the payment gateway was unavailable.
+     */
+    @Test
+    void aDeclinedCardArrivesAsADeclineWithTheGatewaysOwnReason() {
+        STUB.respondWithCardDecline();
+
+        Throwable thrown = catchThrowable(
+                () -> paymentGatewayPort.charge("booking-1", "booking-1", new BigDecimal("150.00"), "USD"));
+
+        assertThat(thrown).isInstanceOf(PaymentDeclinedException.class);
+        assertThat(thrown).hasMessageContaining(DECLINE_MESSAGE);
     }
 
     /**

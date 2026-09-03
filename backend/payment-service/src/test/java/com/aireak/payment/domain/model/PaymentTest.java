@@ -359,4 +359,37 @@ class PaymentTest {
         assertThat(firstPull).hasSize(1);
         assertThat(secondPull).isEmpty();
     }
+
+    /**
+     * failure_reason is a VARCHAR(500) (see {@code PaymentJpaEntity}) and nothing between the
+     * gateway and the column ever measured what it was handed. The reason is whatever the gateway
+     * said — since chargeFallback stopped substituting its own text for a decline, that is a real
+     * third-party string on the hot path, and one long enough to overflow the column would fail
+     * the whole markFailed transaction, leaving the payment INITIATED with no PaymentFailedEvent
+     * and its booking stuck in PENDING_PAYMENT until the reconciliation job noticed.
+     */
+    @Test
+    void markFailedTrimsAReasonTooLongForTheColumnItIsStoredIn() {
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
+        payment.pullDomainEvents();
+
+        payment.markFailed("x".repeat(4000));
+
+        assertThat(payment.getFailureReason()).hasSizeLessThanOrEqualTo(500);
+        PaymentFailedEvent event = (PaymentFailedEvent) payment.pullDomainEvents().get(0);
+        assertThat(event.reason()).isEqualTo(payment.getFailureReason());
+    }
+
+    /** The ambiguous marker has to survive the trim, or a lost success reads as a plain failure. */
+    @Test
+    void markFailedAmbiguousKeepsItsMarkerOnAReasonTooLongForTheColumn() {
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
+        payment.pullDomainEvents();
+
+        payment.markFailedAmbiguous("y".repeat(4000));
+
+        assertThat(payment.getFailureReason()).hasSizeLessThanOrEqualTo(500);
+        assertThat(payment.getFailureReason()).startsWith(Payment.GATEWAY_AMBIGUOUS_PREFIX);
+        assertThat(payment.isAmbiguousFailure()).isTrue();
+    }
 }

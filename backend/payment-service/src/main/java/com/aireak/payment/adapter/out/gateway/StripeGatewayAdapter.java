@@ -155,11 +155,25 @@ public class StripeGatewayAdapter implements PaymentGatewayPort {
 
     private String chargeFallback(String idempotencyKey, String bookingId, BigDecimal amount,
                                   String currency, Throwable t) {
+        // A decline travels unchanged. PaymentService already reads the cause chain to tell a
+        // decline from an ambiguous failure, but it records e.getMessage() as the payment's
+        // failureReason -- and that reason does not stay here: it rides PaymentFailedEvent to
+        // booking-service, becomes the booking's cancellation reason, and is rendered into the
+        // customer's cancellation email. Replacing it told a customer whose card was declined
+        // that the payment gateway was unavailable.
+        if (t instanceof PaymentDeclinedException declined) {
+            throw declined;
+        }
         log.error("Payment gateway unavailable for bookingId={}: {}", bookingId, t.getMessage());
         throw new RuntimeException("Payment gateway unavailable", t);
     }
 
     private String refundFallback(String gatewayTransactionId, BigDecimal amount, String currency, Throwable t) {
+        // Same reasoning as chargeFallback: a refund Stripe actively rejected is not the gateway
+        // being unreachable, and whoever reads the dead-lettered refund needs to know which it was.
+        if (t instanceof PaymentDeclinedException declined) {
+            throw declined;
+        }
         log.error("Payment gateway unavailable for refund of paymentIntentId={}: {}",
                 gatewayTransactionId, t.getMessage());
         throw new RuntimeException("Payment gateway unavailable", t);

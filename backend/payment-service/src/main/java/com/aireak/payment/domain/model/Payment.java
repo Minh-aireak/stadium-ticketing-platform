@@ -92,6 +92,17 @@ public class Payment {
      */
     static final String UNSPECIFIED_REASON = "No reason reported by the payment gateway";
 
+    /**
+     * Width of {@code payments.failure_reason} (see {@code PaymentJpaEntity}). The reason is
+     * whatever the gateway said, and since chargeFallback stopped substituting its own wording for
+     * a decline that is a third-party string on the hot path. One longer than the column would
+     * fail the markFailed transaction at commit, leaving the payment INITIATED with no
+     * PaymentFailedEvent and its booking stuck in PENDING_PAYMENT until BookingReconciliationJob
+     * came round. Trimming from the end keeps {@link #GATEWAY_AMBIGUOUS_PREFIX} intact, which
+     * {@link #isAmbiguousFailure} reads to decide whether a retry may use a fresh Stripe key.
+     */
+    private static final int MAX_FAILURE_REASON_LENGTH = 500;
+
     // ----------------------------------------------------------------
     // Domain behavior
     // ----------------------------------------------------------------
@@ -136,8 +147,10 @@ public class Payment {
         String fullReason = ambiguous && !describedReason.startsWith(GATEWAY_AMBIGUOUS_PREFIX)
                 ? GATEWAY_AMBIGUOUS_PREFIX + describedReason
                 : describedReason;
-        this.failureReason = fullReason;
-        domainEvents.add(new PaymentFailedEvent(paymentId, bookingId, fullReason));
+        this.failureReason = fullReason.length() > MAX_FAILURE_REASON_LENGTH
+                ? fullReason.substring(0, MAX_FAILURE_REASON_LENGTH)
+                : fullReason;
+        domainEvents.add(new PaymentFailedEvent(paymentId, bookingId, this.failureReason));
     }
 
     /**
