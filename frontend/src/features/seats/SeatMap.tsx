@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
 import { memo, useMemo } from 'react'
 
+import { formatCurrency } from '@/lib/format'
 import { useMemoizedSet } from '@/lib/memo'
 import { cn } from '@/lib/utils'
 import type { Seat } from './types'
@@ -8,12 +9,15 @@ import type { Seat } from './types'
 interface SeatMapProps {
   seats: Seat[]
   selected: string[]
+  // The showtime's currency, from the navigation state. The seat map DTO carries a price per
+  // seat but no currency — ticket-inventory-service quotes every seat in the showtime's one.
+  currency: string
   onToggle: (code: string) => void
   tierFilter?: 'all' | Seat['tier']
   blockSeatCodes?: ReadonlySet<string> | null
 }
 
-function SeatMapComponent({ seats, selected, onToggle, tierFilter = 'all', blockSeatCodes = null }: SeatMapProps) {
+function SeatMapComponent({ seats, selected, currency, onToggle, tierFilter = 'all', blockSeatCodes = null }: SeatMapProps) {
   // Row count/letters come from the backend layout (see SeatMapLayout), not a fixed A-F —
   // derive them from the actual seats instead of hardcoding, so showtimes with more/fewer
   // seats than the old 6-row mock still render every row.
@@ -55,7 +59,7 @@ function SeatMapComponent({ seats, selected, onToggle, tierFilter = 'all', block
                     whileHover={!disabled ? { scale: 1.15 } : undefined}
                     whileTap={!disabled ? { scale: 0.95 } : undefined}
                     onClick={() => onToggle(seat.code)}
-                    title={`${seat.code} · ${seat.tier} · ${seat.price.toLocaleString('vi-VN')}đ`}
+                    title={`${seat.code} · ${seat.tier} · ${formatCurrency(seat.price, currency)}`}
                     className={cn(
                       'flex size-6 items-center justify-center rounded-md text-[10px] font-medium transition-colors sm:size-7',
                       (outOfTier || outOfBlock) && !isSelected && 'opacity-35 cursor-not-allowed',

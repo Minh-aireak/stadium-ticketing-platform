@@ -3,6 +3,7 @@ import { ArrowLeft, X } from 'lucide-react'
 import { memo, useCallback, useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { formatCurrency } from '@/lib/format'
 import { useMemoizedSet } from '@/lib/memo'
 import { cn } from '@/lib/utils'
 import type { StadiumDefinition, StadiumZone, StandId } from './stadiumLayout'
@@ -12,6 +13,9 @@ interface StadiumSeatMapProps {
   stadium: StadiumDefinition
   zones: StadiumZone[]
   selected: string[]
+  // See SeatMapProps#currency: the seat map DTO prices each seat but names no currency, because
+  // every seat in a showtime is quoted in the showtime's.
+  currency: string
   onToggle: (code: string) => void
   onClearSelection: () => void
 }
@@ -159,7 +163,7 @@ function UprightCaption({
   )
 }
 
-function StadiumSeatMapComponent({ stadium, zones, selected, onToggle, onClearSelection }: StadiumSeatMapProps) {
+function StadiumSeatMapComponent({ stadium, zones, selected, currency, onToggle, onClearSelection }: StadiumSeatMapProps) {
   const reduceMotion = useReducedMotion()
   const [activeId, setActiveId] = useState<StandId | null>(null)
   const activeZone = zones.find((zone) => zone.id === activeId) ?? null
@@ -468,7 +472,7 @@ function StadiumSeatMapComponent({ stadium, zones, selected, onToggle, onClearSe
                               <title>
                                 {isPlaceholder
                                   ? `${positionedRow.label}${displayNumber} · Chưa khả dụng`
-                                  : `${positionedRow.label}${displayNumber} · Mã ${seat.code} · ${seat.price.toLocaleString('vi-VN')}đ`}
+                                  : `${positionedRow.label}${displayNumber} · Mã ${seat.code} · ${formatCurrency(seat.price, currency)}`}
                               </title>
                               <rect
                                 x={x - SEAT_WIDTH / 2}

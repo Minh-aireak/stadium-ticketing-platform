@@ -133,7 +133,7 @@ export function AccountPage() {
                         <QrCode className="size-10 text-accent" />
                         <div>
                           <div className="font-medium">
-                            Ghế {booking.seatCodes.join(', ')} · {formatCurrency(booking.amount)}
+                            Ghế {booking.seatCodes.join(', ')} · {formatCurrency(booking.amount, booking.currency)}
                           </div>
                           <div className="text-sm text-muted">
                             Mã đặt vé {booking.bookingId} · Mua ngày{' '}

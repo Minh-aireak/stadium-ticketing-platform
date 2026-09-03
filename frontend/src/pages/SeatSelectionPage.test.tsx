@@ -1,5 +1,5 @@
-import { render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Seat } from '@/features/seats/types'
@@ -39,13 +39,19 @@ const state: SeatSelectionState = {
   startTime: new Date(Date.now() + 86_400_000).toISOString(),
   // Not a stadium the layout table knows, so the page falls back to the plain grid seat map.
   stadiumId: 'stadium-unknown',
+  currency: 'VND',
 }
 
-function renderSeatSelection() {
+function CheckoutStateProbe() {
+  return <pre data-testid="checkout-state">{JSON.stringify(useLocation().state)}</pre>
+}
+
+function renderSeatSelection(overrides: Partial<SeatSelectionState> = {}) {
   return render(
-    <MemoryRouter initialEntries={[{ pathname: '/matches/match-1/seats', state }]}>
+    <MemoryRouter initialEntries={[{ pathname: '/matches/match-1/seats', state: { ...state, ...overrides } }]}>
       <Routes>
         <Route path="/matches/:matchId/seats" element={<SeatSelectionPage />} />
+        <Route path="/checkout" element={<CheckoutStateProbe />} />
         <Route path="*" element={<div>redirected</div>} />
       </Routes>
     </MemoryRouter>,
@@ -105,5 +111,35 @@ describe('SeatSelectionPage', () => {
 
     await waitFor(() => expect(screen.getByText('Chưa chọn ghế nào')).toBeDefined())
     expect(holdSeats).not.toHaveBeenCalled()
+  })
+
+  /**
+   * The page hard-coded `currency: 'VND'` into the CheckoutState it handed forward, and
+   * SeatSelectionState had no currency field to carry the real one — so the showtime's currency,
+   * which match-catalog-service stores and payment-service charges in, was dropped between the
+   * match detail page and checkout. It is only ever displayed (booking-service overwrites the
+   * posted amount and currency with ticket-inventory-service's in saga Step 2b), but it is
+   * displayed on the screen where the customer agrees to the charge.
+   */
+  it('carries the showtime currency through to checkout instead of assuming đồng', async () => {
+    getSeatMap.mockResolvedValue({
+      showtimeId: 'show-1',
+      seats: [seat('A1', { status: 'held', heldByYou: true, price: 12.99 })],
+    })
+
+    renderSeatSelection({ currency: 'USD' })
+
+    await waitFor(() => expect(screen.getByText('1 ghế')).toBeDefined())
+    // Both the running total and the tier legend price it, so more than one node carries it.
+    expect(screen.getAllByText(/US\$/).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/₫/)).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tiếp tục thanh toán' }))
+
+    await waitFor(() => expect(screen.getByTestId('checkout-state')).toBeDefined())
+    expect(JSON.parse(screen.getByTestId('checkout-state').textContent ?? '{}')).toMatchObject({
+      currency: 'USD',
+      seatCodes: ['A1'],
+    })
   })
 })

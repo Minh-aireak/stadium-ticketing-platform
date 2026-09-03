@@ -263,7 +263,7 @@ export function AdminPage() {
                       {draft.showtimes.map((s, i) => (
                         <div key={i} className="flex items-center justify-between rounded-lg border border-border px-4 py-2 text-sm">
                           <span>{s.stadiumName} · {formatKickoff(s.startTime)}</span>
-                          <span className="text-muted">{s.totalSeats} ghế · {formatCurrency(s.basePrice)}</span>
+                          <span className="text-muted">{s.totalSeats} ghế · {formatCurrency(s.basePrice, s.currency)}</span>
                         </div>
                       ))}
                     </div>

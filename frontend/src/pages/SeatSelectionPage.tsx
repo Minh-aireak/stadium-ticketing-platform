@@ -24,6 +24,11 @@ export interface SeatSelectionState {
   showtimeId: string
   startTime: string
   stadiumId: string
+  // The showtime's currency (see match-catalog-service's ShowtimeResponse), handed over by
+  // MatchDetailPage. Every price on this screen and the whole checkout total downstream are
+  // quoted in it; the page used to have no field for it and wrote 'VND' into CheckoutState by
+  // hand instead.
+  currency: string
 }
 
 type TierFilter = 'all' | Seat['tier']
@@ -48,7 +53,7 @@ const tierLegend: { tier: Seat['tier']; label: string; className: string }[] = [
   { tier: 'standard', label: 'Standard', className: 'bg-border' },
 ]
 
-function SeatGuideComponent({ seats }: { seats: Seat[] }) {
+function SeatGuideComponent({ seats, currency }: { seats: Seat[]; currency: string }) {
   const pricesByTier = useMemo(() => {
     const prices = new Map<Seat['tier'], number>()
     seats.forEach((seat) => {
@@ -81,7 +86,7 @@ function SeatGuideComponent({ seats }: { seats: Seat[] }) {
                 <div key={item.tier} className="grid min-h-9 grid-cols-[12px_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border border-border bg-surface-2/60 px-2.5">
                   <span className={`size-2.5 rounded-full ${item.className}`} />
                   <strong className="text-xs">{item.label}</strong>
-                  <span className="text-[10px] text-muted">{price === undefined ? '—' : formatCurrency(price)}</span>
+                  <span className="text-[10px] text-muted">{price === undefined ? '—' : formatCurrency(price, currency)}</span>
                 </div>
               )
             })}
@@ -266,10 +271,10 @@ export function SeatSelectionPage() {
       showtimeId: state.showtimeId,
       seatCodes: selected,
       amount: total,
-      currency: 'VND',
+      currency: state.currency,
     }
     navigate('/checkout', { state: checkoutState })
-  }, [matchId, navigate, selected, state?.matchLabel, state?.showtimeId, total])
+  }, [matchId, navigate, selected, state?.currency, state?.matchLabel, state?.showtimeId, total])
 
   if (!matchId || !state?.showtimeId || !state.startTime || new Date(state.startTime).getTime() <= Date.now()) {
     return <Navigate to={matchId ? `/matches/${matchId}` : '/'} replace />
@@ -292,7 +297,7 @@ export function SeatSelectionPage() {
 
         <div className="grid items-start gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
           <div className="flex min-w-0 flex-col gap-3 lg:sticky lg:top-24">
-            <SeatGuide seats={seats} />
+            <SeatGuide seats={seats} currency={state.currency} />
 
             <Card>
               <CardContent className="flex flex-col gap-4 p-5">
@@ -314,7 +319,7 @@ export function SeatSelectionPage() {
                 </div>
                 <div className="flex items-end justify-between gap-3 border-t border-border pt-4">
                   <div className="text-xs text-muted">Tổng thanh toán</div>
-                  <div className="text-2xl font-bold">{formatCurrency(total)}</div>
+                  <div className="text-2xl font-bold">{formatCurrency(total, state.currency)}</div>
                 </div>
                 <Button
                   variant="gradient"
@@ -340,6 +345,7 @@ export function SeatSelectionPage() {
                 stadium={stadiumMap.stadium}
                 zones={stadiumMap.zones}
                 selected={selected}
+                currency={state.currency}
                 onToggle={toggleSeat}
                 onClearSelection={clearSelection}
               />
@@ -412,6 +418,7 @@ export function SeatSelectionPage() {
                 <SeatMap
                   seats={seats}
                   selected={selected}
+                  currency={state.currency}
                   onToggle={toggleSeat}
                   tierFilter={tierFilter}
                   blockSeatCodes={blockSeatCodes}

@@ -1,15 +1,22 @@
 import { render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { CheckoutPage } from './CheckoutPage'
 import type { CheckoutState } from './CheckoutPage'
 
+const createBooking = vi.fn()
+const unholdSeats = vi.fn()
+
 vi.mock('@/features/auth/AuthContext', () => ({
   useAuth: () => ({ user: { id: 'cust-1', email: 'a@b.test', role: 'USER' } }),
 }))
-vi.mock('@/features/booking/bookingApi', () => ({ createBooking: vi.fn() }))
-vi.mock('@/features/seats/seatsApi', () => ({ unholdSeats: vi.fn() }))
+vi.mock('@/features/booking/bookingApi', () => ({
+  createBooking: (...args: unknown[]) => createBooking(...args),
+}))
+vi.mock('@/features/seats/seatsApi', () => ({
+  unholdSeats: (...args: unknown[]) => unholdSeats(...args),
+}))
 
 const state: CheckoutState = {
   matchId: 'match-1',
@@ -20,13 +27,22 @@ const state: CheckoutState = {
   currency: 'VND',
 }
 
-function renderCheckout() {
+function renderCheckout(overrides: Partial<CheckoutState> = {}) {
   return render(
-    <MemoryRouter initialEntries={[{ pathname: '/checkout', state }]}>
-      <CheckoutPage />
+    <MemoryRouter initialEntries={[{ pathname: '/checkout', state: { ...state, ...overrides } }]}>
+      <Routes>
+        <Route path="/checkout" element={<CheckoutPage />} />
+        <Route path="/checkout/:bookingId/status" element={<div>trang trạng thái</div>} />
+        <Route path="*" element={<div>đã rời trang</div>} />
+      </Routes>
     </MemoryRouter>,
   )
 }
+
+beforeEach(() => {
+  createBooking.mockResolvedValue({ bookingId: 'b-1', status: 'PENDING_PAYMENT' })
+  unholdSeats.mockResolvedValue(undefined)
+})
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -56,5 +72,18 @@ describe('CheckoutPage', () => {
 
     expect(() => renderCheckout()).not.toThrow()
     expect(screen.getByRole('button', { name: /Xác nhận & Thanh toán/ })).toBeDefined()
+  })
+
+  /**
+   * The total on this screen is the number the customer agrees to be charged. It was rendered by
+   * a formatter hard-pinned to VND, so a showtime priced in any other currency — which
+   * match-catalog-service accepts and payment-service charges in — was shown with the đồng
+   * symbol. The currency was in this page's own navigation state the whole time, destructured
+   * out of it and then never used.
+   */
+  it('shows the total in the currency the order is priced in', () => {
+    renderCheckout({ amount: 12.99, currency: 'USD' })
+    expect(screen.getByText(/US\$/)).toBeDefined()
+    expect(screen.queryByText(/₫/)).toBeNull()
   })
 })

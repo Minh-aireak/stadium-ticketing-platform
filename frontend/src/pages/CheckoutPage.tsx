@@ -88,7 +88,7 @@ export function CheckoutPage() {
 
             <div className="flex items-center justify-between border-t border-border pt-4">
               <span className="text-muted">Tổng cộng</span>
-              <span className="text-xl font-bold">{formatCurrency(amount)}</span>
+              <span className="text-xl font-bold">{formatCurrency(amount, currency)}</span>
             </div>
 
             {error && (

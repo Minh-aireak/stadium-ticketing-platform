@@ -110,6 +110,7 @@ export function MatchDetailPage() {
               showtimeId: showtime.showtimeId,
               startTime: showtime.startTime,
               stadiumId: showtime.stadiumId,
+              currency: showtime.currency,
             }
             return (
               <Card key={showtime.showtimeId}>
@@ -123,7 +124,7 @@ export function MatchDetailPage() {
                       <MapPin className="size-4 text-accent" />
                       {showtime.stadiumName}
                     </span>
-                    <span className="text-xs">Giá từ {formatCurrency(showtime.basePrice)}</span>
+                    <span className="text-xs">Giá từ {formatCurrency(showtime.basePrice, showtime.currency)}</span>
                   </div>
                   <div className="flex flex-col items-end gap-2">
                     <div className="text-sm font-medium">
