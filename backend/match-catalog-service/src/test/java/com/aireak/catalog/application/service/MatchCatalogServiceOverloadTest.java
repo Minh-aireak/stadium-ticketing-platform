@@ -129,7 +129,7 @@ class MatchCatalogServiceOverloadTest {
                 MatchStatus.DRAFT, Instant.now(),
                 List.of(new Showtime("showtime-1", Instant.now().plusSeconds(3600), "venue-1",
                         100, 100, new BigDecimal("150000"), "VND")));
-        when(matchRepository.findById("match-1")).thenReturn(Optional.of(draft));
+        when(matchRepository.findByIdForUpdate("match-1")).thenReturn(Optional.of(draft));
 
         assertThatCode(() -> createMatchUseCase.createMatch("Home FC", "Away FC", "Premier League"))
                 .doesNotThrowAnyException();

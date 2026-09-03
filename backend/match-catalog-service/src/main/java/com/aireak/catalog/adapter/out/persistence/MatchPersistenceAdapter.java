@@ -37,6 +37,16 @@ public class MatchPersistenceAdapter implements MatchRepository {
                 .map(e -> toDomain(e, e.getShowtimes()));
     }
 
+    /**
+     * Identical to {@link #findById} here — this adapter has no cache to bypass. The two stay
+     * separate methods because {@link CachingMatchRepository} is what the application layer
+     * actually holds, and there they are genuinely different reads.
+     */
+    @Override
+    public Optional<Match> findByIdForUpdate(String matchId) {
+        return findById(matchId);
+    }
+
     @Override
     public Optional<Match> findByShowtimeId(String showtimeId) {
         return jpaRepository.findByShowtimeId(showtimeId)

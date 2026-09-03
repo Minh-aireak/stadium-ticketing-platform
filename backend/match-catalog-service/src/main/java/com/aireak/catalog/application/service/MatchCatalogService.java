@@ -137,8 +137,14 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
         log.info("Match cancelled: id={}, reason={}", matchId, reason);
     }
 
+    /**
+     * Every write use case above loads through here, and every one of them saves what it gets
+     * back — so this deliberately takes the uncached, un-overlaid read
+     * ({@link MatchRepository#findByIdForUpdate}) rather than the one the browse endpoints use.
+     * See that method for what went into Postgres when it did not.
+     */
     private Match findOrThrow(String matchId) {
-        return matchRepository.findById(matchId)
+        return matchRepository.findByIdForUpdate(matchId)
                 .orElseThrow(() -> new MatchNotFoundException(matchId));
     }
 

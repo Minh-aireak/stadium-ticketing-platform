@@ -170,6 +170,43 @@ class CachingMatchRepositoryTest {
         verify(delegate, times(1)).findAllByIds(any()); // overlay didn't require a fresh DB load
     }
 
+    /**
+     * The write path (publish/cancel/complete/addShowtime) loads the aggregate, mutates it and
+     * saves it straight back, so whatever it is handed is what reaches {@code showtimes}. Handing
+     * it the live-seat overlay wrote a Redis number into the column Redis is supposed to be a
+     * cache OF — and {@code SoldSeatsProjectionService} then reseeds Redis from that column, so a
+     * counter that had drifted (clamped at zero by an oversell, say) became the durable truth.
+     */
+    @Test
+    void findByIdForUpdateReturnsTheCommittedSeatCountNotTheLiveOverlay() {
+        Match match = aPublishedMatch("match-1", "showtime-1", 60);
+        when(delegate.findById("match-1")).thenReturn(java.util.Optional.of(match));
+        seedLiveSeatCount("showtime-1", 0);
+
+        var forUpdate = repository.findByIdForUpdate("match-1");
+
+        assertThat(forUpdate).isPresent();
+        assertThat(forUpdate.get().getShowtimes().get(0).getAvailableSeats()).isEqualTo(60);
+    }
+
+    /**
+     * Neither tier, not just no overlay. The local tier cannot be invalidated across pods, so a
+     * write built on a cached aggregate could merge a showtime list that another instance had
+     * already added to — and {@code MatchJpaEntity.showtimes} is {@code orphanRemoval = true}.
+     */
+    @Test
+    void findByIdForUpdateNeverServesAWriteFromEitherCacheTier() {
+        Match match = aPublishedMatch("match-1", "showtime-1", 60);
+        when(delegate.findAllByIds(List.of("match-1"))).thenReturn(List.of(match));
+        when(delegate.findById("match-1")).thenReturn(java.util.Optional.of(match));
+
+        repository.findById("match-1");        // populates the local + Redis tiers
+        repository.findByIdForUpdate("match-1");
+        repository.findByIdForUpdate("match-1");
+
+        verify(delegate, times(2)).findById("match-1");
+    }
+
     @Test
     void findByStatusCachesTheIdListSoASecondPageRequestSkipsTheFullScan() {
         Match match1 = aPublishedMatch("match-1", "showtime-1", 100);

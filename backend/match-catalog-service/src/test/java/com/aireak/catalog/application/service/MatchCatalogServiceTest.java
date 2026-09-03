@@ -81,7 +81,7 @@ class MatchCatalogServiceTest {
     void addShowtimeLoadsMutatesSavesAndPublishesEvent() {
         Match existing = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
                 MatchStatus.DRAFT, Instant.now(), List.of());
-        when(matchRepository.findById("match-1")).thenReturn(Optional.of(existing));
+        when(matchRepository.findByIdForUpdate("match-1")).thenReturn(Optional.of(existing));
         Instant startTime = Instant.now().plusSeconds(7200);
 
         service.addShowtime("match-1", startTime, "my-dinh", BASE_PRICE, "VND");
@@ -105,7 +105,7 @@ class MatchCatalogServiceTest {
     void addShowtimeSeedsTheLiveSeatCounterWithTheStadiumsFullCapacity() {
         Match existing = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
                 MatchStatus.DRAFT, Instant.now(), List.of());
-        when(matchRepository.findById("match-1")).thenReturn(Optional.of(existing));
+        when(matchRepository.findByIdForUpdate("match-1")).thenReturn(Optional.of(existing));
 
         service.addShowtime("match-1", Instant.now().plusSeconds(7200), "my-dinh", BASE_PRICE, "VND");
 
@@ -124,7 +124,7 @@ class MatchCatalogServiceTest {
 
     @Test
     void addShowtimeThrowsWhenMatchNotFound() {
-        when(matchRepository.findById("missing")).thenReturn(Optional.empty());
+        when(matchRepository.findByIdForUpdate("missing")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.addShowtime(
                 "missing", Instant.now().plusSeconds(3600), "my-dinh", BASE_PRICE, "VND"))
@@ -137,7 +137,7 @@ class MatchCatalogServiceTest {
                 "match-1", Instant.now().minusSeconds(1), "my-dinh", BASE_PRICE, "VND"))
                 .isInstanceOf(InvalidShowtimeException.class);
 
-        verify(matchRepository, never()).findById(any());
+        verify(matchRepository, never()).findByIdForUpdate(any());
     }
 
     @Test
@@ -147,7 +147,7 @@ class MatchCatalogServiceTest {
                 .isInstanceOf(InvalidShowtimeException.class)
                 .hasMessageContaining("Unknown stadium");
 
-        verify(matchRepository, never()).findById(any());
+        verify(matchRepository, never()).findByIdForUpdate(any());
         verify(matchRepository, never()).save(any());
     }
 
@@ -166,7 +166,7 @@ class MatchCatalogServiceTest {
     @Test
     void publishMatchSavesIndexesAndPublishesEvent() {
         Match existing = matchWithShowtime("match-1");
-        when(matchRepository.findById("match-1")).thenReturn(Optional.of(existing));
+        when(matchRepository.findByIdForUpdate("match-1")).thenReturn(Optional.of(existing));
 
         service.publishMatch("match-1");
 
@@ -188,7 +188,7 @@ class MatchCatalogServiceTest {
         // swallow it or index/publish a match that never actually transitioned.
         Match draftWithNoShowtimes = Match.reconstitute("match-1", "Home FC", "Away FC",
                 "Premier League", MatchStatus.DRAFT, Instant.now(), List.of());
-        when(matchRepository.findById("match-1")).thenReturn(Optional.of(draftWithNoShowtimes));
+        when(matchRepository.findByIdForUpdate("match-1")).thenReturn(Optional.of(draftWithNoShowtimes));
 
         assertThatThrownBy(() -> service.publishMatch("match-1"))
                 .isInstanceOf(InvalidMatchStatusException.class);
@@ -202,7 +202,7 @@ class MatchCatalogServiceTest {
     void completeMatchTransitionsSavesAndPublishesEvent() {
         Match published = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
                 MatchStatus.PUBLISHED, Instant.now(), List.of());
-        when(matchRepository.findById("match-1")).thenReturn(Optional.of(published));
+        when(matchRepository.findByIdForUpdate("match-1")).thenReturn(Optional.of(published));
 
         service.completeMatch("match-1");
 
@@ -219,7 +219,7 @@ class MatchCatalogServiceTest {
     @Test
     void cancelMatchTransitionsSavesAndPublishesEventWithShowtimeIdsAndReason() {
         Match published = matchWithShowtime("match-1");
-        when(matchRepository.findById("match-1")).thenReturn(Optional.of(published));
+        when(matchRepository.findByIdForUpdate("match-1")).thenReturn(Optional.of(published));
 
         service.cancelMatch("match-1", "Stadium closed for safety inspection");
 
@@ -241,7 +241,7 @@ class MatchCatalogServiceTest {
         // listMatches report a total that counted matches it had already filtered out of the page.
         Match published = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
                 MatchStatus.PUBLISHED, Instant.now(), List.of());
-        when(matchRepository.findById("match-1")).thenReturn(Optional.of(published));
+        when(matchRepository.findByIdForUpdate("match-1")).thenReturn(Optional.of(published));
 
         service.completeMatch("match-1");
 
@@ -254,7 +254,7 @@ class MatchCatalogServiceTest {
     void cancelMatchReindexesAPublishedMatchAndLeavesADraftOutOfTheIndex() {
         Match published = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
                 MatchStatus.PUBLISHED, Instant.now(), List.of());
-        when(matchRepository.findById("match-1")).thenReturn(Optional.of(published));
+        when(matchRepository.findByIdForUpdate("match-1")).thenReturn(Optional.of(published));
 
         service.cancelMatch("match-1", "Stadium closed");
 
@@ -265,7 +265,7 @@ class MatchCatalogServiceTest {
         // A DRAFT match can be cancelled too, but was never indexed — writing it now would put a
         // match that was never public into a public search index for the status filter to hide.
         Match draft = matchWithShowtime("match-2");
-        when(matchRepository.findById("match-2")).thenReturn(Optional.of(draft));
+        when(matchRepository.findByIdForUpdate("match-2")).thenReturn(Optional.of(draft));
 
         service.cancelMatch("match-2", "Never went on sale");
 
@@ -274,7 +274,7 @@ class MatchCatalogServiceTest {
 
     @Test
     void cancelMatchThrowsWhenMatchNotFound() {
-        when(matchRepository.findById("missing")).thenReturn(Optional.empty());
+        when(matchRepository.findByIdForUpdate("missing")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.cancelMatch("missing", "reason"))
                 .isInstanceOf(MatchNotFoundException.class);
@@ -282,10 +282,28 @@ class MatchCatalogServiceTest {
 
     @Test
     void completeMatchThrowsWhenMatchNotFound() {
-        when(matchRepository.findById("missing")).thenReturn(Optional.empty());
+        when(matchRepository.findByIdForUpdate("missing")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.completeMatch("missing"))
                 .isInstanceOf(MatchNotFoundException.class);
+    }
+
+    /**
+     * The write path must not read through {@link com.aireak.catalog.adapter.out.persistence.CachingMatchRepository}.
+     * What {@code findById} returns has its {@code availableSeats} overwritten from the live Redis
+     * counter, and the aggregate handed back here is saved straight back to Postgres — so reading
+     * the write path through the read cache persisted a cache value over the column that cache is
+     * a cache of.
+     */
+    @Test
+    void everyWriteUseCaseLoadsTheAggregateOffTheWritePathReadNotTheCachedOne() {
+        Match draft = matchWithShowtime("match-1");
+        when(matchRepository.findByIdForUpdate("match-1")).thenReturn(Optional.of(draft));
+
+        service.publishMatch("match-1");
+
+        verify(matchRepository).findByIdForUpdate("match-1");
+        verify(matchRepository, never()).findById(any());
     }
 
     @Test

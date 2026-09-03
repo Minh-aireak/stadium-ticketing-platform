@@ -43,6 +43,10 @@ import java.util.Optional;
  * right before returning (falling back to whatever the cached/loaded Match already carried on a
  * miss there) — see {@link #overlayLiveSeats}.
  *
+ * <p>Everything here is the READ side. The write path takes {@link #findByIdForUpdate}, which
+ * bypasses both tiers and the overlay — see that method for what a write built on a cached,
+ * overlaid aggregate persisted.
+ *
  * <p>Local TTL is the practical bound on how stale an admin write (publish/cancel/complete) can
  * look on a DIFFERENT pod — {@link #save} actively invalidates Redis, but there is no way to reach
  * into another pod's local cache. Same trade-off booking-service's {@code RedissonIdempotencyStore}
@@ -80,6 +84,22 @@ public class CachingMatchRepository implements MatchRepository {
     @Override
     public Optional<Match> findById(String matchId) {
         return loadAll(List.of(matchId)).stream().findFirst();
+    }
+
+    /**
+     * Straight to the database, past both tiers and past {@link #overlayLiveSeats}.
+     *
+     * <p>Everything this class does to a Match on the way out is right for a read and wrong for a
+     * write. The overlay replaces {@code availableSeats} with the live Redis counter — the value
+     * this class's own javadoc says is never to be trusted from a cache — and a write saves the
+     * aggregate back, so that value landed in {@code showtimes.available_seats}. The tiers add the
+     * second half: the local one has no cross-instance invalidation, so a write could be built on
+     * a showtime list another instance had already added to, and the mapping's
+     * {@code orphanRemoval = true} deletes whatever is missing from it.
+     */
+    @Override
+    public Optional<Match> findByIdForUpdate(String matchId) {
+        return delegate.findById(matchId);
     }
 
     @Override
