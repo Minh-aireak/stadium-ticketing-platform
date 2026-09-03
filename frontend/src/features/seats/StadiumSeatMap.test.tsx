@@ -70,6 +70,23 @@ describe('StadiumSeatMap seat naming', () => {
     expect(screen.getByLabelText(/^Ghế A8,/)).toBeDefined()
   })
 
+  /**
+   * The same fabricated name reached the two places a sighted customer actually reads. The
+   * tooltip was `${row.label}${displayNumber} · Mã ${seat.code} · …` — "A14 · Mã A2 · 100.000 ₫",
+   * leading with the wrong seat — and the number drawn inside the rectangle was `{displayNumber}`,
+   * so seat A2 had a "14" printed on it. Pinning only the aria-label left two thirds of the fix
+   * free to regress in silence.
+   */
+  it('titles a seat and prints its number by its own code, never by its slot position', () => {
+    renderStadium()
+
+    const a2 = screen.getByLabelText(/^Ghế A2,/)
+
+    // Not a plain-space literal: Intl separates the amount from the symbol with U+00A0.
+    expect(a2.querySelector('title')?.textContent).toMatch(/^A2 · standard · 100\.000\s₫$/u)
+    expect(a2.querySelector('text')?.textContent).toBe('2')
+  })
+
   it('still labels an empty slot by its position, since it has no seat to name', () => {
     renderStadium()
 
