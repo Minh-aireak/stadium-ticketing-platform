@@ -62,9 +62,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return result.accountId
       },
       async logout() {
-        await authApi.logout()
-        setUser(null)
-        setStatus('anonymous')
+        try {
+          await authApi.logout()
+        } finally {
+          // Clear local state whichever way the request went, then let the rejection through.
+          // authApi.logout drops the in-memory access token in its own finally, so on a failed
+          // request this used to leave `user` and `status` untouched: the navbar kept showing
+          // the customer's email and a "Đăng xuất" button while the app no longer held a token
+          // to make requests with. The next protected call then 401'd, the response interceptor
+          // spent the refresh cookie the server had never been told to revoke, and the session
+          // came back — a logout that looked like it did nothing and, on the server, hadn't.
+          setUser(null)
+          setStatus('anonymous')
+        }
       },
     }),
     [user, status],

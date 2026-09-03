@@ -62,8 +62,19 @@ export function AccountPage() {
   }, [page, toast])
 
   async function handleLogout() {
-    await logout()
-    navigate('/')
+    try {
+      await logout()
+    } catch (err: unknown) {
+      // The local session is gone either way (see AuthContext#logout), but the server may still
+      // hold the refresh session, so say so rather than letting the rejection go unhandled.
+      toast({
+        title: 'Đăng xuất chưa hoàn tất',
+        description: getErrorMessage(err, 'Không thể báo cho máy chủ. Vui lòng thử đăng xuất lại.'),
+        variant: 'error',
+      })
+    } finally {
+      navigate('/')
+    }
   }
 
   const totalPages = Math.max(1, Math.ceil(totalElements / PAGE_SIZE))

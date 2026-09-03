@@ -5,6 +5,8 @@ import { Link, useNavigate } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/features/auth/AuthContext'
+import { useToast } from '@/hooks/useToast'
+import { getErrorMessage } from '@/lib/errors'
 
 const navLinks = [
   { label: 'Trận đấu', to: '/#matches' },
@@ -15,11 +17,23 @@ export function Navbar() {
   const [open, setOpen] = useState(false)
   const { user, status, logout } = useAuth()
   const navigate = useNavigate()
+  const { toast } = useToast()
 
   async function handleLogout() {
     setOpen(false)
-    await logout()
-    navigate('/')
+    try {
+      await logout()
+    } catch (err: unknown) {
+      // See AccountPage#handleLogout: the local session is cleared regardless, but a failed
+      // request means the server was never told, and the customer needs to know to retry.
+      toast({
+        title: 'Đăng xuất chưa hoàn tất',
+        description: getErrorMessage(err, 'Không thể báo cho máy chủ. Vui lòng thử đăng xuất lại.'),
+        variant: 'error',
+      })
+    } finally {
+      navigate('/')
+    }
   }
 
   return (
