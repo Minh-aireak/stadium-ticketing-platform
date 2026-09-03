@@ -1,6 +1,7 @@
 package com.aireak.gateway.filter;
 
 import com.aireak.gateway.config.JwtValidationProperties;
+import com.aireak.gateway.util.ProblemDetailJson;
 import com.aireak.gateway.util.PublicPathMatcher;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.JWSVerifier;
@@ -23,7 +24,6 @@ import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
-import tools.jackson.databind.json.JsonMapper;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -68,8 +68,6 @@ public class JwtAuthenticationWebFilter implements WebFilter, Ordered {
     private final JWSVerifier primaryVerifier;
     private final JWSVerifier previousVerifier;
     private final JwtValidationProperties properties;
-    private final JsonMapper jsonMapper = JsonMapper.builder().findAndAddModules(
-            JwtAuthenticationWebFilter.class.getClassLoader()).build();
 
     public JwtAuthenticationWebFilter(JwtValidationProperties properties) {
         this.properties = properties;
@@ -170,15 +168,23 @@ public class JwtAuthenticationWebFilter implements WebFilter, Ordered {
     }
 
     /**
-     * Builds the 401 body with {@link JsonMapper}, not string concatenation. {@code instance}
+     * Builds the 401 body with {@link ProblemDetailJson}, not string concatenation. {@code instance}
      * carries the request path, and {@code URI#getPath()} returns it DECODED — a request to
      * {@code /api/v1/bookings/x%22,%22role%22:%22admin} used to put a raw quote straight into the
      * JSON, letting any unauthenticated caller inject arbitrary fields into (or simply corrupt)
      * this response. Serializing a {@link ProblemDetail} escapes it, and matches how every other
      * error response in the platform is produced (see common's {@code JwtAuthenticationFilter}).
+     *
+     * <p>{@code getRawPath()}, though, not {@code getPath()}. Escaping was only half of it: the
+     * decoded form still reached {@link URI#create} on the line that sets {@code instance}, and a
+     * quote is not a legal URI character — so that same request answered
+     * {@code IllegalArgumentException: Illegal character in path}, which propagates out of this
+     * filter and reaches {@code GatewayExceptionHandler} as a 500. Any unauthenticated caller
+     * could turn every 401 this filter issues into an internal error by putting {@code %22} in
+     * the path. The encoded form is what the client sent and is URI-legal by construction.
      */
     private Mono<Void> unauthorized(ServerWebExchange exchange, String reason) {
-        String path = exchange.getRequest().getURI().getPath();
+        String path = exchange.getRequest().getURI().getRawPath();
         CorrelationIdWebFilter.withCorrelationId(exchange, () ->
                 log.debug("Rejected request to {}: {}", path, reason));
         ServerHttpResponse response = exchange.getResponse();
@@ -192,7 +198,7 @@ public class JwtAuthenticationWebFilter implements WebFilter, Ordered {
         problem.setProperty("timestamp", Instant.now());
 
         DataBuffer buffer = response.bufferFactory()
-                .wrap(jsonMapper.writeValueAsBytes(problem));
+                .wrap(ProblemDetailJson.toBytes(problem));
         return response.writeWith(Mono.just(buffer));
     }
 }

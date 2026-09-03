@@ -75,7 +75,7 @@ public class CorrelationIdWebFilter implements WebFilter, Ordered {
      * costs nothing at runtime and adds no dependency.
      */
     public static void withCorrelationId(ServerWebExchange exchange, Runnable logging) {
-        String correlationId = exchange.getRequest().getHeaders().getFirst(HEADER_NAME);
+        String correlationId = appliedCorrelationId(exchange);
         if (correlationId == null) {
             // Only reachable when the failure happened before this filter ran: @Order(-100) puts it
             // ahead of every other gateway filter, but not ahead of an error thrown while the
@@ -91,6 +91,33 @@ public class CorrelationIdWebFilter implements WebFilter, Ordered {
             // leaked entry would stamp the next request's log lines with this request's ID.
             MDC.remove(MDC_KEY);
         }
+    }
+
+    /**
+     * The correlation ID this exchange was actually processed and logged under, or {@code null}
+     * when {@link #filter} never ran for it.
+     *
+     * <p>Reads the RESPONSE header this filter set, not the request header, and the difference is
+     * not cosmetic. {@link #filter} sanitises by handing the chain a mutated <em>copy</em> of the
+     * exchange; the original still carries the client's raw header. Everything inside the chain
+     * sees the copy, but a {@code WebExceptionHandler} does not run inside the chain —
+     * {@code ExceptionHandlingWebHandler} sits above {@code FilteringWebHandler} and hands the
+     * handler the exchange it received itself. So on the error path the request header is
+     * whatever arrived from the network, and that value would otherwise reach both the MDC (and
+     * from there a top-level field of the ECS log file) and the error body. The response header is
+     * set on the shared response object before the mutation, so it is the sanitised value for
+     * both copies.
+     *
+     * <p>Falls back to the request header only after re-checking it, which covers the one case
+     * where no response header exists yet: a failure raised before this filter ran at all.
+     */
+    public static String appliedCorrelationId(ServerWebExchange exchange) {
+        String applied = exchange.getResponse().getHeaders().getFirst(HEADER_NAME);
+        if (applied != null) {
+            return applied;
+        }
+        String inbound = exchange.getRequest().getHeaders().getFirst(HEADER_NAME);
+        return isValid(inbound) ? inbound : null;
     }
 
     private static boolean isValid(String candidate) {

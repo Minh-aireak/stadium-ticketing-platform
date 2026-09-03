@@ -9,12 +9,14 @@ import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -24,6 +26,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 class JwtAuthenticationWebFilterTest {
 
@@ -327,6 +330,27 @@ class JwtAuthenticationWebFilterTest {
                 .issueTime(Date.from(Instant.now()))
                 .expirationTime(Date.from(Instant.now().plusSeconds(300)))
                 .build(), SECRET);
+    }
+
+    /**
+     * A quote in the path used to answer with an internal error instead of a 401. The 401 body is
+     * built from a {@code ProblemDetail} whose {@code instance} is set from
+     * {@code URI.create(path)}, and the path was taken DECODED — so {@code %22} became a raw
+     * quote, which {@code URI.create} rejects outright. The resulting
+     * {@code IllegalArgumentException} propagates out of the filter and lands on
+     * {@code GatewayExceptionHandler} as a 500, which any unauthenticated caller could trigger on
+     * demand for every protected path on the platform.
+     */
+    @Test
+    void aQuoteInThePathStillYieldsA401RatherThanAnInternalError() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.method(HttpMethod.GET,
+                        URI.create("/api/v1/bookings/x%22,%22role%22:%22admin")).build());
+
+        assertThatCode(() -> filter.filter(exchange, ex -> Mono.empty()).block(Duration.ofSeconds(5)))
+                .doesNotThrowAnyException();
+
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     private static String buildToken(JWTClaimsSet claims, String secret) {

@@ -5,15 +5,16 @@ import org.springframework.core.annotation.Order;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ProblemDetail;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
+import com.aireak.gateway.util.ProblemDetailJson;
 import reactor.core.publisher.Mono;
 
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 
 /**
@@ -57,16 +58,26 @@ public class ActuatorAccessWebFilter implements WebFilter, Ordered {
                 && !path.startsWith("/actuator/prometheus");
     }
 
+    /**
+     * Builds the 403 body with {@link ProblemDetailJson}, not string concatenation, for the reason
+     * {@code JwtAuthenticationWebFilter} already documents on its own 401: {@code instance}
+     * carries the request path, and a path can contain a quote. Taken here in its still-encoded
+     * form ({@code getRawPath()}), which is both what the client sent and the only form
+     * {@link URI#create} accepts — the decoded one is rejected as an illegal character, turning
+     * the 403 into a 500.
+     */
     private Mono<Void> forbidden(ServerWebExchange exchange, String detail) {
         ServerHttpResponse response = exchange.getResponse();
         response.setStatusCode(HttpStatus.FORBIDDEN);
         response.getHeaders().setContentType(MediaType.APPLICATION_PROBLEM_JSON);
 
-        String body = String.format(
-                "{\"type\":\"%sforbidden\",\"title\":\"Forbidden\",\"status\":403,\"detail\":\"%s\",\"instance\":\"%s\",\"timestamp\":\"%s\"}",
-                TYPE_BASE, detail, exchange.getRequest().getURI().getPath(), Instant.now()
-        );
-        DataBuffer buffer = response.bufferFactory().wrap(body.getBytes(StandardCharsets.UTF_8));
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, detail);
+        problem.setType(URI.create(TYPE_BASE + "forbidden"));
+        problem.setTitle("Forbidden");
+        problem.setInstance(URI.create(exchange.getRequest().getURI().getRawPath()));
+        problem.setProperty("timestamp", Instant.now());
+
+        DataBuffer buffer = response.bufferFactory().wrap(ProblemDetailJson.toBytes(problem));
         return response.writeWith(Mono.just(buffer));
     }
 }
