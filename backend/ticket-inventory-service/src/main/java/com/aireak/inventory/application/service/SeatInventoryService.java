@@ -159,7 +159,7 @@ public class SeatInventoryService implements ReserveSeatsUseCase, ReleaseSeatsUs
                     // the actual release so there's no gap between the check and the effect.
                     // An internal-service-token call skips this: it's already trusted the same
                     // way confirm is (see SeatInventoryController#requireInternalService).
-                    if (command.requestingCustomerId() != null && !seatHoldPort.isHeldByCustomerAndBooking(
+                    if (command.requestingCustomerId() != null && !seatHoldPort.isFreeOfHoldsByOtherOwners(
                             command.showtimeId(), seatCodes, command.requestingCustomerId(), command.bookingId())) {
                         throw new ForbiddenException(
                                 "Caller does not own the reservation being released");

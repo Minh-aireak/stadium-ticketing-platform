@@ -229,11 +229,11 @@ class SeatInventoryServiceTest {
 
     // CRIT-2-01: an internal-service-token release (no requestingCustomerId — see
     // ReleaseSeatsCommand's 3-arg constructor, exercised by releaseRemovesHoldsAndPublishesEvent
-    // above) is trusted unconditionally and never calls isHeldByCustomerAndBooking. A
+    // above) is trusted unconditionally and never calls isFreeOfHoldsByOtherOwners. A
     // customer-token release must own the reservation it's releasing.
     @Test
     void releaseWithCustomerTokenSucceedsWhenCallerOwnsTheReservation() {
-        when(seatHoldPort.isHeldByCustomerAndBooking(SHOWTIME_ID, SEAT_CODES, CUSTOMER_ID, BOOKING_ID))
+        when(seatHoldPort.isFreeOfHoldsByOtherOwners(SHOWTIME_ID, SEAT_CODES, CUSTOMER_ID, BOOKING_ID))
                 .thenReturn(true);
 
         service.execute(new ReleaseSeatsCommand(SHOWTIME_ID, BOOKING_ID, SEAT_CODE_STRINGS, CUSTOMER_ID));
@@ -245,7 +245,7 @@ class SeatInventoryServiceTest {
     @Test
     void releaseWithCustomerTokenThrowsForbiddenWhenCallerDoesNotOwnTheReservationAndNeverReleases() {
         String attackerId = "attacker-1";
-        when(seatHoldPort.isHeldByCustomerAndBooking(SHOWTIME_ID, SEAT_CODES, attackerId, BOOKING_ID))
+        when(seatHoldPort.isFreeOfHoldsByOtherOwners(SHOWTIME_ID, SEAT_CODES, attackerId, BOOKING_ID))
                 .thenReturn(false);
 
         assertThatThrownBy(() -> service.execute(

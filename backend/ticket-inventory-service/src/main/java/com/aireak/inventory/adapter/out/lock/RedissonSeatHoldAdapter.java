@@ -30,7 +30,7 @@ import java.util.stream.Collectors;
  *         {@code "{customerId}" + OWNER_SEP + "{bookingId}"}, so the owning customer stays
  *         recoverable even though every other port method (and every Redisson-external caller)
  *         only ever refers to the hold by bookingId. This is what lets
- *         {@link #isHeldByCustomerAndBooking} verify a customer-token release actually owns the
+ *         {@link #isFreeOfHoldsByOtherOwners} verify a customer-token release actually owns the
  *         reservation instead of trusting a bookingId path variable alone.</li>
  * </ul>
  *
@@ -49,7 +49,7 @@ public class RedissonSeatHoldAdapter implements SeatHoldPort {
 
     // Unlikely to ever appear inside a UUID-shaped customerId/bookingId; if it ever did, the
     // owner would just fail to parse as a confirmed hold and be treated as a plain-owner value
-    // (matches nothing when compared for isHeldByCustomerAndBooking) — no ambiguity, fails closed.
+    // (matches nothing when compared for isFreeOfHoldsByOtherOwners) — no ambiguity, fails closed.
     private static final String OWNER_SEP = "::";
 
     private final RedissonClient redissonClient;
@@ -60,21 +60,26 @@ public class RedissonSeatHoldAdapter implements SeatHoldPort {
     @Override
     public void holdSeats(String showtimeId, List<SeatCode> seatCodes, String bookingId) {
         RMapCache<String, String> holds = redissonClient.getMapCache(CACHE_NAME);
-        List<SeatCode> placed = new ArrayList<>();
+        // Only what THIS call newly wrote, so the rollback below undoes exactly its own effect —
+        // a seat the owner already held before this call was not placed here and must survive it.
+        List<SeatCode> newlyPlaced = new ArrayList<>();
         List<SeatCode> unavailable = new ArrayList<>();
 
         for (SeatCode seatCode : seatCodes) {
             String key = holdKey(showtimeId, seatCode);
             String previous = holds.putIfAbsent(key, bookingId, holdTtlMinutes, TimeUnit.MINUTES);
             if (previous == null) {
-                placed.add(seatCode);
-            } else {
+                newlyPlaced.add(seatCode);
+            } else if (!previous.equals(bookingId)) {
                 unavailable.add(seatCode);
             }
+            // else: already held by this same owner — a retried request (double-click, network
+            // retry) is a success, not a conflict. Reporting the caller's own seat as taken used
+            // to fail the whole call AND roll back the seats placed alongside it.
         }
 
         if (!unavailable.isEmpty()) {
-            placed.forEach(seatCode -> holds.remove(holdKey(showtimeId, seatCode), bookingId));
+            newlyPlaced.forEach(seatCode -> holds.remove(holdKey(showtimeId, seatCode), bookingId));
             throw new SeatsNotAvailableException(showtimeId, unavailable);
         }
 
@@ -105,9 +110,11 @@ public class RedissonSeatHoldAdapter implements SeatHoldPort {
         // previousOwnerId is always the JWT-authenticated customer confirming their own
         // pre-booking hold into newOwnerId (a bookingId) — see ReserveSeatsCommand. Stored as a
         // composite value (see class javadoc) so the customer stays attributable later, e.g. for
-        // isHeldByCustomerAndBooking.
+        // isFreeOfHoldsByOtherOwners.
         String confirmedOwner = encodeConfirmedOwner(previousOwnerId, newOwnerId);
-        List<SeatCode> placed = new ArrayList<>();
+        // Only what THIS call newly wrote — see holdSeats for why the rollback must not undo a
+        // hold that was already confirmed to this same booking by an earlier attempt.
+        List<SeatCode> newlyPlaced = new ArrayList<>();
         List<SeatCode> unavailable = new ArrayList<>();
 
         for (SeatCode seatCode : seatCodes) {
@@ -118,19 +125,24 @@ public class RedissonSeatHoldAdapter implements SeatHoldPort {
             // or was never placed — falling back to a plain new hold.
             if (holds.remove(key, previousOwnerId)) {
                 holds.put(key, confirmedOwner, holdTtlMinutes, TimeUnit.MINUTES);
-                placed.add(seatCode);
+                newlyPlaced.add(seatCode);
                 continue;
             }
             String previous = holds.putIfAbsent(key, confirmedOwner, holdTtlMinutes, TimeUnit.MINUTES);
             if (previous == null) {
-                placed.add(seatCode);
-            } else {
+                newlyPlaced.add(seatCode);
+            } else if (!confirmedOwner.equals(previous)) {
                 unavailable.add(seatCode);
             }
+            // else: this exact booking already owns the hold — the confirm has simply run before.
+            // booking-service's reserveSeats carries @Retry, so a read timeout on a request the
+            // server actually completed re-enters here; treating that replay as "seats not
+            // available" used to fail the saga and cancel a booking whose seats were correctly
+            // held, leaving them locked out for the full hold TTL.
         }
 
         if (!unavailable.isEmpty()) {
-            placed.forEach(seatCode -> holds.remove(holdKey(showtimeId, seatCode), confirmedOwner));
+            newlyPlaced.forEach(seatCode -> holds.remove(holdKey(showtimeId, seatCode), confirmedOwner));
             throw new SeatsNotAvailableException(showtimeId, unavailable);
         }
 
@@ -139,12 +151,15 @@ public class RedissonSeatHoldAdapter implements SeatHoldPort {
     }
 
     @Override
-    public boolean isHeldByCustomerAndBooking(String showtimeId, List<SeatCode> seatCodes, String customerId,
+    public boolean isFreeOfHoldsByOtherOwners(String showtimeId, List<SeatCode> seatCodes, String customerId,
                                               String bookingId) {
         RMapCache<String, String> holds = redissonClient.getMapCache(CACHE_NAME);
         String expectedOwner = encodeConfirmedOwner(customerId, bookingId);
         for (SeatCode seatCode : seatCodes) {
             String current = holds.get(holdKey(showtimeId, seatCode));
+            // A seat with no active hold passes deliberately — see the port's javadoc. Absence is
+            // not ownership, which is exactly why this method is NOT named for ownership: it
+            // answers "nobody else holds this", the only question the release path needs.
             if (current != null && !current.equals(expectedOwner)) {
                 return false;
             }

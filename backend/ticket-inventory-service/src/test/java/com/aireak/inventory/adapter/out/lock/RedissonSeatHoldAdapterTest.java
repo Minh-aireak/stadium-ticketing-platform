@@ -20,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Exercises {@link RedissonSeatHoldAdapter} against a real Redis (Testcontainers) — the
  * confirmed-hold owner encoding (customerId + bookingId, see the adapter's class javadoc) that
- * backs {@link com.aireak.inventory.application.port.out.SeatHoldPort#isHeldByCustomerAndBooking}
+ * backs {@link com.aireak.inventory.application.port.out.SeatHoldPort#isFreeOfHoldsByOtherOwners}
  * (CRIT-2-01: verifying a customer-token release actually owns the reservation) is exactly the
  * kind of string-format detail worth checking against real Redis rather than mocking.
  */
@@ -60,27 +60,27 @@ class RedissonSeatHoldAdapterTest {
         adapter.holdSeats(showtimeId, seats, customerId);
         adapter.confirmHold(showtimeId, seats, customerId, bookingId);
 
-        assertThat(adapter.isHeldByCustomerAndBooking(showtimeId, seats, customerId, bookingId)).isTrue();
+        assertThat(adapter.isFreeOfHoldsByOtherOwners(showtimeId, seats, customerId, bookingId)).isTrue();
     }
 
     @Test
-    void isHeldByCustomerAndBookingRejectsADifferentCustomerOrBooking() {
+    void isFreeOfHoldsByOtherOwnersRejectsADifferentCustomerOrBooking() {
         String showtimeId = uniqueShowtime();
         List<SeatCode> seats = List.of(new SeatCode("A1"));
         adapter.confirmHold(showtimeId, seats, "customer-1", "booking-1");
 
         // Wrong customer, correct booking — an attacker who somehow learned the real bookingId.
-        assertThat(adapter.isHeldByCustomerAndBooking(showtimeId, seats, "attacker", "booking-1")).isFalse();
+        assertThat(adapter.isFreeOfHoldsByOtherOwners(showtimeId, seats, "attacker", "booking-1")).isFalse();
         // Correct customer, wrong booking.
-        assertThat(adapter.isHeldByCustomerAndBooking(showtimeId, seats, "customer-1", "booking-2")).isFalse();
+        assertThat(adapter.isFreeOfHoldsByOtherOwners(showtimeId, seats, "customer-1", "booking-2")).isFalse();
     }
 
     @Test
-    void isHeldByCustomerAndBookingPassesVacuouslyWhenNoHoldIsActive() {
+    void isFreeOfHoldsByOtherOwnersPassesVacuouslyWhenNoHoldIsActive() {
         String showtimeId = uniqueShowtime();
         List<SeatCode> seats = List.of(new SeatCode("A1"));
 
-        assertThat(adapter.isHeldByCustomerAndBooking(showtimeId, seats, "customer-1", "booking-1")).isTrue();
+        assertThat(adapter.isFreeOfHoldsByOtherOwners(showtimeId, seats, "customer-1", "booking-1")).isTrue();
     }
 
     @Test

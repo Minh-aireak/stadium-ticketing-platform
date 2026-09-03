@@ -61,7 +61,14 @@ public interface SeatHoldPort {
      * <p>Used by the customer-token release path (see {@code ReleaseSeatsCommand}) to stop a
      * customer from releasing another customer's active reservation just by knowing or guessing
      * its bookingId — the bookingId path variable alone is not proof of ownership.
+     *
+     * <p><strong>Not an ownership predicate, and deliberately not named like one.</strong> It was
+     * previously called {@code isHeldByCustomerAndBooking}, which reads as "these seats are held
+     * by this customer" — a claim it does not make and must never be used for, since a caller
+     * holding nothing at all also gets {@code true}. That is correct for release (there is
+     * nothing to protect) and wrong for anything that needs proof of possession; the name now
+     * says which of the two it is.
      */
-    boolean isHeldByCustomerAndBooking(String showtimeId, List<SeatCode> seatCodes, String customerId,
+    boolean isFreeOfHoldsByOtherOwners(String showtimeId, List<SeatCode> seatCodes, String customerId,
                                        String bookingId);
 }
