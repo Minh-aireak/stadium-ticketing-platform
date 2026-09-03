@@ -91,7 +91,9 @@
 
         <!-- ShedLock — backs com.aireak.common.scheduling.SchedulerLockConfig (optional: only
              services that actually run a @Scheduled job need it at runtime, and the config class
-             is @ConditionalOnClass so api-gateway, which has neither, ignores it entirely). -->
+             is @ConditionalOnClass so a consumer of this module without ShedLock on its own
+             classpath ignores it entirely. All six consumers declare it today; api-gateway is not
+             one of them — it does not depend on this module at all). -->
         <dependency>
             <groupId>net.javacrumbs.shedlock</groupId>
             <artifactId>shedlock-spring</artifactId>

@@ -22,20 +22,22 @@ import javax.sql.DataSource;
  * scaling a service horizontally safe rather than a silent correctness change.
  *
  * <p>Backed by the JDBC provider rather than the Redis one because it is the only choice every
- * service can use: match-catalog-service and notification-service both run scheduled jobs
- * without Redisson on the classpath, while all six have Postgres and Flyway. The {@code shedlock}
- * table is created by each service's own migration.
+ * service can use: notification-service runs a scheduled job with no Redisson on its classpath at
+ * all, while all six have Postgres and Flyway. The {@code shedlock} table is created by each
+ * service's own migration.
  *
  * <p>Lives in {@code common} so there is one copy rather than six. ShedLock is {@code
  * optional=true} there, and optional dependencies are not transitive, so only a service that
- * declares it itself gets it — api-gateway component-scans {@code com.aireak.common} but is
- * WebFlux with no scheduled job and no datasource, and the class guard below leaves it out.
- * The guard is written by name deliberately: Spring evaluates it from bytecode metadata, so the
- * class is never loaded (and its {@link LockProvider} bean signature never resolved) where
- * ShedLock is absent. {@code @ConditionalOnBean(DataSource.class)} is NOT used — on a
- * component-scanned config it is evaluated before autoconfiguration has registered the
- * DataSource, so it would silently skip this class in every service and leave every
- * {@code @SchedulerLock} doing nothing.
+ * declares it itself gets it. All six services that consume {@code common} declare it today, so
+ * the class guard below is defensive rather than load-bearing — but it is written by name
+ * deliberately: Spring evaluates it from bytecode metadata, so the class is never loaded (and its
+ * {@link LockProvider} bean signature never resolved) where ShedLock is absent, which is what a
+ * seventh consumer without it would need. api-gateway is not covered from here at all — it
+ * neither depends on {@code common} nor component-scans it, the same way {@code
+ * RedissonCommandBudgetConfig} already records. {@code @ConditionalOnBean(DataSource.class)} is
+ * NOT used — on a component-scanned config it is evaluated before autoconfiguration has
+ * registered the DataSource, so it would silently skip this class in every service and leave
+ * every {@code @SchedulerLock} doing nothing.
  */
 @Configuration
 @ConditionalOnClass(name = "net.javacrumbs.shedlock.core.LockProvider")
