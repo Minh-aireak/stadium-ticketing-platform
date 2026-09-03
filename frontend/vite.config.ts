@@ -32,7 +32,7 @@ export default defineConfig({
         // Vendor code is pinned in package.json and changes only when a dependency is upgraded;
         // app code changes every deploy. Left to itself the bundler packs both into one shared
         // chunk, so editing a single component invalidates 410 kB of React and framer-motion
-        // (132 kB over the wire, now that nginx.conf compresses) in every returning visitor's
+        // (130 kB over the wire, now that nginx.conf compresses) in every returning visitor's
         // cache. Naming them separately means a deploy only busts the app chunks. It does not
         // shrink the first load — react-router and framer-motion are both on the landing path
         // via the App shell and Hero; route-level `lazy` (see routes/router.tsx) is what does
