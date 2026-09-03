@@ -3,6 +3,8 @@ package com.aireak.inventory.adapter.in.web;
 import io.github.resilience4j.bulkhead.BulkheadFullException;
 import io.github.resilience4j.ratelimiter.RequestNotPermitted;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -18,8 +20,18 @@ import java.time.Instant;
  * 503 Service Unavailable with a Retry-After header, instead of falling through to
  * {@code GlobalExceptionHandler}'s generic 500 — these are deliberate fail-fast rejections
  * under load, not unexpected server errors.
+ *
+ * <p>{@code @Order} is what actually makes that happen, and is not decoration. Spring asks each
+ * {@code @ControllerAdvice} in order and takes the first one that has a handler for the exception;
+ * {@code GlobalExceptionHandler} has {@code @ExceptionHandler(Exception.class)}, so it has a
+ * handler for every exception there is. With both advices unordered they both sat at
+ * {@code LOWEST_PRECEDENCE} and the winner was decided by bean-definition order — which comes from
+ * the order the two packages happen to be listed in {@code @SpringBootApplication(scanBasePackages)}.
+ * Listing {@code com.aireak.common} first there, an edit with no visible connection to this class,
+ * turned every load-shed rejection into a 500 logged as "Unexpected error".
  */
 @Slf4j
+@Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice
 public class InventoryOverloadExceptionHandler {
 

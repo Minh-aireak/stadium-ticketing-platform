@@ -5,6 +5,8 @@ import com.aireak.common.exception.ForbiddenException;
 import com.aireak.common.exception.IdentityMismatchException;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -31,8 +33,16 @@ import java.util.stream.Collectors;
  * <p>Layering rule: this class lives in {@code adapter/in/web} concern
  * within common — it translates domain exceptions to HTTP problem details
  * without leaking stack traces to clients.
+ *
+ * <p>Explicitly LAST. {@link #handleGenericException} matches {@link Exception}, so Spring — which
+ * takes the first advice in order that has a handler for the thrown type — would never reach a
+ * later advice for anything. That makes this class's precedence the whole platform's exception
+ * mapping, not a local detail: a service-specific advice such as {@code InventoryOverloadExceptionHandler}
+ * only gets to map its exception if it is asked first. Both used to be unordered, and which one won
+ * fell out of bean-definition order.
  */
 @Slf4j
+@Order(Ordered.LOWEST_PRECEDENCE)
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 

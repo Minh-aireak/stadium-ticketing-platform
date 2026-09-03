@@ -1,4 +1,4 @@
-package com.aireak.catalog.adapter.in.web;
+package com.aireak.inventory.adapter.in.web;
 
 import com.aireak.common.web.advice.GlobalExceptionHandler;
 import io.github.resilience4j.bulkhead.Bulkhead;
@@ -24,9 +24,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-class CatalogOverloadExceptionHandlerTest {
+class InventoryOverloadExceptionHandlerTest {
 
-    private final CatalogOverloadExceptionHandler handler = new CatalogOverloadExceptionHandler();
+    private final InventoryOverloadExceptionHandler handler = new InventoryOverloadExceptionHandler();
 
     @Test
     void bulkheadRejectionBecomes503WithRetryAfter() {
@@ -43,7 +43,7 @@ class CatalogOverloadExceptionHandlerTest {
     void rateLimiterRejectionBecomes503WithRetryAfter() {
         ResponseEntity<ProblemDetail> response = handler.handleRateLimited(
                 RequestNotPermitted.createRequestNotPermitted(
-                        RateLimiter.of("catalog-read", RateLimiterConfig.custom()
+                        RateLimiter.of("seat-inventory", RateLimiterConfig.custom()
                                 .limitForPeriod(1)
                                 .limitRefreshPeriod(Duration.ofSeconds(1))
                                 .timeoutDuration(Duration.ZERO)
@@ -78,7 +78,7 @@ class CatalogOverloadExceptionHandlerTest {
 
     private static BulkheadFullException bulkheadFull() {
         return BulkheadFullException.createBulkheadFullException(
-                Bulkhead.of("catalog-read", BulkheadConfig.custom()
+                Bulkhead.of("seat-inventory", BulkheadConfig.custom()
                         .maxConcurrentCalls(1)
                         .maxWaitDuration(Duration.ZERO)
                         .build()));
@@ -87,7 +87,7 @@ class CatalogOverloadExceptionHandlerTest {
     @RestController
     static class OverloadedController {
         @GetMapping("/overloaded")
-        String browse() {
+        String reserve() {
             throw bulkheadFull();
         }
     }
