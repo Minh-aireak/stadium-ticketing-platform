@@ -44,6 +44,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.HtmlUtils;
 
 import java.net.URI;
 import java.time.Duration;
@@ -241,10 +242,23 @@ public class AuthController {
 
     // ---- helpers ----
 
+    /**
+     * Renders the browser-facing verification result page.
+     *
+     * <p>Every interpolated value is HTML-escaped. Today they are all server-owned — the messages
+     * are string literals and {@code loginUrl} comes from config — so nothing here is currently
+     * attacker-controlled. Escaping anyway is the point: this is the one place in the codebase
+     * that builds HTML by string interpolation, and it sits directly on the path that consumes a
+     * {@code ?token=} query parameter. The day someone makes a message more helpful by appending
+     * the offending token, the escaping needs to already be here.
+     */
     private String verificationPage(String title, String message, boolean success) {
         String color = success ? "#1e7a3a" : "#a31515";
-        String loginUrl = (corsProperties.allowedOrigins() == null || corsProperties.allowedOrigins().isEmpty())
+        String rawLoginUrl = (corsProperties.allowedOrigins() == null || corsProperties.allowedOrigins().isEmpty())
                 ? "/" : corsProperties.allowedOrigins().get(0) + "/login";
+        String safeTitle = HtmlUtils.htmlEscape(title);
+        String safeMessage = HtmlUtils.htmlEscape(message == null ? "" : message);
+        String loginUrl = HtmlUtils.htmlEscape(rawLoginUrl);
         return """
                 <!DOCTYPE html>
                 <html>
@@ -264,7 +278,7 @@ public class AuthController {
                   </div>
                 </body>
                 </html>
-                """.formatted(title, color, title, message, loginUrl);
+                """.formatted(safeTitle, color, safeTitle, safeMessage, loginUrl);
     }
 
     private LoginResponse toLoginResponse(AuthResult result) {

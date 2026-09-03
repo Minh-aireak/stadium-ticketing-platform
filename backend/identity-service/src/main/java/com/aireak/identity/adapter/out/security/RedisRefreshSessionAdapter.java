@@ -55,6 +55,11 @@ public class RedisRefreshSessionAdapter implements RefreshSessionStorePort {
     private static final int SECRET_BYTES = 32;
     private static final int SESSION_ID_BYTES = 16;
 
+    // Returns "OK:{expiresAt}:{userId}" on success, carrying the two fields the caller needs back
+    // in the same atomic step that rotated the token. A second getMap(...).get("expiresAt") round
+    // trip used to fetch them, which both cost an extra command on the refresh hot path and could
+    // observe the session key already gone (its TTL elapsing between the two calls) — the caller
+    // then did Long.parseLong(null) and answered a 500 where a 401 was correct.
     private static final String ROTATE_SCRIPT = """
             local d = redis.call('HGETALL', KEYS[1])
             if #d == 0 then
@@ -75,12 +80,24 @@ public class RedisRefreshSessionAdapter implements RefreshSessionStorePort {
             end
 
             redis.call('HSET', KEYS[1], 'tokenHash', ARGV[3], 'lastUsedAt', ARGV[2])
-            return 'OK'
+            return 'OK:' .. m['expiresAt'] .. ':' .. m['userId']
             """;
 
+    // Revokes only on a tokenHash match, the same proof of possession ROTATE_SCRIPT demands.
+    // Without it, holding any 48-byte string whose first 16 bytes are a valid sessionId was enough
+    // to revoke that session — the secret half was never checked. Guessing a random UUIDv4 session
+    // id makes that impractical rather than impossible, and "impractical" is not the guarantee to
+    // rest a logout endpoint on. A mismatch is reported as success: logout is idempotent from the
+    // client's point of view and must not become an oracle for which session ids exist.
     private static final String REVOKE_SCRIPT = """
-            local exists = redis.call('EXISTS', KEYS[1])
-            if exists == 1 then
+            local d = redis.call('HGETALL', KEYS[1])
+            if #d == 0 then
+              return 'OK'
+            end
+            local m = {}
+            for i = 1, #d, 2 do m[d[i]] = d[i + 1] end
+
+            if m['tokenHash'] == ARGV[2] then
               redis.call('HSET', KEYS[1], 'revokedAt', ARGV[1])
             end
             return 'OK'
@@ -178,20 +195,23 @@ public class RedisRefreshSessionAdapter implements RefreshSessionStorePort {
             throw new RefreshSessionStoreUnavailableException("Failed to rotate refresh token", ex);
         }
 
-        return switch (status) {
-            case "OK" -> {
-                var map = redissonClient.<String, String>getMap(sessionKey(decoded.sessionId()), StringCodec.INSTANCE);
-                long expiresAtMillis = Long.parseLong(map.get("expiresAt"));
-                String accountId = map.get("userId");
-                yield new IssuedRefreshToken(decoded.sessionId().toString(), decoded.sessionId().toString(), accountId,
-                        encodeToken(decoded.sessionId(), newSecret), Instant.ofEpochMilli(expiresAtMillis));
-            }
-            case "REUSE_DETECTED" -> throw new RefreshTokenReuseException(
+        if (status != null && status.startsWith("OK:")) {
+            // "OK:{expiresAt}:{userId}" — split on the first two separators only, since a userId
+            // is opaque to this adapter and must survive containing one.
+            String rest = status.substring("OK:".length());
+            int separator = rest.indexOf(':');
+            long expiresAtMillis = Long.parseLong(rest.substring(0, separator));
+            String accountId = rest.substring(separator + 1);
+            return new IssuedRefreshToken(decoded.sessionId().toString(), decoded.sessionId().toString(), accountId,
+                    encodeToken(decoded.sessionId(), newSecret), Instant.ofEpochMilli(expiresAtMillis));
+        }
+        throw switch (status) {
+            case "REUSE_DETECTED" -> new RefreshTokenReuseException(
                     "Refresh token reuse detected — session revoked");
-            case "REVOKED" -> throw new InvalidRefreshTokenException("Refresh session has been revoked");
-            case "EXPIRED" -> throw new InvalidRefreshTokenException("Refresh session has expired");
-            case "NOT_FOUND" -> throw new InvalidRefreshTokenException("Unknown refresh session");
-            default -> throw new InvalidRefreshTokenException("Refresh session rejected");
+            case "REVOKED" -> new InvalidRefreshTokenException("Refresh session has been revoked");
+            case "EXPIRED" -> new InvalidRefreshTokenException("Refresh session has expired");
+            case "NOT_FOUND" -> new InvalidRefreshTokenException("Unknown refresh session");
+            case null, default -> new InvalidRefreshTokenException("Refresh session rejected");
         };
     }
 
@@ -210,7 +230,7 @@ public class RedisRefreshSessionAdapter implements RefreshSessionStorePort {
                     REVOKE_SCRIPT,
                     RScript.ReturnType.VALUE,
                     List.of(sessionKey(decoded.sessionId())),
-                    String.valueOf(Instant.now().toEpochMilli()));
+                    String.valueOf(Instant.now().toEpochMilli()), decoded.tokenHash());
         } catch (RedisException ex) {
             throw new RefreshSessionStoreUnavailableException("Failed to revoke refresh session", ex);
         }
