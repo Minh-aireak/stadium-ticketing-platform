@@ -7,7 +7,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 /**
  * Ticket Inventory Service — Bounded Context: Inventory.
  * Manages seat availability and reservation for showtimes.
- * Distributed lock via Redisson; optimistic lock via JPA @Version.
+ * Distributed lock via Redisson; there is no JPA {@code @Version} — it was dropped in V6
+ * because it never incremented on the only path that writes (see SeatInventoryJpaEntity).
  */
 @EnableScheduling
 @SpringBootApplication(scanBasePackages = {"com.aireak.inventory", "com.aireak.common"})

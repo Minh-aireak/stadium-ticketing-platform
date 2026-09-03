@@ -28,9 +28,12 @@ public class RedissonDistributedLockAdapter implements DistributedLockPort {
             // ~10s for as long as the JVM lives: an instance that stalls while holding a lock would
             // block the other one indefinitely, and one that is SIGKILLed would hold it until the
             // watchdog timeout (~30s) rather than for leaseTime. Releasing early is the safer
-            // failure here -- every path under this lock has a second guard (@Version on the
-            // aggregate, putIfAbsent per key in RedissonSeatHoldAdapter), so a lease that expires
-            // mid-action cannot double-sell a seat.
+            // failure here -- every path under this lock has a second guard: putIfAbsent per key
+            // in RedissonSeatHoldAdapter for hold and reserve, and Seat#sell refusing a seat
+            // already SOLD to a different booking for confirm. So a lease that expires mid-action
+            // cannot double-sell a seat. This used to credit a @Version on the aggregate as one of
+            // those guards; that column never incremented and was dropped in V6, so naming it here
+            // claimed protection that was not there.
             acquired = lock.tryLock(waitTime, leaseTime, unit);
             if (!acquired) {
                 throw new IllegalStateException(

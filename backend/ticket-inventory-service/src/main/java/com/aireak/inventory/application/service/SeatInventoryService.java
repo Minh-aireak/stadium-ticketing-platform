@@ -61,8 +61,11 @@ import java.util.stream.Collectors;
  * on every reservation attempt no longer touches the DB at all. This keeps the
  * high-concurrency hot path (many people racing for the same seats) off the DB.
  *
- * <p>{@code @Version} on {@code SeatInventoryJpaEntity} still provides optimistic
- * locking as a defense layer for the (now much rarer) confirm write.
+ * <p>The confirm write's second layer, behind the Redisson lock, is {@link Seat#sell} refusing a
+ * seat already SOLD to a different booking. It is NOT a JPA {@code @Version}: this class used to
+ * claim one on {@code SeatInventoryJpaEntity}, but that column never incremented — selling a seat
+ * writes to {@code seats}, which JPA does not count as a change to the owning entity — and it was
+ * dropped in V6. See {@code SeatInventoryJpaEntity} for the full reasoning.
  */
 @Slf4j
 @Service
