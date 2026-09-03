@@ -138,7 +138,12 @@ class OutboxEventPublisherIntegrationTest {
                 }
 
                 @Override
-                public AccountId consume(String rawToken) {
+                public AccountId peek(String rawToken) {
+                    throw new UnsupportedOperationException("not used in this test");
+                }
+
+                @Override
+                public void invalidate(String rawToken) {
                     throw new UnsupportedOperationException("not used in this test");
                 }
             };

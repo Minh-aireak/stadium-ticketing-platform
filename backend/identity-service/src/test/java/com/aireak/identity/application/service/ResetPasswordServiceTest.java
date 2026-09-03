@@ -8,6 +8,7 @@ import com.aireak.identity.application.port.out.RefreshSessionStorePort;
 import com.aireak.identity.domain.exception.InvalidAccountStatusException;
 import com.aireak.identity.domain.exception.InvalidPasswordException;
 import com.aireak.identity.domain.exception.InvalidPasswordResetTokenException;
+import com.aireak.identity.domain.exception.RefreshSessionStoreUnavailableException;
 import com.aireak.identity.domain.model.Account;
 import com.aireak.identity.domain.model.AccountId;
 import com.aireak.identity.domain.model.AccountRole;
@@ -28,6 +29,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -45,16 +47,18 @@ class ResetPasswordServiceTest {
     @Mock
     private RefreshSessionStorePort refreshSessionStore;
 
+    // The steps bean is built for real, not mocked: it holds the account read and the hashing
+    // that every assertion below is about, and @Transactional is inert without a proxy anyway.
     private ResetPasswordService newService() {
-        return new ResetPasswordService(resetTokenPort, accountRepository, passwordHashPort,
-                refreshSessionStore);
+        return new ResetPasswordService(resetTokenPort, refreshSessionStore,
+                new PasswordResetSteps(accountRepository, passwordHashPort));
     }
 
     @Test
-    void consumesTheTokenAndStoresTheNewlyHashedPassword() {
+    void spendsTheTokenAndStoresTheNewlyHashedPassword() {
         Account account = activeAccount();
         HashedPassword newHash = new HashedPassword("$2a$12$newHash");
-        when(resetTokenPort.consume("reset-tok")).thenReturn(account.getId());
+        when(resetTokenPort.peek("reset-tok")).thenReturn(account.getId());
         when(accountRepository.findById(account.getId())).thenReturn(Optional.of(account));
         when(passwordHashPort.hash(any(RawPassword.class))).thenReturn(newHash);
 
@@ -72,41 +76,65 @@ class ResetPasswordServiceTest {
     @Test
     void revokesEveryRefreshSessionOnceTheNewPasswordIsStored() {
         Account account = activeAccount();
-        when(resetTokenPort.consume("reset-tok")).thenReturn(account.getId());
+        when(resetTokenPort.peek("reset-tok")).thenReturn(account.getId());
         when(accountRepository.findById(account.getId())).thenReturn(Optional.of(account));
         when(passwordHashPort.hash(any(RawPassword.class))).thenReturn(new HashedPassword("$2a$12$newHash"));
 
         newService().execute(new ResetPasswordCommand("reset-tok", "NewPassw0rd"));
 
-        InOrder inOrder = inOrder(accountRepository, refreshSessionStore);
+        InOrder inOrder = inOrder(accountRepository, refreshSessionStore, resetTokenPort);
         inOrder.verify(accountRepository).save(any(Account.class));
         inOrder.verify(refreshSessionStore).revokeAllForAccount(account.getId());
+        // Last, and only here: spending the token before this point is what used to leave a
+        // customer with a dead link and an unchanged password.
+        inOrder.verify(resetTokenPort).invalidate("reset-tok");
+    }
+
+    /**
+     * The regression this ordering exists for. Revoking sessions is a Redis call and can fail on
+     * its own; when it does, the link in the customer's inbox has to still work.
+     */
+    @Test
+    void aFailedSessionRevokeLeavesTheTokenUnspent() {
+        Account account = activeAccount();
+        when(resetTokenPort.peek("reset-tok")).thenReturn(account.getId());
+        when(accountRepository.findById(account.getId())).thenReturn(Optional.of(account));
+        when(passwordHashPort.hash(any(RawPassword.class))).thenReturn(new HashedPassword("$2a$12$newHash"));
+        doThrow(new RefreshSessionStoreUnavailableException("Redis down", new RuntimeException("boom")))
+                .when(refreshSessionStore).revokeAllForAccount(account.getId());
+
+        assertThatThrownBy(() -> newService().execute(new ResetPasswordCommand("reset-tok", "NewPassw0rd")))
+                .isInstanceOf(RefreshSessionStoreUnavailableException.class);
+
+        verify(resetTokenPort, never()).invalidate(any());
     }
 
     @Test
     void aRejectedResetLeavesExistingSessionsAlone() {
-        when(resetTokenPort.consume("stale-tok"))
+        when(resetTokenPort.peek("stale-tok"))
                 .thenThrow(new InvalidPasswordResetTokenException("Password reset token is invalid or has expired"));
 
         assertThatThrownBy(() -> newService().execute(new ResetPasswordCommand("stale-tok", "NewPassw0rd")))
                 .isInstanceOf(InvalidPasswordResetTokenException.class);
 
         verify(refreshSessionStore, never()).revokeAllForAccount(any());
+        verify(resetTokenPort, never()).invalidate(any());
     }
 
     /** A rejected password must not burn the customer's only reset link. */
     @Test
-    void weakPasswordIsRejectedBeforeTheTokenIsConsumed() {
+    void weakPasswordIsRejectedBeforeTheTokenIsTouched() {
         assertThatThrownBy(() -> newService().execute(new ResetPasswordCommand("reset-tok", "weak")))
                 .isInstanceOf(InvalidPasswordException.class);
 
-        verify(resetTokenPort, never()).consume(any());
+        verify(resetTokenPort, never()).peek(any());
+        verify(resetTokenPort, never()).invalidate(any());
         verify(accountRepository, never()).save(any());
     }
 
     @Test
     void expiredOrUnknownTokenIsRejectedWithoutTouchingAnyAccount() {
-        when(resetTokenPort.consume("stale-tok"))
+        when(resetTokenPort.peek("stale-tok"))
                 .thenThrow(new InvalidPasswordResetTokenException("Password reset token is invalid or has expired"));
 
         assertThatThrownBy(() -> newService().execute(new ResetPasswordCommand("stale-tok", "NewPassw0rd")))
@@ -118,7 +146,7 @@ class ResetPasswordServiceTest {
     @Test
     void tokenPointingAtAMissingAccountIsReportedAsAnInvalidToken() {
         AccountId accountId = AccountId.generate();
-        when(resetTokenPort.consume("orphan-tok")).thenReturn(accountId);
+        when(resetTokenPort.peek("orphan-tok")).thenReturn(accountId);
         when(accountRepository.findById(accountId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> newService().execute(new ResetPasswordCommand("orphan-tok", "NewPassw0rd")))
@@ -131,7 +159,7 @@ class ResetPasswordServiceTest {
     void suspendedAccountCannotHaveItsPasswordReset() {
         Account suspended = Account.reconstitute(AccountId.generate(), new Email("banned@example.com"),
                 new HashedPassword("$2a$12$hash"), AccountStatus.SUSPENDED, Instant.now(), AccountRole.USER);
-        when(resetTokenPort.consume("reset-tok")).thenReturn(suspended.getId());
+        when(resetTokenPort.peek("reset-tok")).thenReturn(suspended.getId());
         when(accountRepository.findById(suspended.getId())).thenReturn(Optional.of(suspended));
         when(passwordHashPort.hash(any(RawPassword.class))).thenReturn(new HashedPassword("$2a$12$newHash"));
 
