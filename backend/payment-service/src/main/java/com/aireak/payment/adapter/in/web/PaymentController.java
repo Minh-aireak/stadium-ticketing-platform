@@ -176,9 +176,14 @@ public class PaymentController {
         }
     }
 
-    // fraction = 2 for every currency (simplification: no zero-decimal currency support like
-    // JPY yet) — mirrors the `amount` column's own precision(15,2), and rejects sub-cent values
-    // before they can round unpredictably or blow up BigDecimal division at the gateway.
+    // fraction = 2 mirrors the `amount` column's own precision(15,2) and rejects sub-unit values
+    // before they can round unpredictably at the gateway. It is not a claim that every currency
+    // has two decimals: StripeGatewayAdapter#toSmallestUnit knows fifteen that have none, and
+    // this deployment's own pricing currency is one of them (inventory.pricing.currency defaults
+    // to VND). What keeps a fractional VND amount from ever reaching longValueExact() is upstream
+    // -- SeatMapLayout#priceFor ends in setScale(0, HALF_UP), so every seat price, and therefore
+    // every booking total, is a whole number -- plus requireAmountMatchesBooking below, which
+    // refuses to charge anything but the booking's own recorded amount.
     record InitiatePaymentRequest(
             @NotBlank String bookingId,
             @Positive @Digits(integer = 13, fraction = 2) BigDecimal amount,
