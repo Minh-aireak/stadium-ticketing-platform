@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 
@@ -9,6 +9,7 @@ import { createBooking } from '@/features/booking/bookingApi'
 import { unholdSeats } from '@/features/seats/seatsApi'
 import { formatCurrency } from '@/lib/format'
 import { getErrorMessage } from '@/lib/errors'
+import { randomUuid } from '@/lib/uuid'
 
 export interface CheckoutState {
   matchId: string
@@ -29,7 +30,9 @@ export function CheckoutPage() {
   const [error, setError] = useState<string | null>(null)
   // Stable for the lifetime of this order attempt — a retried click after a network
   // error must reuse the same key so booking-service dedupes it instead of double-booking.
-  const idempotencyKey = useRef(crypto.randomUUID())
+  // A lazy useState initializer rather than useRef(randomUuid()): the useRef form evaluated
+  // its argument on every render and discarded all but the first result.
+  const [idempotencyKey] = useState(() => randomUuid())
 
   if (!state) {
     return <Navigate to="/" replace />
@@ -44,7 +47,7 @@ export function CheckoutPage() {
     try {
       const booking = await createBooking(
         { customerId: user.id, showtimeId, seatCodes, amount, currency },
-        idempotencyKey.current,
+        idempotencyKey,
       )
 
       navigate(`/checkout/${booking.bookingId}/status`, {

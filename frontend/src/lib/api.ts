@@ -1,6 +1,7 @@
 import axios, { type InternalAxiosRequestConfig } from 'axios'
 
 import { getCookie } from '@/lib/cookies'
+import { randomUuid } from '@/lib/uuid'
 
 // Gateway is the single origin the browser talks to; it routes /api/v1/{auth,matches,
 // inventory,payments,notifications,bookings}/** to the right downstream service.
@@ -30,18 +31,9 @@ export const CORRELATION_ID_HEADER = 'X-Correlation-Id'
 // The gateway already generates a correlation ID for every request and every service logs its
 // lines under it; sending our own only means the browser knows the ID too, so a failed request
 // can show the user the exact value to quote. CorrelationIdWebFilter trusts an inbound ID only
-// when it is a well-formed UUID v4 and silently replaces anything else — which the fallback here
-// has to satisfy as well, since crypto.randomUUID is undefined outside a secure context (the app
-// served over plain http on a LAN IP, for instance).
-function newCorrelationId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = Math.floor(Math.random() * 16)
-    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
-  })
-}
+// when it is a well-formed UUID v4 and silently replaces anything else — which randomUuid's
+// insecure-context fallback is written to satisfy.
+const newCorrelationId = randomUuid
 
 // CSRF is only required for cookie-authenticated endpoints (/auth/refresh, /auth/logout).
 // Per A2, the X-XSRF-TOKEN header is only sent when the XSRF-TOKEN cookie actually has a

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { AnimatePresence, motion } from 'framer-motion'
 
 import { Toast } from '@/components/ui/toast'
+import { randomUuid } from '@/lib/uuid'
 
 type ToastVariant = 'success' | 'error' | 'info'
 
@@ -35,7 +36,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const toast = useCallback<ToastContextValue['toast']>(
     ({ title, description, variant = 'info' }) => {
-      const id = crypto.randomUUID()
+      const id = randomUuid()
       setToasts((prev) => [...prev, { id, title, description, variant }])
       setTimeout(() => dismiss(id), AUTO_DISMISS_MS)
     },
