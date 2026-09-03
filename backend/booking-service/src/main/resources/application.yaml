@@ -101,6 +101,10 @@ resilience4j:
         permittedNumberOfCallsInHalfOpenState: 3
         ignoreExceptions:
           - io.github.resilience4j.bulkhead.BulkheadFullException
+          # Seats already taken / booking window closed is inventory answering, not inventory
+          # failing. Contention for a seat is ordinary traffic on a hot match, and counting it
+          # would let customers open this breaker on a healthy service just by racing each other.
+          - com.aireak.booking.application.port.out.SeatReservationRejectedException
       payment:
         slidingWindowSize: 10
         minimumNumberOfCalls: 5
@@ -131,6 +135,8 @@ resilience4j:
           - io.github.resilience4j.bulkhead.BulkheadFullException
           # Circuit already open — the retry would be refused by the same breaker, three times.
           - io.github.resilience4j.circuitbreaker.CallNotPermittedException
+          # Inventory refused these seats — the answer cannot change on a second ask.
+          - com.aireak.booking.application.port.out.SeatReservationRejectedException
       payment:
         maxAttempts: 3
         waitDuration: 500ms

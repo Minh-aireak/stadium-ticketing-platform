@@ -1,5 +1,6 @@
 package com.aireak.booking.adapter.out.client;
 
+import com.aireak.booking.application.port.out.SeatReservationRejectedException;
 import com.aireak.booking.application.port.out.TicketInventoryPort;
 import com.sun.net.httpserver.HttpServer;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
@@ -39,11 +40,12 @@ import static org.mockito.Mockito.when;
  * annotations only do anything through a proxy, so asserting on a plain
  * {@code new TicketInventoryRestAdapter(...)} would pass no matter where they sat.
  *
- * <p>A {@code @CircuitBreaker(fallbackMethod = ...)} is applied by {@code FallbackExecutor}
- * OUTSIDE the circuit-breaker decoration and fires on any {@code Throwable}, not only on a
- * rejected call — while the Retry aspect (order 2147483642) sits outside the CircuitBreaker aspect
- * (2147483643). So the fallback ran on the first failure of every kind and replaced the exception
- * before the Retry aspect could match it against {@code ignoreExceptions}, which
+ * <p>Two separate things are pinned here, and both were wrong because of one detail: a
+ * {@code @CircuitBreaker(fallbackMethod = ...)} is applied by {@code FallbackExecutor} OUTSIDE the
+ * circuit-breaker decoration and fires on any {@code Throwable}, not only on a rejected call —
+ * while the Retry aspect (order 2147483642) sits outside the CircuitBreaker aspect (2147483643).
+ * So the fallback ran on the first failure of every kind and replaced the exception before the
+ * Retry aspect could match it against {@code ignoreExceptions}, which
  * {@code PredicateCreator.makePredicate} tests with a bare {@code isAssignableFrom} and no cause
  * traversal. Every entry in this service's retry ignore list was dead config.
  *
@@ -60,6 +62,7 @@ import static org.mockito.Mockito.when;
         "resilience4j.circuitbreaker.instances.ticket-inventory.waitDurationInOpenState=10s",
         "resilience4j.circuitbreaker.instances.ticket-inventory.permittedNumberOfCallsInHalfOpenState=3",
         "resilience4j.circuitbreaker.instances.ticket-inventory.ignoreExceptions[0]=io.github.resilience4j.bulkhead.BulkheadFullException",
+        "resilience4j.circuitbreaker.instances.ticket-inventory.ignoreExceptions[1]=com.aireak.booking.application.port.out.SeatReservationRejectedException",
         "resilience4j.bulkhead.instances.ticket-inventory.maxConcurrentCalls=50",
         "resilience4j.bulkhead.instances.ticket-inventory.maxWaitDuration=0",
         "resilience4j.retry.instances.ticket-inventory.maxAttempts=3",
@@ -67,7 +70,8 @@ import static org.mockito.Mockito.when;
         "resilience4j.retry.instances.ticket-inventory.ignoreExceptions[0]=org.springframework.web.client.HttpClientErrorException",
         "resilience4j.retry.instances.ticket-inventory.ignoreExceptions[1]=org.springframework.web.client.HttpServerErrorException$ServiceUnavailable",
         "resilience4j.retry.instances.ticket-inventory.ignoreExceptions[2]=io.github.resilience4j.bulkhead.BulkheadFullException",
-        "resilience4j.retry.instances.ticket-inventory.ignoreExceptions[3]=io.github.resilience4j.circuitbreaker.CallNotPermittedException"
+        "resilience4j.retry.instances.ticket-inventory.ignoreExceptions[3]=io.github.resilience4j.circuitbreaker.CallNotPermittedException",
+        "resilience4j.retry.instances.ticket-inventory.ignoreExceptions[4]=com.aireak.booking.application.port.out.SeatReservationRejectedException"
 })
 class TicketInventoryRestAdapterResilienceTest {
 
@@ -133,6 +137,58 @@ class TicketInventoryRestAdapterResilienceTest {
                 .doesNotThrowAnyException();
 
         assertThat(STUB.requestCount()).isEqualTo(3);
+    }
+
+    /**
+     * 422 is what ticket-inventory-service answers when the seats are gone or the booking window
+     * has closed — {@code SeatsNotAvailableException}/{@code ShowtimeBookingClosedException} are
+     * {@code DomainException}s, which {@code GlobalExceptionHandler} maps to 422. That is the
+     * service answering, not the service failing, so it must not be retried.
+     */
+    @Test
+    void aSeatSomeoneElseTookIsAskedForOnceOnly() {
+        STUB.respondWith(422, "{\"detail\":\"Seats not available for showtime showtime-1: A1\"}");
+
+        catchThrowable(() -> ticketInventoryPort.reserveSeats("showtime-1", "booking-1", List.of("A1")));
+
+        assertThat(STUB.requestCount()).isEqualTo(1);
+    }
+
+    /**
+     * ...and it has to keep meaning what it meant. It used to reach the saga as a bare
+     * {@code RuntimeException("Ticket inventory service unavailable")}, which
+     * {@code GlobalExceptionHandler#handleGenericException} turns into a 500 — so a customer whose
+     * hold had lapsed while they were on the checkout page was told the platform had broken.
+     */
+    @Test
+    void aSeatSomeoneElseTookKeepsSayingSo() {
+        STUB.respondWith(422, "{\"detail\":\"Seats not available for showtime showtime-1: A1\"}");
+
+        Throwable thrown = catchThrowable(
+                () -> ticketInventoryPort.reserveSeats("showtime-1", "booking-1", List.of("A1")));
+
+        assertThat(thrown).isInstanceOf(SeatReservationRejectedException.class);
+        assertThat(thrown).hasMessageContaining("Seats not available for showtime showtime-1: A1");
+    }
+
+    /**
+     * The one that takes the buy path down. Contention for a seat is normal traffic on a hot
+     * match, and every 422 counted as ticket-inventory-service being at fault — three times over,
+     * once per dead-ignore-list retry. Two customers losing the same seat race were enough to open
+     * the breaker (5 failures against minimumNumberOfCalls=5, failureRateThreshold=50), and an
+     * open breaker takes reserveSeats, releaseSeats and the post-payment confirmReservation with
+     * it. payment-service already guards this exact shape for card declines; this side did not.
+     */
+    @Test
+    void seatContentionDoesNotOpenTheCircuitOnAServiceThatAnsweredCorrectly() {
+        STUB.respondWith(422, "{\"detail\":\"Seats not available for showtime showtime-1: A1\"}");
+
+        for (int i = 0; i < 6; i++) {
+            catchThrowable(() -> ticketInventoryPort.reserveSeats("showtime-1", "booking-1", List.of("A1")));
+        }
+
+        assertThat(circuitBreaker.getMetrics().getNumberOfFailedCalls()).isZero();
+        assertThat(circuitBreaker.getState()).isEqualTo(CircuitBreaker.State.CLOSED);
     }
 
     /** The opposite case, which must still count: a 503 means the service really is in trouble. */
