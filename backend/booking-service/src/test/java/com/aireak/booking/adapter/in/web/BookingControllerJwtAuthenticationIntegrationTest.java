@@ -33,6 +33,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -168,6 +169,24 @@ class BookingControllerJwtAuthenticationIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated());
+    }
+
+    @Test
+    void rejectsCreateBookingWhenASeatCodeIsNotAWellFormedSeatCode() throws Exception {
+        String accountId = UUID.randomUUID().toString();
+        // Authenticated, and the body's customerId is the caller's own, so the only thing left
+        // that can reject this is the per-element constraint on seatCodes. Before it existed,
+        // "not-a-seat" reached the use case and became a persisted booking.
+        String body = jsonMapper.writeValueAsString(new BookingController.CreateBookingRequest(
+                accountId, "showtime-1", List.of("A1", "not-a-seat"), new BigDecimal("50.00"), "USD"));
+
+        mockMvc.perform(post("/api/v1/bookings")
+                        .header("Authorization", "Bearer " + validToken(accountId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(createBookingUseCase);
     }
 
     private String validToken(String subject) {

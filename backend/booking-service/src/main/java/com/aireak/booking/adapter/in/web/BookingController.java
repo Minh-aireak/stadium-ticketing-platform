@@ -12,6 +12,7 @@ import com.aireak.common.security.AuthenticatedUserContext;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -28,6 +29,10 @@ import java.util.List;
 @RequestMapping("/api/v1/bookings")
 @RequiredArgsConstructor
 public class BookingController {
+
+    // Kept in step with ticket-inventory-service's SeatCode value object, which is what
+    // ultimately parses these; a code this rejects is one the saga would fail on later.
+    private static final String SEAT_CODE_PATTERN = "^[A-Z]\\d{1,3}$";
 
     private static final int MIN_PAGE_SIZE = 1;
     private static final int MAX_PAGE_SIZE = 100;
@@ -136,10 +141,20 @@ public class BookingController {
     // ticket-inventory-service computes server-side from each seat's tier before any
     // charge-relevant step runs (see BookingOrchestrationService#createBooking, Step 2b).
     // NEVER used to compute the actual charge.
+    /**
+     * {@code seatCodes} is constrained element by element, not just non-empty: the format is
+     * ticket-inventory-service's ({@code SeatCode}, e.g. A12, B3), and until it was checked here
+     * nothing on booking's side checked it at all — {@code SeatSelection} deliberately holds only
+     * shape-of-the-collection invariants, since its constructor also runs when reconstituting a
+     * persisted booking. So an arbitrary string got as far as a saved booking row and a
+     * confirmation email before inventory rejected it partway through the saga. Rejecting it at
+     * the edge costs one annotation and turns that into a 400.
+     */
     public record CreateBookingRequest(
             @NotBlank String customerId,
             @NotBlank String showtimeId,
-            @NotEmpty List<String> seatCodes,
+            @NotEmpty List<@Pattern(regexp = SEAT_CODE_PATTERN,
+                    message = "must be a seat code such as A12 or B3") String> seatCodes,
             @Positive BigDecimal amount,
             @NotBlank String currency
     ) {}
