@@ -69,6 +69,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Until this step existed the storefront had no tests at all, so every frontend change
+      # rode on `tsc -b` alone — which type-checks a call but says nothing about what it does.
+      - name: Test
+        run: npm test
+
       # `npm run build` is `tsc -b && vite build`, so this is the typecheck too — the app is
       # never type-checked anywhere else in CI.
       - name: Typecheck & build
