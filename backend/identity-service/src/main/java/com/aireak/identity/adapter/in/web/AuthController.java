@@ -251,12 +251,35 @@ public class AuthController {
                         "This account cannot be verified. Please contact support.", false));
     }
 
+    /**
+     * Redis unreachable while a verification token is stored or read. Three endpoints can raise
+     * this and only one of them is a browser navigation, so the answer has to differ by endpoint.
+     *
+     * <p>{@code RedisEmailVerificationTokenAdapter} raises it from {@code store} as well as from
+     * {@code peek}, and {@code store} runs inside {@code POST /register} (RegisterAccountService
+     * binds the token once the account row exists) and inside {@code POST /resend-verification} —
+     * both XHR calls from the SPA. Answering those two with {@code text/html} handed a JSON client
+     * a whole HTML document as the body of a 503: no {@code detail} to show, no {@code type} to
+     * recognise the outage by, and a {@code Content-Type} the endpoint never declares.
+     *
+     * <p>{@code GET /verify-email} is the one caller that is a browser following a link out of an
+     * email, and it keeps the page every other outcome of that endpoint renders — see
+     * {@code AuthControllerVerifyEmailPageTest} for the other two.
+     */
     @ExceptionHandler(VerificationTokenStoreUnavailableException.class)
-    public ResponseEntity<String> handleVerificationStoreUnavailable(VerificationTokenStoreUnavailableException ex) {
+    public ResponseEntity<?> handleVerificationStoreUnavailable(VerificationTokenStoreUnavailableException ex,
+                                                                HttpServletRequest request) {
         log.error("Verification token store unavailable", ex);
-        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                .contentType(MediaType.TEXT_HTML)
-                .body(verificationPage("Service unavailable", "Please try again shortly.", false));
+        if (isBrowserVerificationLink(request)) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .contentType(MediaType.TEXT_HTML)
+                    .body(verificationPage("Service unavailable", "Please try again shortly.", false));
+        }
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
+                "Email verification is temporarily unavailable");
+        problem.setType(URI.create(TYPE_BASE + "verification-token-store-unavailable"));
+        problem.setTitle("Service Unavailable");
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(problem);
     }
 
     @ExceptionHandler(PasswordResetTokenStoreUnavailableException.class)
@@ -323,6 +346,12 @@ public class AuthController {
     private LoginResponse toLoginResponse(AuthResult result) {
         long expiresIn = Duration.between(Instant.now(), result.accessTokenExpiresAt()).getSeconds();
         return LoginResponse.bearer(result.accessToken(), Math.max(expiresIn, 0));
+    }
+
+    /** The one endpoint here whose caller is a browser following a link, not the SPA. */
+    private boolean isBrowserVerificationLink(HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        return uri != null && uri.endsWith("/verify-email");
     }
 
     private String readCookie(HttpServletRequest request) {
