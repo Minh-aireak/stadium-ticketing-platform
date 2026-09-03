@@ -6,7 +6,6 @@ import com.aireak.identity.application.port.out.RefreshSessionStorePort;
 import com.aireak.identity.application.port.out.TokenGeneratorPort;
 import com.aireak.identity.application.port.out.dto.IssuedRefreshToken;
 import com.aireak.identity.config.JwtProperties;
-import com.aireak.identity.domain.exception.InvalidAccountStatusException;
 import com.aireak.identity.domain.exception.InvalidRefreshTokenException;
 import com.aireak.identity.domain.exception.RefreshTokenReuseException;
 import com.aireak.identity.domain.model.Account;
@@ -99,13 +98,19 @@ class RefreshTokenServiceTest {
                 .isInstanceOf(InvalidRefreshTokenException.class);
     }
 
-    // Documents a real (minor) quirk: rotation in Redis has already succeeded and issued a new
-    // token by the time this status check runs — the client gets rejected here and their cookie
-    // gets cleared (see AuthController's exception handlers), so the newly rotated token is
-    // never actually used by anyone. Not a security issue (a suspended account SHOULD be denied),
-    // just an orphaned Redis session sitting until its absolute TTL expires.
+    /**
+     * Rotation in Redis has already advanced the session's tokenHash by the time this status
+     * check runs, so the cookie the browser still holds is stale the moment this call is
+     * rejected. That only stays harmless if the rejection clears the cookie — and
+     * {@code AuthController} clears it for {@code InvalidRefreshTokenException} and
+     * {@code RefreshTokenReuseException} and nothing else. Raising a plain
+     * {@code InvalidAccountStatusException} here fell through to the common handler's 422 with
+     * the cookie left in place, and the browser's next refresh presented the old token against
+     * the rotated hash: {@code ROTATE_SCRIPT} read that as reuse and logged
+     * "Refresh token reuse detected" for a customer who did nothing.
+     */
     @Test
-    void rejectsRefreshForANonActiveAccountEvenThoughRotationAlreadySucceeded() {
+    void refreshForANonActiveAccountIsRejectedAsAnInvalidRefreshToken() {
         AccountId accountId = AccountId.generate();
         IssuedRefreshToken rotated = new IssuedRefreshToken("session-1", "session-1",
                 accountId.toString(), "new-raw-token", Instant.now().plusSeconds(1000));
@@ -116,8 +121,29 @@ class RefreshTokenServiceTest {
         when(accountRepository.findById(accountId)).thenReturn(Optional.of(suspended));
 
         assertThatThrownBy(() -> service().execute("raw-token"))
-                .isInstanceOf(InvalidAccountStatusException.class);
+                .isInstanceOf(InvalidRefreshTokenException.class);
 
         verify(tokenGeneratorPort, never()).generateToken(any());
+    }
+
+    /**
+     * And it says nothing more than that. {@code LoginService} answers an unknown email, a wrong
+     * password and a disabled account with one identical message on purpose; a refresh that
+     * replies "Account is not active, current status: SUSPENDED" gives back exactly what login
+     * spends a dummy bcrypt comparison to withhold.
+     */
+    @Test
+    void theRejectionDoesNotNameTheAccountStatus() {
+        AccountId accountId = AccountId.generate();
+        IssuedRefreshToken rotated = new IssuedRefreshToken("session-1", "session-1",
+                accountId.toString(), "new-raw-token", Instant.now().plusSeconds(1000));
+        when(refreshSessionStorePort.rotate("raw-token")).thenReturn(rotated);
+        Account suspended = Account.reconstitute(accountId, new Email("user@example.com"),
+                new HashedPassword("$2a$12$hash"), com.aireak.identity.domain.model.AccountStatus.SUSPENDED,
+                Instant.now(), com.aireak.identity.domain.model.AccountRole.USER);
+        when(accountRepository.findById(accountId)).thenReturn(Optional.of(suspended));
+
+        assertThatThrownBy(() -> service().execute("raw-token"))
+                .hasMessageNotContainingAny("SUSPENDED", "PENDING_VERIFICATION");
     }
 }

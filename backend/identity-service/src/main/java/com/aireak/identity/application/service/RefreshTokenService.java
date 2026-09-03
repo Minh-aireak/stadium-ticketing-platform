@@ -6,7 +6,6 @@ import com.aireak.identity.application.port.out.AccountRepository;
 import com.aireak.identity.application.port.out.RefreshSessionStorePort;
 import com.aireak.identity.application.port.out.TokenGeneratorPort;
 import com.aireak.identity.config.JwtProperties;
-import com.aireak.identity.domain.exception.InvalidAccountStatusException;
 import com.aireak.identity.domain.exception.InvalidRefreshTokenException;
 import com.aireak.identity.domain.model.Account;
 import com.aireak.identity.domain.model.AccountId;
@@ -54,8 +53,23 @@ public class RefreshTokenService implements RefreshTokenUseCase {
                 .orElseThrow(() -> new InvalidRefreshTokenException("Unknown account for refresh session"));
 
         if (account.getStatus() != AccountStatus.ACTIVE) {
-            throw new InvalidAccountStatusException(
-                    "Account is not active, current status: " + account.getStatus());
+            // InvalidRefreshTokenException, not InvalidAccountStatusException, and the status stays
+            // out of the message. Two reasons, and each one alone would be enough.
+            //
+            // AuthController clears the refresh cookie for this exception and for
+            // RefreshTokenReuseException, and for nothing else. A domain exception fell through to
+            // common's GlobalExceptionHandler as a 422 with the cookie untouched -- but rotate()
+            // above has ALREADY advanced the session's tokenHash, so the cookie the browser keeps
+            // is stale from that moment. Its next refresh presents the old token against the
+            // rotated hash, ROTATE_SCRIPT reads that as reuse, and the platform logs "Refresh token
+            // reuse detected" about a customer who did nothing.
+            //
+            // And "Account is not active, current status: SUSPENDED" went to the client. LoginService
+            // answers an unknown email, a wrong password and a disabled account with one identical
+            // message on purpose, paying for a dummy bcrypt comparison to keep it that way; refresh
+            // must not hand back what login spends that on withholding.
+            log.warn("Refresh rejected: accountId={}, status={}", account.getId(), account.getStatus());
+            throw new InvalidRefreshTokenException("Refresh session is no longer valid");
         }
 
         String accessToken = tokenGeneratorPort.generateToken(account);
