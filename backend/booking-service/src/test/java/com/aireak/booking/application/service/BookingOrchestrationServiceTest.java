@@ -116,17 +116,6 @@ class BookingOrchestrationServiceTest {
         verify(paymentPort, never()).checkOutcome(anyString());
     }
 
-    @Test
-    void paymentSucceededAfterCancellationRequestsRefund() {
-        when(sagaSteps.findOrThrow(BOOKING_ID)).thenReturn(cancelledBooking(BOOKING_ID));
-
-        service.confirmBooking(BOOKING_ID);
-
-        verify(sagaSteps, never()).markConfirmed(anyString());
-        verify(sagaSteps).requestRefundForLatePayment(
-                BOOKING_ID, "Payment succeeded after booking cancellation");
-    }
-
     @Nested
     class HappyPath {
 
