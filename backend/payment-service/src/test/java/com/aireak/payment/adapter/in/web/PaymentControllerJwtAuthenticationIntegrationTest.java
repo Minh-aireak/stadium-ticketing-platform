@@ -4,7 +4,6 @@ import com.aireak.common.exception.IdentityMismatchException;
 import com.aireak.common.security.AuthenticatedUser;
 import com.aireak.payment.application.port.in.GetPaymentUseCase;
 import com.aireak.payment.application.port.in.InitiatePaymentUseCase;
-import com.aireak.payment.application.port.in.RefundPaymentUseCase;
 import com.aireak.payment.application.port.in.RetryPaymentUseCase;
 import com.aireak.payment.application.port.out.BookingOwnershipPort;
 import com.aireak.payment.domain.exception.DuplicatePaymentException;
@@ -81,9 +80,6 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
 
     @MockitoBean
     private RetryPaymentUseCase retryPaymentUseCase;
-
-    @MockitoBean
-    private RefundPaymentUseCase refundPaymentUseCase;
 
     @MockitoBean
     private BookingOwnershipPort bookingOwnershipPort;
@@ -333,36 +329,31 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
     }
 
     // ---------------------------------------------------------------
-    // Refund: internal-service token only
+    // Refund: not an HTTP endpoint at all
     // ---------------------------------------------------------------
 
+    /**
+     * A refund reaches this service on {@code booking.refund.requested} and nowhere else -- see
+     * {@code RefundRequestedConsumer}, whose own javadoc records that it replaced the synchronous
+     * HTTP call booking-service used to make. That commit removed the caller
+     * ({@code PaymentRestAdapter}) but left the endpoint standing, so for its whole life since
+     * then {@code POST /api/v1/payments/{bookingId}/refund} has been an unreferenced door onto a
+     * real Stripe refund. This pins that the door is gone rather than merely unused: re-opening
+     * it has to be somebody's deliberate decision, not a merge.
+     *
+     * <p>The request carries an internal-service token on purpose. That is the strongest
+     * credential any caller could present here -- the endpoint's own guard accepted nothing else
+     * -- so a 404 for it is a 404 for everyone.
+     */
     @Test
-    void refundRejectsACustomerTokenEvenIfItOwnsTheBooking() throws Exception {
-        mockMvc.perform(post("/api/v1/payments/{bookingId}/refund", BOOKING_ID)
-                        .header("Authorization", "Bearer " + validToken(CUSTOMER_A_ID))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"reason":"Match cancelled"}
-                                """))
-                .andExpect(status().isForbidden());
-
-        verify(refundPaymentUseCase, never()).refundByBookingId(anyString(), anyString());
-    }
-
-    @Test
-    void refundSucceedsForInternalServiceToken() throws Exception {
-        when(refundPaymentUseCase.refundByBookingId(BOOKING_ID, "Match cancelled"))
-                .thenReturn(Optional.of(PAYMENT_ID));
-
+    void thereIsNoHttpRefundEndpointBecauseRefundsArriveOnTheOutboxTopic() throws Exception {
         mockMvc.perform(post("/api/v1/payments/{bookingId}/refund", BOOKING_ID)
                         .header("Authorization", "Bearer " + internalServiceToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"reason":"Match cancelled"}
                                 """))
-                .andExpect(status().isOk());
-
-        verify(refundPaymentUseCase).refundByBookingId(BOOKING_ID, "Match cancelled");
+                .andExpect(status().isNotFound());
     }
 
     // ---------------------------------------------------------------

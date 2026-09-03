@@ -1,11 +1,9 @@
 package com.aireak.payment.adapter.in.web;
 
-import com.aireak.common.exception.ForbiddenException;
 import com.aireak.common.security.AuthenticatedUser;
 import com.aireak.common.security.AuthenticatedUserContext;
 import com.aireak.payment.application.port.in.GetPaymentUseCase;
 import com.aireak.payment.application.port.in.InitiatePaymentUseCase;
-import com.aireak.payment.application.port.in.RefundPaymentUseCase;
 import com.aireak.payment.application.port.in.RetryPaymentUseCase;
 import com.aireak.payment.application.port.in.command.InitiatePaymentCommand;
 import com.aireak.payment.application.port.out.BookingOwnershipPort;
@@ -37,7 +35,6 @@ public class PaymentController {
     private final InitiatePaymentUseCase initiatePaymentUseCase;
     private final GetPaymentUseCase getPaymentUseCase;
     private final RetryPaymentUseCase retryPaymentUseCase;
-    private final RefundPaymentUseCase refundPaymentUseCase;
     private final BookingOwnershipPort bookingOwnershipPort;
 
     /**
@@ -98,33 +95,10 @@ public class PaymentController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
-    /**
-     * POST /api/v1/payments/{bookingId}/refund — internal-service token only:
-     * {@code booking-service}'s {@code PaymentRestAdapter} never forwards a real customer token
-     * for this call (it always mints one — see {@code InternalServiceTokenProvider}), so a
-     * request bearing a customer token here cannot be a genuine system-triggered refund. Mirrors
-     * ticket-inventory-service's {@code SeatInventoryController#confirm} pattern.
-     */
-    @PostMapping("/{bookingId}/refund")
-    public ResponseEntity<RefundResponse> refund(@PathVariable("bookingId") String bookingId,
-                                                 @Valid @RequestBody RefundRequest request) {
-        requireInternalService();
-        return refundPaymentUseCase.refundByBookingId(bookingId, request.reason())
-                .map(paymentId -> ResponseEntity.ok(new RefundResponse(paymentId, true)))
-                .orElseGet(() -> ResponseEntity.ok(new RefundResponse(null, false)));
-    }
-
     private AuthenticatedUser currentUser() {
         return AuthenticatedUserContext.get()
                 .orElseThrow(() -> new IllegalStateException(
                         "JwtAuthenticationFilter did not run for this request"));
-    }
-
-    private void requireInternalService() {
-        AuthenticatedUser user = currentUser();
-        if (!user.isInternalService()) {
-            throw new ForbiddenException("This operation is restricted to internal service calls");
-        }
     }
 
     @GetMapping("/{bookingId}")
@@ -191,10 +165,6 @@ public class PaymentController {
     ) {}
 
     record InitiatePaymentResponse(String paymentId) {}
-
-    record RefundRequest(@NotBlank String reason) {}
-
-    record RefundResponse(String paymentId, boolean refunded) {}
 
     record PaymentStatusResponse(
             String paymentId,

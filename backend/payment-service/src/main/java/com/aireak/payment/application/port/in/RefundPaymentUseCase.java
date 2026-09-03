@@ -3,8 +3,13 @@ package com.aireak.payment.application.port.in;
 import java.util.Optional;
 
 /**
- * Inbound port: refund a SUCCEEDED payment for a booking. Called internally by booking-service
- * when a match is cancelled — never directly by a customer (see PaymentController).
+ * Inbound port: refund a SUCCEEDED payment for a booking.
+ *
+ * <p>Driven by exactly one adapter — {@code RefundRequestedConsumer}, off booking-service's
+ * {@code booking.refund.requested} topic, which is where a cancelled match and a payment that
+ * landed after its booking was already gone both end up. There is no HTTP route onto this: the
+ * endpoint that used to offer one outlived its only caller and was removed, so a refund can only
+ * be requested by a service that can write to booking-service's outbox, never by a client.
  */
 public interface RefundPaymentUseCase {
     /**
