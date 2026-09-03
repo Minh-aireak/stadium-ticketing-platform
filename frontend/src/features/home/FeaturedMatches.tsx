@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Loader2, Search } from 'lucide-react'
 
@@ -13,12 +13,33 @@ import { getErrorMessage } from '@/lib/errors'
 const PAGE_SIZE = 8
 const SEARCH_DEBOUNCE_MS = 350
 
+/**
+ * Accumulates the leagues seen across every response, rather than reading them off the page
+ * currently on screen.
+ *
+ * <p>There is no leagues endpoint, so the chip row has to come from the matches themselves — but
+ * deriving it from `matches` made the filter destroy its own options: picking a league narrowed
+ * the results to that league, and every other chip vanished with the matches it came from. The
+ * only way to reach a second league was to notice the search box had been filled in and edit it
+ * by hand. Paging had the milder version of the same problem, since a chip only existed while a
+ * match from its league happened to be on the current page of eight.
+ *
+ * <p>Returns the previous array unchanged when nothing is new, so the chip row does not re-render
+ * on every fetch.
+ */
+function rememberLeagues(known: string[], items: Match[]): string[] {
+  const merged = new Set(known)
+  items.forEach((item) => merged.add(item.competition))
+  return merged.size === known.length ? known : Array.from(merged).sort()
+}
+
 export function FeaturedMatches() {
   const { toast } = useToast()
   const [queryInput, setQueryInput] = useState('')
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(0)
   const [matches, setMatches] = useState<Match[]>([])
+  const [leagues, setLeagues] = useState<string[]>([])
   const [totalElements, setTotalElements] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -42,6 +63,7 @@ export function FeaturedMatches() {
         if (cancelled) return
         setMatches(res.items)
         setTotalElements(res.totalElements)
+        setLeagues((known) => rememberLeagues(known, res.items))
       })
       .catch((err: unknown) => {
         if (cancelled) return
@@ -62,13 +84,6 @@ export function FeaturedMatches() {
   // and reports its totalHits, and since 90b96a2 that total counts the same PUBLISHED matches the
   // page hands back — so it divides into pages exactly as the browse total does.
   const totalPages = Math.max(1, Math.ceil(totalElements / PAGE_SIZE))
-
-  // No dedicated leagues endpoint — derive the chip list from whatever matches are already
-  // loaded on this page rather than adding a new API just for a filter shortcut.
-  const leagues = useMemo(
-    () => Array.from(new Set(matches.map((m) => m.competition))).sort(),
-    [matches],
-  )
 
   return (
     <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
