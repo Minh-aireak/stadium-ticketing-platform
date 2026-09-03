@@ -16,7 +16,10 @@ import java.util.UUID;
 
 public class Booking {
 
-    private static final int MAX_TICKETS = 10;
+    // Matches the browser's own limit in SeatSelectionPage and ticket-inventory-service's
+    // SeatRequestLimits.MAX_SEATS_PER_REQUEST. The three used to disagree (8 / 10 / none),
+    // which meant the only number a customer ever saw was the browser's.
+    private static final int MAX_TICKETS = 8;
 
     private final String bookingId;
     private final String customerId;

@@ -64,21 +64,21 @@ class BookingTest {
 
     @Test
     void createRejectsMoreThanMaxTickets() {
-        List<String> elevenSeats = List.of("A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9", "A10", "A11");
+        List<String> nineSeats = List.of("A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9");
 
         assertThatThrownBy(() -> Booking.create("customer-1", "customer-1@example.com", "showtime-1",
-                new SeatSelection(elevenSeats), AMOUNT, null))
+                new SeatSelection(nineSeats), AMOUNT, null))
                 .isInstanceOf(MaxTicketsExceededException.class);
     }
 
     @Test
     void createAllowsExactlyMaxTickets() {
-        List<String> tenSeats = List.of("A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9", "A10");
+        List<String> eightSeats = List.of("A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8");
 
         Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1",
-                new SeatSelection(tenSeats), AMOUNT, null);
+                new SeatSelection(eightSeats), AMOUNT, null);
 
-        assertThat(booking.getSeatSelection().count()).isEqualTo(10);
+        assertThat(booking.getSeatSelection().count()).isEqualTo(8);
     }
 
     @Test

@@ -20,6 +20,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -38,6 +39,9 @@ class TransactionalEmailServiceTest {
     private EmailSenderPort emailSenderPort;
 
     private TransactionalEmailService service;
+
+    /** What notifications.body was before V4 widened it to TEXT. */
+    private static final int PRE_V4_BODY_COLUMN_WIDTH = 2000;
 
     @BeforeEach
     void setUp() {
@@ -190,6 +194,49 @@ class TransactionalEmailServiceTest {
         service.sendPasswordResetEmail(new PasswordResetEmail("@example.com", "http://x/reset", 15));
 
         assertThat(captureSent().toName()).isEqualTo("@example.com");
+    }
+
+    /**
+     * notifications.body is TEXT rather than a bounded VARCHAR, and V4 justifies that with a seat
+     * list nothing capped. Both services cap it now -- Booking.MAX_TICKETS and
+     * SeatRequestLimits.MAX_SEATS_PER_REQUEST are both 8 -- so a confirmation body no longer grows
+     * without limit. A cancellation body still does: reason arrives from an admin's free-text
+     * CancelMatchRequest and is bounded at no hop between there and here. These two pin which of
+     * the two templates is now the reason the ceiling must stay off, so that a future change to
+     * either cap, or to the templates, has to come back through this file.
+     */
+    @Test
+    void aCancellationReasonIsWhatStillPushesARenderedBodyPastTheOldCeiling() {
+        Map<String, Object> model = new HashMap<>();
+        model.put("bookingId", "booking-1");
+        model.put("customerId", "cust-1");
+        model.put("showtimeId", "showtime-1");
+        model.put("reason", "x".repeat(5_000));
+
+        Optional<EmailContent> content = service.sendTemplatedEmail(
+                "booking-cancelled", "Your booking has been cancelled", "john@example.com", model);
+
+        assertThat(content).isPresent();
+        assertThat(content.get().textBody()).hasSizeGreaterThan(PRE_V4_BODY_COLUMN_WIDTH);
+    }
+
+    @Test
+    void aConfirmationCarryingEverySeatABookingMayHoldFitsWellInsideTheOldCeiling() {
+        Map<String, Object> model = new HashMap<>();
+        model.put("bookingId", "booking-1");
+        model.put("customerId", "cust-1");
+        model.put("showtimeId", "showtime-1");
+        // Booking.MAX_TICKETS seats, the most one booking can ever carry into this template.
+        model.put("seatCodes", List.of("A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8"));
+        model.put("amount", new BigDecimal("1250000"));
+        model.put("currency", "VND");
+        model.put("occurredAt", Instant.parse("2026-08-31T10:00:00Z"));
+
+        Optional<EmailContent> content = service.sendTemplatedEmail(
+                "booking-confirmed", "Your booking is confirmed!", "john@example.com", model);
+
+        assertThat(content).isPresent();
+        assertThat(content.get().textBody()).hasSizeLessThan(PRE_V4_BODY_COLUMN_WIDTH);
     }
 
     private EmailMessage captureSent() {

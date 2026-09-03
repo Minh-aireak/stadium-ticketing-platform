@@ -31,7 +31,12 @@ public class NotificationJpaEntity extends BaseAuditEntity {
     private String title;
 
     // TEXT, not a bounded VARCHAR: this holds the rendered plain-text email body, whose length
-    // follows the event payload (a booking's seat list is not capped anywhere). See V4.
+    // follows the event payload. The example V4 gives has expired -- a booking's seat list IS
+    // capped now, at Booking.MAX_TICKETS and SeatRequestLimits.MAX_SEATS_PER_REQUEST, both 8, so
+    // booking-confirmed renders well inside the VARCHAR(2000) V4 removed. What keeps the ceiling
+    // off is booking-cancelled: it interpolates the cancellation reason, which reaches here from
+    // an admin's free-text CancelMatchRequest and is bounded at no hop on the way. See
+    // TransactionalEmailServiceTest, which pins both halves.
     @Column(name = "body", nullable = false, columnDefinition = "TEXT")
     private String body;
 
