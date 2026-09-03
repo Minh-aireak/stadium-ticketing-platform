@@ -14,9 +14,14 @@ export async function getSeatMap(showtimeId: string): Promise<SeatMapResponse> {
   return data
 }
 
-// GET /api/v1/inventory/{showtimeId}/layout — best-effort topology for the Section/Block
-// picker (Phương án B). The backend may not have deployed this endpoint yet, so callers
-// must treat 404/5xx as "no layout available" and fall back to the plain seat map.
+// GET /api/v1/inventory/{showtimeId}/layout — static seating topology for the Section/Block
+// picker. Kept off the /seats DTO because it never changes with hold state; the backend derives
+// it from the persisted seats (tier -> section, row letter -> block, see SeatingLayoutQueryService)
+// and answers 404 when the showtime has no seat inventory at all.
+//
+// Returning null instead of throwing is the contract SeatInventoryController#getLayout documents
+// from its own side: no layout means no Section/Block picker, and SeatSelectionPage falls back to
+// the plain seat map rather than failing the page over a decoration.
 export async function getSeatLayout(showtimeId: string): Promise<SeatLayout | null> {
   try {
     const { data } = await api.get<SeatLayout>(`/inventory/${showtimeId}/layout`)

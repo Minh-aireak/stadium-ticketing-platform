@@ -15,7 +15,8 @@ export interface Seat {
   heldByYou: boolean
 }
 
-// Layout topology for the Section/Block picker (Phương án B). Served by a separate
+// Layout topology for the Section/Block picker. Mirrors SeatInventoryController's LayoutResponse
+// / SectionResponse / BlockResponse field for field, served by a separate
 // GET /inventory/{showtimeId}/layout endpoint so the realtime /seats DTO stays clean.
 export interface SeatLayoutBlock {
   id: string
