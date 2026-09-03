@@ -1,3 +1,4 @@
+import { AxiosError, AxiosHeaders } from 'axios'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -25,6 +26,20 @@ const state: CheckoutState = {
   seatCodes: ['A1', 'A2'],
   amount: 400000,
   currency: 'VND',
+}
+
+/** An axios rejection carrying an RFC 7807 body, as every service here answers a 4xx/5xx with. */
+function problemDetail(status: number, detail: string) {
+  const error = new AxiosError('Request failed', 'ERR_BAD_RESPONSE')
+  error.config = { headers: new AxiosHeaders() } as never
+  error.response = {
+    status,
+    statusText: '',
+    data: { detail },
+    headers: {},
+    config: error.config,
+  } as never
+  return error
 }
 
 function renderCheckout(overrides: Partial<CheckoutState> = {}) {
@@ -114,5 +129,48 @@ describe('CheckoutPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Xác nhận & Thanh toán/ }))
 
     await waitFor(() => expect(screen.getByText('trang trạng thái')).toBeDefined())
+  })
+
+  /**
+   * booking-service does not write its own sentence for a refused reservation: its
+   * TicketInventoryRestAdapter#refusalDetail reads ticket-inventory's ProblemDetail and copies the
+   * detail straight into SeatReservationRejectedException, a DomainException that
+   * GlobalExceptionHandler answers 422. So inventory's English reaches this page unchanged, and
+   * getErrorMessage renders any detail it finds verbatim.
+   *
+   * <p>Same defect 7d3eee1 fixed on SeatSelectionPage, on the other endpoint that can lose a seat
+   * race — the predicate it added for exactly this sentence was never applied here.
+   */
+  it('explains a seat lost between selection and confirmation in Vietnamese', async () => {
+    createBooking.mockRejectedValue(problemDetail(422, 'Seats not available for showtime show-1: A1'))
+
+    renderCheckout()
+    fireEvent.click(screen.getByRole('button', { name: /Xác nhận & Thanh toán/ }))
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('Một trong những ghế bạn chọn vừa được người khác đặt. Vui lòng quay lại và chọn ghế khác.'),
+      ).toBeDefined(),
+    )
+    expect(screen.queryByText(/Seats not available/)).toBeNull()
+    expect(screen.getByRole('button', { name: /Quay lại chọn ghế khác/ })).toBeDefined()
+  })
+
+  it('still shows a 422 that is not the seat race exactly as the backend worded it', async () => {
+    createBooking.mockRejectedValue(problemDetail(422, 'Booking amount does not match the seats'))
+
+    renderCheckout()
+    fireEvent.click(screen.getByRole('button', { name: /Xác nhận & Thanh toán/ }))
+
+    await waitFor(() => expect(screen.getByText('Booking amount does not match the seats')).toBeDefined())
+  })
+
+  it('still falls back to its own sentence when the failure carried no detail', async () => {
+    createBooking.mockRejectedValue(problemDetail(500, ''))
+
+    renderCheckout()
+    fireEvent.click(screen.getByRole('button', { name: /Xác nhận & Thanh toán/ }))
+
+    await waitFor(() => expect(screen.getByText(/Không thể tạo đơn đặt vé/)).toBeDefined())
   })
 })

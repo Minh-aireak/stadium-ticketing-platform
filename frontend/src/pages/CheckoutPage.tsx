@@ -8,7 +8,7 @@ import { useAuth } from '@/features/auth/AuthContext'
 import { createBooking } from '@/features/booking/bookingApi'
 import { unholdSeats } from '@/features/seats/seatsApi'
 import { formatCurrency } from '@/lib/format'
-import { getErrorMessage } from '@/lib/errors'
+import { getErrorMessage, isSeatsUnavailableError } from '@/lib/errors'
 import { randomUuid } from '@/lib/uuid'
 
 export interface CheckoutState {
@@ -70,7 +70,16 @@ export function CheckoutPage() {
         state: { matchLabel, seatCodes },
       })
     } catch (err) {
-      setError(getErrorMessage(err, 'Không thể tạo đơn đặt vé. Vui lòng thử lại.'))
+      setError(
+        // The seat race again, one step later than SeatSelectionPage sees it. booking-service
+        // writes no sentence of its own here: TicketInventoryRestAdapter#refusalDetail copies
+        // ticket-inventory's ProblemDetail detail into SeatReservationRejectedException, so the
+        // customer got inventory's English naming the internal showtimeId — the exact string
+        // 7d3eee1 added this predicate to keep off the screen, on the endpoint that never got it.
+        isSeatsUnavailableError(err)
+          ? 'Một trong những ghế bạn chọn vừa được người khác đặt. Vui lòng quay lại và chọn ghế khác.'
+          : getErrorMessage(err, 'Không thể tạo đơn đặt vé. Vui lòng thử lại.'),
+      )
     } finally {
       setSubmitting(false)
     }
