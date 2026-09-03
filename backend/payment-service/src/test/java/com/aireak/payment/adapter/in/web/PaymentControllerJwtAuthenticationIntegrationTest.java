@@ -35,7 +35,6 @@ import java.util.UUID;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -108,7 +107,7 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
 
     @Test
     void validTokenReachesTheControllerWhichReturns404ForAnUnknownBooking() throws Exception {
-        doNothing().when(bookingOwnershipPort).verifyCallerOwnsBooking(anyString(), anyString());
+        when(bookingOwnershipPort.fetchOwnedBooking(anyString(), anyString())).thenReturn(ownedBooking());
         when(getPaymentUseCase.getByBookingId("nonexistent")).thenReturn(Optional.empty());
 
         mockMvc.perform(get("/api/v1/payments/{bookingId}", "nonexistent")
@@ -123,7 +122,7 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
     @Test
     void initiateReturns403WhenCustomerDoesNotOwnBooking() throws Exception {
         doThrow(new IdentityMismatchException("Caller does not own booking " + BOOKING_ID))
-                .when(bookingOwnershipPort).verifyCallerOwnsBooking(eq(BOOKING_ID), anyString());
+                .when(bookingOwnershipPort).fetchOwnedBooking(eq(BOOKING_ID), anyString());
 
         mockMvc.perform(post("/api/v1/payments")
                         .header("Authorization", "Bearer " + validToken(CUSTOMER_A_ID))
@@ -138,7 +137,7 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
 
     @Test
     void initiateSucceedsWhenCustomerOwnsBooking() throws Exception {
-        doNothing().when(bookingOwnershipPort).verifyCallerOwnsBooking(eq(BOOKING_ID), anyString());
+        when(bookingOwnershipPort.fetchOwnedBooking(eq(BOOKING_ID), anyString())).thenReturn(ownedBooking());
         when(initiatePaymentUseCase.execute(any())).thenReturn(PAYMENT_ID);
 
         mockMvc.perform(post("/api/v1/payments")
@@ -153,8 +152,56 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
     }
 
     @Test
+    void initiateRejectsAnAmountThatUndercutsTheBooking() throws Exception {
+        when(bookingOwnershipPort.fetchOwnedBooking(eq(BOOKING_ID), anyString())).thenReturn(ownedBooking());
+
+        // Owning the booking is not a licence to name the price: a caller who reaches this
+        // endpoint directly (booking-service's own Step 4 having failed) could otherwise pay a
+        // token amount for a booking priced at 50.00 and still have it confirmed.
+        mockMvc.perform(post("/api/v1/payments")
+                        .header("Authorization", "Bearer " + validToken(CUSTOMER_A_ID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"bookingId":"%s","amount":"0.01","currency":"USD"}
+                                """.formatted(BOOKING_ID)))
+                .andExpect(status().isUnprocessableEntity());
+
+        verify(initiatePaymentUseCase, never()).execute(any());
+    }
+
+    @Test
+    void initiateRejectsACurrencyThatDiffersFromTheBooking() throws Exception {
+        when(bookingOwnershipPort.fetchOwnedBooking(eq(BOOKING_ID), anyString())).thenReturn(ownedBooking());
+
+        mockMvc.perform(post("/api/v1/payments")
+                        .header("Authorization", "Bearer " + validToken(CUSTOMER_A_ID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"bookingId":"%s","amount":"50.00","currency":"VND"}
+                                """.formatted(BOOKING_ID)))
+                .andExpect(status().isUnprocessableEntity());
+
+        verify(initiatePaymentUseCase, never()).execute(any());
+    }
+
+    @Test
+    void initiateAcceptsTheSameAmountWrittenWithADifferentScale() throws Exception {
+        when(bookingOwnershipPort.fetchOwnedBooking(eq(BOOKING_ID), anyString())).thenReturn(ownedBooking());
+        when(initiatePaymentUseCase.execute(any())).thenReturn(PAYMENT_ID);
+
+        // 50 and 50.00 are the same money; BigDecimal.equals would disagree, hence compareTo.
+        mockMvc.perform(post("/api/v1/payments")
+                        .header("Authorization", "Bearer " + validToken(CUSTOMER_A_ID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"bookingId":"%s","amount":"50","currency":"USD"}
+                                """.formatted(BOOKING_ID)))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
     void initiateReturnsAcceptedWhenAnIdempotentPaymentAttemptIsStillInProgress() throws Exception {
-        doNothing().when(bookingOwnershipPort).verifyCallerOwnsBooking(eq(BOOKING_ID), anyString());
+        when(bookingOwnershipPort.fetchOwnedBooking(eq(BOOKING_ID), anyString())).thenReturn(ownedBooking());
         when(initiatePaymentUseCase.execute(any())).thenThrow(
                 new DuplicatePaymentException("Payment for booking " + BOOKING_ID +
                         " is already being processed"));
@@ -182,7 +229,7 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
                                 """.formatted(BOOKING_ID)))
                 .andExpect(status().isCreated());
 
-        verify(bookingOwnershipPort, never()).verifyCallerOwnsBooking(anyString(), anyString());
+        verify(bookingOwnershipPort, never()).fetchOwnedBooking(anyString(), anyString());
     }
 
     // ---------------------------------------------------------------
@@ -192,7 +239,7 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
     @Test
     void getByBookingIdReturns403WhenCustomerDoesNotOwnBooking() throws Exception {
         doThrow(new IdentityMismatchException("Caller does not own booking " + BOOKING_ID))
-                .when(bookingOwnershipPort).verifyCallerOwnsBooking(eq(BOOKING_ID), anyString());
+                .when(bookingOwnershipPort).fetchOwnedBooking(eq(BOOKING_ID), anyString());
 
         mockMvc.perform(get("/api/v1/payments/{bookingId}", BOOKING_ID)
                         .header("Authorization", "Bearer " + validToken(CUSTOMER_A_ID)))
@@ -203,7 +250,7 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
 
     @Test
     void getByBookingIdSucceedsWhenCustomerOwnsBooking() throws Exception {
-        doNothing().when(bookingOwnershipPort).verifyCallerOwnsBooking(eq(BOOKING_ID), anyString());
+        when(bookingOwnershipPort.fetchOwnedBooking(eq(BOOKING_ID), anyString())).thenReturn(ownedBooking());
         Payment payment = Payment.reconstitute(PAYMENT_ID, BOOKING_ID, "buyer@example.com", new BigDecimal("50.00"), "USD",
                 PaymentStatus.SUCCEEDED, "gw-tx-1", null, Instant.now(), 1L);
         when(getPaymentUseCase.getByBookingId(BOOKING_ID)).thenReturn(Optional.of(payment));
@@ -223,7 +270,7 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
                         .header("Authorization", "Bearer " + internalServiceToken()))
                 .andExpect(status().isOk());
 
-        verify(bookingOwnershipPort, never()).verifyCallerOwnsBooking(anyString(), anyString());
+        verify(bookingOwnershipPort, never()).fetchOwnedBooking(anyString(), anyString());
     }
 
     // ---------------------------------------------------------------
@@ -236,7 +283,7 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
                 PaymentStatus.FAILED, null, "gateway error", Instant.now(), 1L);
         when(getPaymentUseCase.getById(PAYMENT_ID)).thenReturn(Optional.of(payment));
         doThrow(new IdentityMismatchException("Caller does not own booking " + BOOKING_ID))
-                .when(bookingOwnershipPort).verifyCallerOwnsBooking(eq(BOOKING_ID), anyString());
+                .when(bookingOwnershipPort).fetchOwnedBooking(eq(BOOKING_ID), anyString());
 
         mockMvc.perform(post("/api/v1/payments/{paymentId}/retry", PAYMENT_ID)
                         .header("Authorization", "Bearer " + validToken(CUSTOMER_A_ID)))
@@ -253,7 +300,7 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
                         .header("Authorization", "Bearer " + validToken(CUSTOMER_A_ID)))
                 .andExpect(status().isNotFound());
 
-        verify(bookingOwnershipPort, never()).verifyCallerOwnsBooking(anyString(), anyString());
+        verify(bookingOwnershipPort, never()).fetchOwnedBooking(anyString(), anyString());
     }
 
     @Test
@@ -261,7 +308,7 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
         Payment payment = Payment.reconstitute(PAYMENT_ID, BOOKING_ID, "buyer@example.com", new BigDecimal("50.00"), "USD",
                 PaymentStatus.FAILED, null, "gateway error", Instant.now(), 1L);
         when(getPaymentUseCase.getById(PAYMENT_ID)).thenReturn(Optional.of(payment));
-        doNothing().when(bookingOwnershipPort).verifyCallerOwnsBooking(eq(BOOKING_ID), anyString());
+        when(bookingOwnershipPort.fetchOwnedBooking(eq(BOOKING_ID), anyString())).thenReturn(ownedBooking());
         when(retryPaymentUseCase.retry(PAYMENT_ID)).thenReturn(Optional.of(PAYMENT_ID));
 
         mockMvc.perform(post("/api/v1/payments/{paymentId}/retry", PAYMENT_ID)
@@ -282,7 +329,7 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
                         .header("Authorization", "Bearer " + internalServiceToken()))
                 .andExpect(status().isOk());
 
-        verify(bookingOwnershipPort, never()).verifyCallerOwnsBooking(anyString(), anyString());
+        verify(bookingOwnershipPort, never()).fetchOwnedBooking(anyString(), anyString());
     }
 
     // ---------------------------------------------------------------
@@ -316,6 +363,20 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
                 .andExpect(status().isOk());
 
         verify(refundPaymentUseCase).refundByBookingId(BOOKING_ID, "Match cancelled");
+    }
+
+    // ---------------------------------------------------------------
+    // Fixtures
+    // ---------------------------------------------------------------
+
+    /**
+     * The booking every ownership-passing test stubs. Its amount/currency deliberately match the
+     * request bodies below — the controller now rejects a charge that disagrees with the booking,
+     * so an ownership-only stub is no longer enough to reach the use case.
+     */
+    private static BookingOwnershipPort.OwnedBooking ownedBooking() {
+        return new BookingOwnershipPort.OwnedBooking(
+                BOOKING_ID, "PENDING_PAYMENT", new BigDecimal("50.00"), "USD");
     }
 
     // ---------------------------------------------------------------

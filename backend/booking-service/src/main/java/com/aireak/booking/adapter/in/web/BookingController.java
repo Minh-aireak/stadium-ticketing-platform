@@ -63,6 +63,17 @@ public class BookingController {
                 .body(new CreateBookingResponse(result.bookingId(), result.status().name()));
     }
 
+    /**
+     * GET /api/v1/bookings/{bookingId} — the booking's current status and, critically, the
+     * <strong>authoritative amount</strong> the saga computed server-side from each seat's tier
+     * (see {@code BookingOrchestrationService#createBooking}, Step 2b).
+     *
+     * <p>payment-service calls this endpoint to authorize a payment (see its
+     * {@code BookingOwnershipPort}) and now also to check the amount it was asked to charge
+     * against the one recorded here. Returning only {@code status} left it with nothing to
+     * compare against, so a caller could initiate a payment for their own booking at any amount
+     * they liked. This response is the source of truth for that comparison.
+     */
     @GetMapping("/{bookingId}")
     public ResponseEntity<BookingStatusResponse> getBooking(@PathVariable("bookingId") String bookingId) {
         return getBookingUseCase.getBooking(bookingId)
@@ -70,7 +81,9 @@ public class BookingController {
                     // bookingId alone is guessable/enumerable — without this, any authenticated
                     // caller could poll another customer's booking status by ID.
                     requireMatchingIdentity(b.getCustomerId());
-                    return ResponseEntity.ok(new BookingStatusResponse(b.getBookingId(), b.getStatus().name()));
+                    return ResponseEntity.ok(new BookingStatusResponse(
+                            b.getBookingId(), b.getStatus().name(),
+                            b.getAmount().amount(), b.getAmount().currency()));
                 })
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
@@ -133,7 +146,14 @@ public class BookingController {
 
     public record CreateBookingResponse(String bookingId, String status) {}
 
-    public record BookingStatusResponse(String bookingId, String status) {}
+    /**
+     * {@code amount}/{@code currency} are the server-computed charge for this booking, never the
+     * placeholder the client posted — see {@link #getBooking}. Only ever returned to the booking's
+     * own customer (or an internal service acting for them), so exposing it here discloses
+     * nothing the caller did not already own.
+     */
+    public record BookingStatusResponse(String bookingId, String status,
+                                        BigDecimal amount, String currency) {}
 
     public record BookingSummaryResponse(String bookingId, String showtimeId, List<String> seatCodes,
                                         BigDecimal amount, String currency, String status, Instant createdAt) {}

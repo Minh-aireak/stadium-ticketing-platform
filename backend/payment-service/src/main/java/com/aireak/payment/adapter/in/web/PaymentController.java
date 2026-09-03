@@ -1,7 +1,6 @@
 package com.aireak.payment.adapter.in.web;
 
 import com.aireak.common.exception.ForbiddenException;
-import com.aireak.common.exception.IdentityMismatchException;
 import com.aireak.common.security.AuthenticatedUser;
 import com.aireak.common.security.AuthenticatedUserContext;
 import com.aireak.payment.application.port.in.GetPaymentUseCase;
@@ -11,6 +10,7 @@ import com.aireak.payment.application.port.in.RetryPaymentUseCase;
 import com.aireak.payment.application.port.in.command.InitiatePaymentCommand;
 import com.aireak.payment.application.port.out.BookingOwnershipPort;
 import com.aireak.payment.domain.exception.DuplicatePaymentException;
+import com.aireak.payment.domain.exception.PaymentAmountMismatchException;
 import com.aireak.payment.domain.model.Payment;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Digits;
@@ -40,16 +40,39 @@ public class PaymentController {
     private final RefundPaymentUseCase refundPaymentUseCase;
     private final BookingOwnershipPort bookingOwnershipPort;
 
+    /**
+     * POST /api/v1/payments — starts the charge for a booking.
+     *
+     * <p>Owning the booking is necessary but <strong>not sufficient</strong>: the charge is only
+     * ever the amount booking-service computed server-side from the seats' tiers. Trusting
+     * {@code request.amount()} meant a customer who owned a booking could pay whatever they liked
+     * for it — reachable in practice by forcing booking-service's Step 4 to fail ambiguously (its
+     * payment circuit breaker opening is enough), which leaves the booking PENDING_PAYMENT with no
+     * Payment row, then calling this endpoint directly with the bookingId from "my tickets".
+     */
     @PostMapping
     public ResponseEntity<InitiatePaymentResponse> initiate(@Valid @RequestBody InitiatePaymentRequest request) {
-        enforceBookingOwnership(request.bookingId());
+        BigDecimal chargeAmount = request.amount();
+        String chargeCurrency = request.currency();
+
+        AuthenticatedUser caller = currentUser();
+        if (!caller.isInternalService()) {
+            BookingOwnershipPort.OwnedBooking booking =
+                    bookingOwnershipPort.fetchOwnedBooking(request.bookingId(), caller.token());
+            requireAmountMatchesBooking(request, booking);
+            // Charge the booking's own figures, not the request's — matching them above makes the
+            // two equal, so this is belt-and-braces against a future divergence in that check.
+            chargeAmount = booking.amount();
+            chargeCurrency = booking.currency();
+        }
+
         try {
-            // Email comes off the validated JWT, never the request body — enforceBookingOwnership
+            // Email comes off the validated JWT, never the request body — the ownership check
             // above already proved this caller owns the booking, and a client-supplied address
             // would let anyone redirect someone else's payment receipt.
             String paymentId = initiatePaymentUseCase.execute(
                     new InitiatePaymentCommand(request.bookingId(), currentUser().email(),
-                            request.amount(), request.currency()));
+                            chargeAmount, chargeCurrency));
             return ResponseEntity.status(HttpStatus.CREATED)
                     .body(new InitiatePaymentResponse(paymentId));
         } catch (DuplicatePaymentException exception) {
@@ -126,7 +149,31 @@ public class PaymentController {
         if (user.isInternalService()) {
             return;
         }
-        bookingOwnershipPort.verifyCallerOwnsBooking(bookingId, user.token());
+        bookingOwnershipPort.fetchOwnedBooking(bookingId, user.token());
+    }
+
+    /**
+     * Rejects a request whose amount/currency disagree with the booking's own.
+     *
+     * <p>Fails closed when booking-service did not report them at all: an older instance that
+     * doesn't yet return the fields leaves them null, and "we could not check" must never be
+     * allowed to read as "it checked out" — that is precisely the state this endpoint was
+     * previously in for every request.
+     */
+    private void requireAmountMatchesBooking(InitiatePaymentRequest request,
+                                             BookingOwnershipPort.OwnedBooking booking) {
+        if (booking.amount() == null || booking.currency() == null) {
+            throw new IllegalStateException(
+                    "booking-service did not report an authoritative amount for booking " + booking.bookingId()
+                            + "; refusing to charge an unverified amount");
+        }
+        // compareTo, not equals: BigDecimal.equals also compares scale, so 500 and 500.00 would
+        // be rejected as a mismatch even though they are the same amount of money.
+        if (request.amount().compareTo(booking.amount()) != 0
+                || !booking.currency().equalsIgnoreCase(request.currency())) {
+            throw new PaymentAmountMismatchException(
+                    "Requested charge does not match the booking's amount");
+        }
     }
 
     // fraction = 2 for every currency (simplification: no zero-decimal currency support like

@@ -10,11 +10,13 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import java.math.BigDecimal;
+
 /**
- * Calls booking-service's {@code GET /api/v1/bookings/{bookingId}} to verify the caller owns
- * the booking. That endpoint already enforces ownership (403 if the JWT subject doesn't match
- * the booking's customerId, 404 if the booking doesn't exist) — this adapter only interprets
- * the HTTP response code, never duplicates the ownership logic itself.
+ * Calls booking-service's {@code GET /api/v1/bookings/{bookingId}} to fetch a booking the caller
+ * owns. That endpoint already enforces ownership (403 if the JWT subject doesn't match the
+ * booking's customerId, 404 if the booking doesn't exist) — this adapter only interprets the HTTP
+ * response, never duplicates the ownership logic itself.
  *
  * <p>Forwards the caller's <em>original</em> bearer token, not an internal-service token —
  * the booking-service endpoint needs to see the real end-user identity to perform its own
@@ -31,17 +33,28 @@ public class BookingOwnershipRestAdapter implements BookingOwnershipPort {
     private String baseUrl;
 
     @Override
-    public void verifyCallerOwnsBooking(String bookingId, String callerBearerToken) {
-        restClient.get()
+    public OwnedBooking fetchOwnedBooking(String bookingId, String callerBearerToken) {
+        BookingResponse response = restClient.get()
                 .uri(baseUrl + "/api/v1/bookings/{bookingId}", bookingId)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + callerBearerToken)
                 .retrieve()
-                .onStatus(HttpStatusCode::is4xxClientError, (request, response) -> {
+                .onStatus(HttpStatusCode::is4xxClientError, (request, clientResponse) -> {
                     log.debug("Booking ownership check failed: bookingId={}, status={}",
-                            bookingId, response.getStatusCode());
+                            bookingId, clientResponse.getStatusCode());
                     throw new IdentityMismatchException(
                             "Caller does not own booking " + bookingId);
                 })
-                .toBodilessEntity();
+                .body(BookingResponse.class);
+
+        if (response == null) {
+            // A 2xx with no body is not an ownership failure but is not a usable answer either;
+            // failing here is what keeps an unverifiable amount from being charged.
+            throw new IllegalStateException("booking-service returned an empty body for booking " + bookingId);
+        }
+        return new OwnedBooking(response.bookingId(), response.status(), response.amount(), response.currency());
     }
+
+    // amount/currency are absent on a booking-service instance older than the endpoint change that
+    // added them; Jackson leaves them null and the caller treats null as "cannot verify".
+    record BookingResponse(String bookingId, String status, BigDecimal amount, String currency) {}
 }
