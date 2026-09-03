@@ -54,4 +54,36 @@ class EmailTest {
 
         assertThat(email.toString()).isEqualTo("user@example.com");
     }
+
+    /**
+     * accounts.email is VARCHAR(255). Nothing bounded the address before: @Email on
+     * RegisterRequest checks shape and not length, and the pattern here accepts a local part of
+     * any size -- so an over-long address was accepted all the way to the INSERT, where Postgres
+     * raised "value too long for type character varying(255)". That arrives as a
+     * DataIntegrityViolationException at commit, which GlobalExceptionHandler can only answer as
+     * 409 "The request conflicts with existing data".
+     */
+    @Test
+    void rejectsAnAddressLongerThanTheAccountsEmailColumnCanHold() {
+        String tooLong = "a".repeat(243) + "@example.com"; // 255 characters
+
+        assertThatThrownBy(() -> new Email(tooLong))
+                .isInstanceOf(InvalidEmailException.class)
+                .hasMessageContaining("254");
+    }
+
+    @Test
+    void acceptsAnAddressOfExactlyTheMaximumLength() {
+        String atLimit = "a".repeat(242) + "@example.com"; // 254 characters
+
+        assertThat(new Email(atLimit).value()).hasSize(254);
+    }
+
+    /** The bound applies to the trimmed value, not the raw one -- padding must not cost length. */
+    @Test
+    void measuresLengthAfterTrimming() {
+        String atLimit = "a".repeat(242) + "@example.com";
+
+        assertThat(new Email("  " + atLimit + "  ").value()).hasSize(254);
+    }
 }
