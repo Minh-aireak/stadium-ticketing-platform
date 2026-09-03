@@ -124,4 +124,28 @@ api.interceptors.response.use(
   },
 )
 
+/**
+ * The access token to send, refreshing first when the in-memory one is gone — which it is
+ * immediately after a page reload, while the HttpOnly refresh session is still good.
+ *
+ * <p>Callers that need a token *before* dispatching (rather than reacting to a 401) bypass the
+ * response interceptor, and with it the interceptor's session-expired handling. Doing the refresh
+ * inline here without that meant a customer whose session had actually expired got their request's
+ * own generic error — on checkout, "Không thể tạo đơn đặt vé. Vui lòng thử lại." — and could
+ * retry it forever, because nothing ever told AuthProvider the session was gone and no route
+ * guard ever sent them to log in.
+ */
+export async function ensureAccessToken(): Promise<string> {
+  const current = getAccessToken()
+  if (current) return current
+  try {
+    return await refreshAccessToken()
+  } catch (error) {
+    // Same handling as the 401 path in the response interceptor above.
+    setAccessToken(null)
+    onSessionExpired?.()
+    throw error
+  }
+}
+
 export { refreshAccessToken }
