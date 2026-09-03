@@ -21,6 +21,7 @@ import com.aireak.identity.application.port.in.command.ResetPasswordCommand;
 import com.aireak.identity.application.port.in.dto.AuthResult;
 import com.aireak.identity.config.AuthCookieProperties;
 import com.aireak.identity.config.CorsProperties;
+import com.aireak.identity.domain.exception.InvalidAccountStatusException;
 import com.aireak.identity.domain.exception.InvalidCredentialsException;
 import com.aireak.identity.domain.exception.InvalidRefreshTokenException;
 import com.aireak.identity.domain.exception.InvalidVerificationTokenException;
@@ -226,6 +227,28 @@ public class AuthController {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .contentType(MediaType.TEXT_HTML)
                 .body(verificationPage("Verification failed", ex.getMessage(), false));
+    }
+
+    /**
+     * The other way {@code GET /verify-email} can fail: {@code AccountActivationSteps} forgives an
+     * account that is already ACTIVE but not a SUSPENDED one, so a suspended account following a
+     * still-valid link reaches {@link com.aireak.identity.domain.model.Account#activate()} and is
+     * refused. Without this the response was common's {@code GlobalExceptionHandler} 422 —
+     * {@code application/problem+json} rendered into a browser window that had just followed a
+     * link out of an email. Every other outcome of this endpoint is a page; so is this one.
+     *
+     * <p>Reachable only from verification: {@code RefreshTokenService} used to raise the same
+     * exception for a disabled account and now answers {@code InvalidRefreshTokenException}
+     * instead, so a JSON endpoint can no longer end up in this HTML handler. The status itself is
+     * deliberately not shown — the page says the link could not be used, not why.
+     */
+    @ExceptionHandler(InvalidAccountStatusException.class)
+    public ResponseEntity<String> handleInvalidAccountStatus(InvalidAccountStatusException ex) {
+        log.warn("Verification link could not be applied: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .contentType(MediaType.TEXT_HTML)
+                .body(verificationPage("Verification failed",
+                        "This account cannot be verified. Please contact support.", false));
     }
 
     @ExceptionHandler(VerificationTokenStoreUnavailableException.class)
