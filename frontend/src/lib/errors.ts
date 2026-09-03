@@ -3,7 +3,9 @@ import { isAxiosError } from 'axios'
 import { CORRELATION_ID_HEADER } from '@/lib/api'
 
 // Backend errors follow RFC 7807 ProblemDetail (see common/GlobalExceptionHandler):
-// { type, title, status, detail, timestamp }. `detail` is the human-readable message.
+// { type, title, status, detail, timestamp }. `detail` is the human-readable message, and it is
+// written in English — so where `type` identifies the failure on its own, MESSAGE_BY_ERROR_TYPE
+// below answers in Vietnamese instead of showing it.
 //
 // The one exception is the gateway's 429 rate-limit response, which is hand-built and has a
 // different shape: { error: 'rate_limit_exceeded', retryAfterSeconds } plus a Retry-After header.
@@ -24,9 +26,97 @@ export function getErrorMessage(
     if (error.response?.status === 429 && problemDetail === undefined) {
       return formatRateLimitMessage(error.response)
     }
+    const errorType = problemTypeSuffix(error.response?.data)
+    if (errorType !== undefined) {
+      const translated = MESSAGE_BY_ERROR_TYPE.get(errorType)
+      if (translated !== undefined) return appendCorrelationId(error, translated)
+      if (errorType === UNINFORMATIVE_ERROR_TYPE) return appendCorrelationId(error, fallback)
+    }
     if (problemDetail !== undefined) return appendCorrelationId(error, problemDetail)
   }
   return appendCorrelationId(error, fallback)
+}
+
+const ERROR_TYPE_BASE = 'https://aireak.com/errors/'
+
+/**
+ * Vietnamese for the ProblemDetail `type` URIs that identify exactly one failure and whose
+ * `detail` holds nothing the customer can act on — a fixed English sentence, or one that only
+ * varies by an internal id. Every entry was read off the handler that sends it: the two
+ * *OverloadExceptionHandlers, the controller-local handlers in identity / match-catalog /
+ * ticket-inventory / booking, common's GlobalExceptionHandler, and the gateway. That one-to-one
+ * is what makes the type, rather than the sentence, the thing to key on.
+ *
+ * <p>A Map rather than an object literal: the key is read off the wire, and an object literal
+ * would answer `constructor` and `toString` out of Object.prototype with something that is not a
+ * string at all, despite the Record type saying otherwise.
+ *
+ * <p>Deliberately not exhaustive. `domain-error` is the type common's GlobalExceptionHandler
+ * gives EVERY DomainException on the platform, so no single sentence can stand for it; that is
+ * why isSeatsUnavailableError and the three predicates beside it exist and have to keep matching
+ * their sentences. `validation-error`, `not-found`, `forbidden`, `identity-mismatch` and
+ * `unauthorized` are left out for the same reason read the other way: their detail names the
+ * field, resource or reason, and replacing it would throw away the only thing the caller can act
+ * on.
+ */
+const MESSAGE_BY_ERROR_TYPE = new Map<string, string>([
+  ['invalid-credentials', 'Email hoặc mật khẩu không đúng.'],
+  [
+    'session-store-unavailable',
+    'Hệ thống đăng nhập đang tạm thời gián đoạn. Vui lòng thử lại sau ít phút.',
+  ],
+  [
+    'reset-token-store-unavailable',
+    'Chức năng đặt lại mật khẩu đang tạm thời gián đoạn. Vui lòng thử lại sau ít phút.',
+  ],
+  [
+    'verification-token-store-unavailable',
+    'Chưa gửi được email xác minh lúc này. Vui lòng thử lại sau ít phút.',
+  ],
+  [
+    'search-unavailable',
+    'Không tìm kiếm được trận đấu lúc này. Vui lòng thử lại sau ít phút.',
+  ],
+  [
+    'catalog-unavailable',
+    'Chưa kiểm tra được tình trạng vé lúc này. Vui lòng thử lại sau ít phút.',
+  ],
+  // Sent by booking-service for a downstream it could not reach AND by the gateway for one it
+  // could not route to, with a constant detail on both sides, so the sentence names neither.
+  [
+    'service-unavailable',
+    'Một dịch vụ cần cho thao tác này đang tạm thời gián đoạn. Vui lòng thử lại sau ít phút.',
+  ],
+  ['gateway-timeout', 'Máy chủ phản hồi quá chậm. Vui lòng thử lại sau ít phút.'],
+  // Load shedding, not a per-customer quota: both are 503 from a service's Resilience4j bulkhead
+  // or rate limiter. The gateway's own 429 is a different body entirely and is handled above.
+  ['bulkhead-full', 'Hệ thống đang quá tải. Vui lòng thử lại sau giây lát.'],
+  ['rate-limited', 'Hệ thống đang quá tải. Vui lòng thử lại sau giây lát.'],
+  // The only detail here that is not a constant: it embeds the Idempotency-Key the browser
+  // generated, which is plumbing the customer has no use for and should not be shown.
+  [
+    'duplicate-request-in-progress',
+    'Đơn đặt vé này đang được xử lý. Vui lòng đợi giây lát rồi kiểm tra lại.',
+  ],
+  [
+    'data-conflict',
+    'Dữ liệu vừa gửi trùng với dữ liệu đã có. Vui lòng tải lại trang rồi thử lại.',
+  ],
+])
+
+/**
+ * The one constant that says nothing the caller does not already know: handleGenericException's
+ * "An unexpected error occurred" is what every unhandled exception on the platform becomes, while
+ * the call site passing `fallback` knows which request it made. So this type yields to that
+ * sentence instead of getting a table entry of its own.
+ */
+const UNINFORMATIVE_ERROR_TYPE = 'internal-error'
+
+/** The path segment of a platform `type` URI, or undefined for anything else (including none). */
+function problemTypeSuffix(data: unknown): string | undefined {
+  const type = (data as { type?: unknown } | undefined)?.type
+  if (typeof type !== 'string' || !type.startsWith(ERROR_TYPE_BASE)) return undefined
+  return type.slice(ERROR_TYPE_BASE.length)
 }
 
 /**
@@ -94,7 +184,8 @@ export function isInvalidResetTokenError(error: unknown): boolean {
  * already held or sold (see ticket-inventory-service SeatsNotAvailableException). Its detail is
  * English and names the internal showtimeId, so a caller with a seat-specific sentence of its own
  * has to recognise this case rather than pass that sentence to getErrorMessage as a fallback —
- * the fallback only applies when the response carried no detail at all.
+ * a domain 422 reaches the fallback only if the response carried no detail at all. The type table
+ * cannot help here: every DomainException on the platform shares the one `domain-error` type.
  */
 export function isSeatsUnavailableError(error: unknown): boolean {
   if (!isAxiosError(error) || error.response?.status !== 422) return false

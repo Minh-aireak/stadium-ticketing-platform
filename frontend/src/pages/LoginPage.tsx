@@ -28,7 +28,7 @@ export function LoginPage() {
       await login(email, password)
       navigate(from, { replace: true })
     } catch (err) {
-      setError(getErrorMessage(err, 'Email hoặc mật khẩu không đúng.'))
+      setError(getErrorMessage(err, 'Không thể đăng nhập. Vui lòng thử lại.'))
     } finally {
       setSubmitting(false)
     }

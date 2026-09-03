@@ -136,7 +136,8 @@ describe('CheckoutPage', () => {
    * TicketInventoryRestAdapter#refusalDetail reads ticket-inventory's ProblemDetail and copies the
    * detail straight into SeatReservationRejectedException, a DomainException that
    * GlobalExceptionHandler answers 422. So inventory's English reaches this page unchanged, and
-   * getErrorMessage renders any detail it finds verbatim.
+   * getErrorMessage renders a domain 422's detail verbatim — its type table cannot reach one,
+   * because every DomainException on the platform shares the single `domain-error` type.
    *
    * <p>Same defect 7d3eee1 fixed on SeatSelectionPage, on the other endpoint that can lose a seat
    * race — the predicate it added for exactly this sentence was never applied here.

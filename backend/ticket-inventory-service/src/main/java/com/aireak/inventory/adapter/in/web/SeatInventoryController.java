@@ -214,9 +214,10 @@ public class SeatInventoryController {
      * down, and putting it there would make that class's name describe half of what it does.
      *
      * <p>The detail is a constant: the exception's own message names the showtimeId, and this
-     * response is rendered straight into a browser toast (errors.ts prints ProblemDetail's detail
-     * verbatim). The adapter has already logged the cause with a stack trace, so this does not
-     * repeat it.
+     * response reaches a browser toast. Being a constant is also what lets the frontend say it in
+     * Vietnamese — errors.ts keys that sentence off the {@code type} URI below rather than off
+     * this English, which only holds while one type means exactly one failure. The adapter has
+     * already logged the cause with a stack trace, so this does not repeat it.
      */
     @ExceptionHandler(ShowtimeCatalogUnavailableException.class)
     public ResponseEntity<ProblemDetail> handleCatalogUnavailable(ShowtimeCatalogUnavailableException ex) {

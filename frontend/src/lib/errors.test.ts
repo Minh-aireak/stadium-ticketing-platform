@@ -153,3 +153,135 @@ describe('domain error predicates', () => {
     expect(isBookingClosedError(new Error('Ticket booking is closed'))).toBe(false)
   })
 })
+
+/**
+ * `type` is a URI constant chosen by whichever handler built the response, and every one of them
+ * sets it: common's GlobalExceptionHandler, the two *OverloadExceptionHandlers, the
+ * controller-local handlers in match-catalog / ticket-inventory / booking / identity, and the
+ * gateway. Where a type identifies one failure whose `detail` is a fixed English sentence, that
+ * type — not the sentence — is what the UI can translate.
+ *
+ * The per-sentence predicates below stay necessary for the ones it cannot: every DomainException
+ * on the platform shares the single `domain-error` type, so there the sentence is the only thing
+ * that says which rule was broken.
+ */
+describe('ProblemDetail type mapping', () => {
+  function problem(
+    status: number,
+    typeSuffix: string,
+    detail: string,
+    headers: Record<string, string> = {},
+  ): AxiosError {
+    return responseError(
+      status,
+      { type: `https://aireak.com/errors/${typeSuffix}`, status, detail },
+      headers,
+    )
+  }
+
+  /**
+   * LoginService raises InvalidCredentialsException("Invalid credentials") for all four of its
+   * refusals and AuthController answers 401 with that as the detail, so this is what a customer
+   * who mistypes their password sees — and api.ts skips the 401-refresh retry for any /auth/ URL,
+   * so nothing else touches it on the way back.
+   */
+  it('answers the login 401 in Vietnamese, not with "Invalid credentials"', () => {
+    const message = getErrorMessage(
+      problem(401, 'invalid-credentials', 'Invalid credentials'),
+      'Không thể đăng nhập. Vui lòng thử lại.',
+    )
+    expect(message).toBe('Email hoặc mật khẩu không đúng.')
+  })
+
+  // Every detail here is a string literal in the handler that sends it — checked against the
+  // source, not guessed — which is what makes the type enough to translate by.
+  it.each<[number, string, string, string]>([
+    [503, 'session-store-unavailable', 'Authentication service temporarily unavailable',
+      'Hệ thống đăng nhập đang tạm thời gián đoạn. Vui lòng thử lại sau ít phút.'],
+    [503, 'reset-token-store-unavailable', 'Password reset is temporarily unavailable',
+      'Chức năng đặt lại mật khẩu đang tạm thời gián đoạn. Vui lòng thử lại sau ít phút.'],
+    [503, 'verification-token-store-unavailable', 'Email verification is temporarily unavailable',
+      'Chưa gửi được email xác minh lúc này. Vui lòng thử lại sau ít phút.'],
+    [503, 'search-unavailable', 'Match search is temporarily unavailable',
+      'Không tìm kiếm được trận đấu lúc này. Vui lòng thử lại sau ít phút.'],
+    [503, 'catalog-unavailable', 'Ticket availability cannot be verified right now',
+      'Chưa kiểm tra được tình trạng vé lúc này. Vui lòng thử lại sau ít phút.'],
+    [503, 'service-unavailable', 'A service this booking needs is temporarily unavailable',
+      'Một dịch vụ cần cho thao tác này đang tạm thời gián đoạn. Vui lòng thử lại sau ít phút.'],
+    [503, 'bulkhead-full', 'Match catalog service is at capacity',
+      'Hệ thống đang quá tải. Vui lòng thử lại sau giây lát.'],
+    [503, 'rate-limited', 'Too many catalog browse requests',
+      'Hệ thống đang quá tải. Vui lòng thử lại sau giây lát.'],
+    [504, 'gateway-timeout', 'The downstream service took too long to respond',
+      'Máy chủ phản hồi quá chậm. Vui lòng thử lại sau ít phút.'],
+    [409, 'data-conflict', 'The request conflicts with existing data',
+      'Dữ liệu vừa gửi trùng với dữ liệu đã có. Vui lòng tải lại trang rồi thử lại.'],
+    // The one detail that is not a constant — BookingOrchestrationService builds it from the
+    // Idempotency-Key. Keyed by type all the same, and that is what stops the key being shown.
+    [409, 'duplicate-request-in-progress',
+      "Request with Idempotency-Key 'e1f2a3b4-0000-4000-8000-000000000000' is already being processed",
+      'Đơn đặt vé này đang được xử lý. Vui lòng đợi giây lát rồi kiểm tra lại.'],
+  ])('translates the %i %s response', (status, typeSuffix, detail, vietnamese) => {
+    expect(getErrorMessage(problem(status, typeSuffix, detail))).toBe(vietnamese)
+  })
+
+  it('still appends the correlation id to a translated 5xx', () => {
+    const error = problem(503, 'search-unavailable', 'Match search is temporarily unavailable', {
+      'x-correlation-id': 'corr-42',
+    })
+    expect(getErrorMessage(error)).toBe(
+      'Không tìm kiếm được trận đấu lúc này. Vui lòng thử lại sau ít phút. (Mã lỗi: corr-42)',
+    )
+  })
+
+  /**
+   * handleGenericException's "An unexpected error occurred" is the one constant that says nothing
+   * the caller does not already know, and every call site passes a sentence naming the thing that
+   * failed. So this type yields to that sentence rather than to a table entry of its own.
+   */
+  it('lets the call site answer a bare internal error', () => {
+    expect(
+      getErrorMessage(
+        problem(500, 'internal-error', 'An unexpected error occurred'),
+        'Không thể tải danh sách trận đấu.',
+      ),
+    ).toBe('Không thể tải danh sách trận đấu.')
+    expect(getErrorMessage(problem(500, 'internal-error', 'An unexpected error occurred')))
+      .toBe(GENERIC)
+  })
+
+  /** Guard: the one type the table must never claim, and why the predicates above still exist. */
+  it('leaves the shared domain-error type to the per-sentence predicates', () => {
+    const closed = problem(422, 'domain-error', 'Ticket booking is closed for showtime: show-1')
+    expect(getErrorMessage(closed)).toBe('Ticket booking is closed for showtime: show-1')
+    expect(isBookingClosedError(closed)).toBe(true)
+
+    const duplicate = problem(422, 'domain-error', 'Email already registered: a@b.co')
+    expect(isDuplicateEmailError(duplicate)).toBe(true)
+  })
+
+  /** Guard: a type carrying a request-specific detail keeps that detail. */
+  it('renders an untranslated detail verbatim', () => {
+    expect(getErrorMessage(problem(400, 'validation-error', 'homeTeam: must not be blank')))
+      .toBe('homeTeam: must not be blank')
+    expect(getErrorMessage(problem(404, 'not-found', 'Match not found: match-9')))
+      .toBe('Match not found: match-9')
+  })
+
+  /** Guard: the gateway's hand-built 429 has no `type` at all and must keep its own sentence. */
+  it('is not disturbed by the gateway 429', () => {
+    expect(getErrorMessage(responseError(429, { error: 'rate_limit_exceeded', retryAfterSeconds: 30 })))
+      .toBe('Bạn đã thao tác quá nhiều lần. Vui lòng thử lại sau 30 giây.')
+  })
+
+  it('ignores a type outside the platform namespace', () => {
+    expect(getErrorMessage(responseError(503, { type: 'about:blank', detail: 'nothing to map' })))
+      .toBe('nothing to map')
+  })
+
+  /** The suffix is read off the wire, so a name that only exists on Object.prototype is not one. */
+  it('does not treat an inherited property name as a translation', () => {
+    expect(getErrorMessage(problem(503, 'toString', 'nothing to map'))).toBe('nothing to map')
+    expect(getErrorMessage(problem(503, 'constructor', 'nothing to map'))).toBe('nothing to map')
+  })
+})

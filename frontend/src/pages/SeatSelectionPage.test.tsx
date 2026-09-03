@@ -153,7 +153,7 @@ describe('SeatSelectionPage', () => {
   /**
    * The regression. When another shopper already holds the seat just clicked, inventory answers
    * 422 with a ProblemDetail whose detail is English and names the internal showtimeId. Because
-   * getErrorMessage renders any detail it finds verbatim, the Vietnamese sentence this call site
+   * getErrorMessage renders a domain 422's detail verbatim, the Vietnamese sentence this call site
    * passes as getErrorMessage's fallback could only ever have appeared if the backend had sent no
    * detail at all — so the one case it was written for was the one case that could not reach it,
    * and the customer got "Seats not available for showtime show-1: A1" instead.
@@ -221,9 +221,12 @@ describe('SeatSelectionPage', () => {
 
   /**
    * Guard for the pair above: a catalog outage is NOT a closed booking window. c8ff01a split
-   * ShowtimeCatalogUnavailableException off DomainException precisely so it answers 503, and its
-   * detail must keep reaching the customer with the correlation id getErrorMessage appends to a
-   * 5xx — the whole point of that split.
+   * ShowtimeCatalogUnavailableException off DomainException precisely so it answers 503, and it
+   * must keep reaching the customer as an outage carrying the correlation id getErrorMessage
+   * appends to a 5xx — the whole point of that split.
+   *
+   * <p>The body below is SeatInventoryController#handleCatalogUnavailable's, type and all. That
+   * detail is a constant, so errors.ts answers it by type rather than printing the English.
    */
   it('still reports a catalog outage as an outage, with its correlation id', async () => {
     getSeatMap.mockResolvedValue({ showtimeId: 'show-1', seats: [seat('A1'), seat('A2')] })
@@ -232,7 +235,11 @@ describe('SeatSelectionPage', () => {
     outage.response = {
       status: 503,
       statusText: '',
-      data: { detail: 'Cannot confirm the booking window right now' },
+      data: {
+        type: 'https://aireak.com/errors/catalog-unavailable',
+        status: 503,
+        detail: 'Ticket availability cannot be verified right now',
+      },
       headers: { 'x-correlation-id': 'corr-42' },
       config: outage.config,
     } as never
@@ -246,7 +253,8 @@ describe('SeatSelectionPage', () => {
     await waitFor(() => expect(toast).toHaveBeenCalled())
     expect(toast).toHaveBeenCalledWith(
       expect.objectContaining({
-        description: 'Cannot confirm the booking window right now (Mã lỗi: corr-42)',
+        description:
+          'Chưa kiểm tra được tình trạng vé lúc này. Vui lòng thử lại sau ít phút. (Mã lỗi: corr-42)',
       }),
     )
   })

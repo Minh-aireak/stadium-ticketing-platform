@@ -249,8 +249,9 @@ export function SeatSelectionPage() {
       toast({
         title: 'Không thể giữ ghế',
         // Inventory answers a seat someone else holds with an English detail naming the
-        // internal showtimeId, and getErrorMessage renders any detail it finds verbatim. So this
-        // case has to be recognised here: passing the sentence as getErrorMessage's fallback put
+        // internal showtimeId, and getErrorMessage renders a domain 422's detail verbatim — its
+        // type table cannot reach one. So this case has to be recognised here: passing the
+        // sentence as getErrorMessage's fallback put
         // it behind a condition (no detail at all) that this endpoint never satisfies.
         // The same endpoint's other domain 422 (ShowtimeBookingClosedException) needs the same
         // treatment for the same reason: the customer can be sitting on this page when an admin
