@@ -35,9 +35,15 @@ export const CORRELATION_ID_HEADER = 'X-Correlation-Id'
 // insecure-context fallback is written to satisfy.
 const newCorrelationId = randomUuid
 
-// CSRF is only required for cookie-authenticated endpoints (/auth/refresh, /auth/logout).
-// Per A2, the X-XSRF-TOKEN header is only sent when the XSRF-TOKEN cookie actually has a
-// value — if the cookie is missing, the header is omitted entirely.
+// CSRF is only required for cookie-authenticated endpoints (/auth/refresh, /auth/logout), and
+// identity-service's SecurityConfig says why: those two are state-changing requests authenticated
+// by a cookie the browser attaches on its own, which is exactly what a cross-site form can forge.
+// A bearer-authenticated request cannot be forged that way and must not carry this header.
+//
+// The header goes out only when the XSRF-TOKEN cookie actually has a value, because it is an echo
+// of that cookie — CookieCsrfTokenRepository compares the two — so before the server has written
+// the cookie there is nothing to echo and an empty header would be rejected exactly as an absent
+// one is.
 function buildCsrfHeaders(): Record<string, string> {
   const token = getCookie('XSRF-TOKEN')
   return token ? { 'X-XSRF-TOKEN': token } : {}

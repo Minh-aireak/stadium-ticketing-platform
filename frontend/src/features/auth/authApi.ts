@@ -41,8 +41,8 @@ export async function silentRefresh(): Promise<LoginResponse['accessToken']> {
 
 export async function logout(): Promise<void> {
   try {
-    // The X-XSRF-TOKEN header is attached automatically by the shared api interceptor
-    // (only when the XSRF-TOKEN cookie has a value — A2 behavior).
+    // The X-XSRF-TOKEN header is attached automatically by the shared api interceptor's
+    // /auth/logout branch, and only when the XSRF-TOKEN cookie has a value (see lib/api.ts).
     await api.post('/auth/logout', null)
   } finally {
     setAccessToken(null)
