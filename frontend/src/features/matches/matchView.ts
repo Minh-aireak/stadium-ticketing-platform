@@ -8,9 +8,13 @@ export function teamInitials(name: string): string {
   const initials = name
     .split(/\s+/)
     .filter(Boolean)
-    .map((word) => word[0])
-    .join('')
+    // [...word][0] rather than word[0], and slice after the map rather than over the joined
+    // string: indexing a string walks UTF-16 code units, so a name beginning above the BMP
+    // yields half a surrogate pair and the badge draws U+FFFD. Same split between code unit
+    // and code point that RawPassword.validate was carrying.
+    .map((word) => [...word][0])
     .slice(0, 2)
+    .join('')
     .toUpperCase()
   return initials || '?'
 }
