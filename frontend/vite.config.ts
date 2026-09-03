@@ -24,13 +24,18 @@ export default defineConfig({
     rollupOptions: {
       output: {
         // Vendor code is pinned in package.json and changes only when a dependency is upgraded;
-        // app code changes every deploy. Left to itself Rollup packs both into one shared chunk,
-        // so editing a single component invalidates ~200 kB of React and framer-motion in every
-        // returning visitor's cache. Naming them separately means a deploy only busts the app
-        // chunks. It does not shrink the first load — react-router and framer-motion are both on
-        // the landing path via the App shell and Hero; route-level `lazy` (see routes/router.tsx)
-        // is what does that.
-        // Rollup 4 (Vite 8) takes only the function form here, not the old id-to-modules object.
+        // app code changes every deploy. Left to itself the bundler packs both into one shared
+        // chunk, so editing a single component invalidates 410 kB of React and framer-motion
+        // (132 kB over the wire, now that nginx.conf compresses) in every returning visitor's
+        // cache. Naming them separately means a deploy only busts the app chunks. It does not
+        // shrink the first load — react-router and framer-motion are both on the landing path
+        // via the App shell and Hero; route-level `lazy` (see routes/router.tsx) is what does
+        // that.
+        // Vite 8 bundles Rolldown, not Rollup: `vite.rollupVersion` still reports 4.23.0 as a
+        // compatibility shim, but there is no rollup in the dependency tree. Rolldown takes only
+        // the function form — "unlike Rollup, object form is not supported", in its own words
+        // — so Rollup's docs are the wrong place to check whether that is still true. Rolldown
+        // also marks manualChunks deprecated in favour of output.codeSplitting.
         manualChunks(id) {
           if (!id.includes('node_modules')) return undefined
           if (id.includes('framer-motion')) return 'vendor-motion'
