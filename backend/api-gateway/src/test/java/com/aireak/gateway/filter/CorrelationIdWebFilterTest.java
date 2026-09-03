@@ -55,8 +55,17 @@ class CorrelationIdWebFilterTest {
         assertThat(UUID.fromString(generated)).isNotNull();
     }
 
+    /**
+     * Deliberately not named after {@link CorrelationIdWebFilter}'s {@code MAX_INBOUND_LENGTH}.
+     * That guard is checked first, but it decides no outcome an assertion here can see: the UUID
+     * v4 pattern is anchored at a fixed 36 characters, so every string long enough to trip the
+     * length check fails the regex as well. The guard is there to keep the regex off an
+     * arbitrarily large header value — a cost, not a result — and deleting it leaves this test
+     * green. {@code common}'s CorrelationIdFilterTest already names its equivalent case for the
+     * input and the outcome rather than the guard ({@code replacesAnOverlongInboundId}).
+     */
     @Test
-    void generatesANewIdWhenHeaderExceeds64Characters() {
+    void generatesANewIdForAnOverlongInboundHeader() {
         String tooLong = "a".repeat(65);
         MockServerWebExchange exchange = exchangeWithHeader(tooLong);
 
