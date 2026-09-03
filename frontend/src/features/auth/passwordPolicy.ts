@@ -3,43 +3,44 @@ export const PASSWORD_MIN_LENGTH = 8
 export interface PasswordRequirement {
   id: string
   label: string
-  /** Required requirements gate form submission; non-required ones only affect the strength score. */
-  required: boolean
   test: (password: string) => boolean
 }
 
-// Mirrors backend/identity-service RawPassword policy exactly: min 8 chars, at least one
-// uppercase, one lowercase, one digit. The backend has no special-character rule, so it stays
-// non-required here to avoid the frontend rejecting passwords the backend would accept.
+/**
+ * The checklist rendered under a password field (see PasswordChecklist). What actually gates
+ * submission is `passwordSchema` in registerSchema.ts; the four policy rows here restate the
+ * same rules for the reader, and 'special' is advisory only — identity-service's RawPassword has
+ * no special-character rule, and the frontend must not reject a password the backend accepts.
+ *
+ * <p>Both halves of this list used to carry a `required: boolean` documented as "Required
+ * requirements gate form submission; non-required ones only affect the strength score". Nothing
+ * anywhere read the field: submission is gated by zod, and getPasswordStrength computes its
+ * score from its own character-class checks without consulting this list at all.
+ */
 export const PASSWORD_REQUIREMENTS: PasswordRequirement[] = [
   {
     id: 'length',
     label: `Ít nhất ${PASSWORD_MIN_LENGTH} ký tự`,
-    required: true,
     test: (password) => password.length >= PASSWORD_MIN_LENGTH,
   },
   {
     id: 'uppercase',
     label: 'Có chữ hoa (A-Z)',
-    required: true,
     test: (password) => /[A-Z]/.test(password),
   },
   {
     id: 'lowercase',
     label: 'Có chữ thường (a-z)',
-    required: true,
     test: (password) => /[a-z]/.test(password),
   },
   {
     id: 'digit',
-    required: true,
     label: 'Có số (0-9)',
     test: (password) => /[0-9]/.test(password),
   },
   {
     id: 'special',
     label: 'Có ký tự đặc biệt (khuyến khích)',
-    required: false,
     test: (password) => /[^A-Za-z0-9]/.test(password),
   },
 ]
