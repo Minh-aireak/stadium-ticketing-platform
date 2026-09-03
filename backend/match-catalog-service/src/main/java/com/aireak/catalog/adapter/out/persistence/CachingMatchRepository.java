@@ -95,11 +95,21 @@ public class CachingMatchRepository implements MatchRepository {
         return delegate.findByShowtimeId(showtimeId);
     }
 
+    /**
+     * Slices the cached id list rather than paging in SQL — the whole list is already in memory.
+     *
+     * <p>The offset is computed in {@code long}. {@code page * size} as {@code int} overflows:
+     * {@code MatchController} clamps size to 100 but leaves page unbounded above, so
+     * {@code ?page=2147483647} wraps to -100, and {@code subList(-100, 0)} throws
+     * {@link IndexOutOfBoundsException} — a 500 on a public, unauthenticated endpoint from a single
+     * query parameter. Clamping to {@code ids.size()} in long space turns any out-of-range page
+     * into the empty page it should always have been.
+     */
     @Override
     public List<Match> findByStatus(MatchStatus status, int page, int size) {
         List<String> ids = resolveIdList(status);
-        int from = Math.min(page * size, ids.size());
-        int to = Math.min(from + size, ids.size());
+        int from = (int) Math.min((long) Math.max(page, 0) * Math.max(size, 0), ids.size());
+        int to = (int) Math.min((long) from + Math.max(size, 0), ids.size());
         return loadAll(ids.subList(from, to));
     }
 

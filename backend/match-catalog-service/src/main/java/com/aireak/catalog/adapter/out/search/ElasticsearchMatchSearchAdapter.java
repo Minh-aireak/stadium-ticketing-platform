@@ -28,6 +28,15 @@ public class ElasticsearchMatchSearchAdapter implements MatchSearchPort {
 
     private static final String INDEX = "matches";
 
+    /**
+     * Elasticsearch refuses any request whose {@code from + size} exceeds the index's
+     * {@code index.max_result_window} (10 000 by default) — it answers 400, which surfaces here as
+     * an unhandled exception and reaches the caller as a 500 on a public endpoint. Nothing stops a
+     * client asking for page 200; bounding it here turns "too deep to answer" into an empty page,
+     * which is what it means.
+     */
+    private static final int MAX_RESULT_WINDOW = 10_000;
+
     private final ElasticsearchClient elasticsearchClient;
 
     @Override
@@ -47,12 +56,22 @@ public class ElasticsearchMatchSearchAdapter implements MatchSearchPort {
 
     @Override
     public SearchResult search(String query, int page, int size) {
-        int from = page * size;
+        // Computed in long: MatchController clamps size to [1,100] but leaves page unbounded above,
+        // so `page * size` as int wraps — ?q=x&page=2147483647 lands on from = -100, which
+        // Elasticsearch rejects with a 400 and the caller sees as a 500.
+        int safeSize = Math.max(size, 0);
+        long offset = (long) Math.max(page, 0) * safeSize;
+        if (offset + safeSize > MAX_RESULT_WINDOW) {
+            // Past what the index will page through at all. An empty page is the honest answer and
+            // costs no round trip; totalHits stays 0 because we never got to ask.
+            return new SearchResult(List.of(), 0);
+        }
+        int from = (int) offset;
         try {
             SearchResponse<MatchDocument> response = elasticsearchClient.search(req -> req
                             .index(INDEX)
                             .from(from)
-                            .size(size)
+                            .size(safeSize)
                             .query(q -> q.multiMatch(m -> m
                                     .query(query)
                                     .fields("homeTeam", "awayTeam", "competition"))),
