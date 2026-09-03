@@ -26,9 +26,14 @@ import java.util.Optional;
  *
  * <p>This job queries payment-service directly for the true outcome ({@link PaymentPort#checkOutcome})
  * and drives the SAME saga methods {@code PaymentResultConsumer} uses
- * ({@link BookingOrchestrationService#confirmBooking}/{@link BookingOrchestrationService#cancelBookingOnPaymentFailure})
- * — both already no-op if the booking isn't PENDING_PAYMENT anymore, so this job can never race
- * or double-apply an outcome the Kafka consumer (or a concurrent run) already applied.
+ * ({@link BookingOrchestrationService#confirmBooking}/{@link BookingOrchestrationService#cancelBookingOnPaymentFailure}),
+ * so it can never race or double-apply an outcome the Kafka consumer (or a concurrent run) already
+ * applied. Their guards are not the same guard, though, and the difference is what makes the DRAFT
+ * sweep below work at all: {@code confirmBooking} refuses anything that is not PENDING_PAYMENT,
+ * while {@code cancelBookingOnPaymentFailure} refuses only CONFIRMED and CANCELLED — which is why
+ * it can be handed a DRAFT booking and actually cancel it. This javadoc used to credit both with
+ * the stricter guard; had that been true, {@link #reconcileDraftBookings} would have been a silent
+ * no-op logging a warning about the same stuck bookings every five minutes forever.
  *
  * <p>Only considers bookings last updated more than {@code graceMinutes} ago, so it never races
  * the normal, still-in-flight case where payment-service simply hasn't responded yet.

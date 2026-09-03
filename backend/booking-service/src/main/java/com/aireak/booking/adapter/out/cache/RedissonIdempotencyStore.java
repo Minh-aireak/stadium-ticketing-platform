@@ -39,6 +39,11 @@ class RedissonIdempotencyStore implements IdempotencyStore {
     // which stopped being the number this platform runs with when that budget was introduced.
     private static final Duration CLAIM_TIMEOUT = Duration.ofMillis(300);
 
+    // complete() and release() run after the decision they record has already been made, so they
+    // get a budget of their own rather than sharing claim()'s: nothing downstream is waiting on
+    // the answer, and neither is allowed to fail the request that reached them.
+    private static final Duration WRITE_TIMEOUT = Duration.ofMillis(500);
+
     // Local (per-JVM, NOT shared across pods) cache of COMPLETED claims only — caching
     // InProgress/absent here would let two pods each believe a key is free/theirs to claim, since
     // a pod's local cache is never invalidated by another pod's writes. 60s is sized to absorb
@@ -92,15 +97,51 @@ class RedissonIdempotencyStore implements IdempotencyStore {
         }
     }
 
+    /**
+     * Bounded and swallowed like {@link #claim}, because this runs at the very end of a booking
+     * that has already succeeded — the row is committed, payment is initiated and
+     * BookingCreatedEvent is published by the time it is called. It used to be a bare
+     * {@code set()}: a Redis blip at that moment threw out of {@code createBooking} and handed the
+     * customer a 500 for a booking that was real and in flight. That is not what "a performance
+     * layer, not the source of truth" (see {@link IdempotencyStore}) can be allowed to mean.
+     *
+     * <p>The cost of losing this write is a replay that misses the fast path and falls through to
+     * {@code BookingRepository#findByIdempotencyKey}, which is authoritative anyway.
+     */
     @Override
     public void complete(String idempotencyKey, String bookingId) {
-        bucket(idempotencyKey).set(COMPLETED_PREFIX + bookingId, COMPLETED_TTL.toSeconds(), TimeUnit.SECONDS);
+        try {
+            bucket(idempotencyKey)
+                    .setAsync(COMPLETED_PREFIX + bookingId, COMPLETED_TTL.toSeconds(), TimeUnit.SECONDS)
+                    .toCompletableFuture()
+                    .get(WRITE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (Exception e) {
+            log.warn("Could not record the completed idempotency claim; a replay will fall back to "
+                    + "the database: key={}, error={}", idempotencyKey, e.getMessage());
+        }
+        // Local either way: this pod can still answer its own client's retry from memory.
         completedCache.put(idempotencyKey, bookingId);
     }
 
+    /**
+     * Same treatment, and one more reason for it: every caller of this runs it in a catch block
+     * immediately before rethrowing the failure that got it there. A throw from here replaced that
+     * exception with a Redis one, so a customer whose payment was rejected was told about a cache
+     * instead.
+     *
+     * <p>The cost of losing this delete is that the key stays IN_PROGRESS until its 90s TTL, so a
+     * client retrying inside that window gets a 409 rather than a fresh attempt.
+     */
     @Override
     public void release(String idempotencyKey) {
-        bucket(idempotencyKey).delete();
+        try {
+            bucket(idempotencyKey).deleteAsync()
+                    .toCompletableFuture()
+                    .get(WRITE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (Exception e) {
+            log.warn("Could not release the idempotency claim; it expires on its own in {}s: "
+                    + "key={}, error={}", IN_PROGRESS_TTL.toSeconds(), idempotencyKey, e.getMessage());
+        }
         // Defensive: release() is only ever called for a key that was never completed, so this is
         // a no-op in practice — invalidating anyway costs nothing and closes off any future misuse.
         completedCache.invalidate(idempotencyKey);
