@@ -31,6 +31,13 @@
 # topic and a quiet dead-letter topic alongside the one that fires, so both
 # directions fail here.
 #
+# BookingSeatsSoldToSomeoneElse and SeatSalesNotFinalizing are single-series
+# thresholds, but both read a gauge that InventoryConfirmationReconciler rewrites
+# on every pass INCLUDING an empty one. A gauge that is only written when there is
+# something to report keeps its last value forever, so the fixture below drives
+# each series back to zero and pins that the alert stops -- the failure mode is an
+# alert nobody can clear, which is indistinguishable from one nobody believes.
+#
 # The other rules are single-series thresholds with nothing comparable to get wrong.
 # ============================================================================
 
@@ -131,3 +138,42 @@ tests:
               summary: "a record was dead-lettered onto payment.payment.succeeded-dlt"
               description: >-
                 A listener exhausted its retries and the record was republished to payment.payment.succeeded-dlt. Nothing replays a dead-lettered record automatically — grep the logs for "ALERT:" to find which one and why. This reads the broker's own end offset via kafka-exporter rather than the services' spring_kafka_listener timer, which counts every failed ATTEMPT and so fires on a blip the next retry clears, well before anything is actually dead-lettered.
+
+  # Two bookings are refused for good at t=0 and a human resolves them at t=20m. The alert has to
+  # fire once the 15m `for` elapses and then stop -- InventoryConfirmationReconciler re-reads the
+  # count from the database on every pass rather than accumulating it, so a fix applied by hand
+  # shows up on the next run. booking_inventory_unconfirmed_count rides along in the same fixture
+  # at a value that never reaches its own 30m threshold, to pin that the two gauges are separate
+  # alerts and not one: a transient backlog must not page anybody.
+  - interval: 1m
+    input_series:
+      - series: 'booking_inventory_sale_refused_count{job="booking-service"}'
+        values: "2x19 0x15"
+      - series: 'booking_inventory_unconfirmed_count{job="booking-service"}'
+        values: "3x10 0x24"
+    alert_rule_test:
+      # Below the 15m `for`: a scan that has only just found them is not yet an incident.
+      - eval_time: 14m
+        alertname: BookingSeatsSoldToSomeoneElse
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: BookingSeatsSoldToSomeoneElse
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: booking-service
+            exp_annotations:
+              summary: "a paid, confirmed booking has seats it does not own"
+              description: >-
+                InventoryConfirmationReconciler has been reporting bookings whose seat sale ticket-inventory-service refused for 15 minutes. Each one is CONFIRMED, paid for, and has already had its confirmation email sent, for seats that belong to another booking. Nothing retries these — grep the logs for "ALERT:" to find which, then refund or reseat by hand.
+      # Resolved by hand at t=20m, so the gauge reads 0 and the alert clears.
+      - eval_time: 25m
+        alertname: BookingSeatsSoldToSomeoneElse
+        exp_alerts: []
+      # The transient gauge cleared at t=11m, well inside its own 30m window, so it never fires.
+      - eval_time: 16m
+        alertname: SeatSalesNotFinalizing
+        exp_alerts: []
+      - eval_time: 33m
+        alertname: SeatSalesNotFinalizing
+        exp_alerts: []

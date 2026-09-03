@@ -189,3 +189,42 @@ groups:
             UnreconciledPaymentAlertJob has been reporting unreconciled payments for 15 minutes.
             A customer has been charged without their booking being confirmed — this needs a
             human, not a retry.
+
+      # The mirror image of the alert above, one step further along the saga: the payment DID
+      # land, the booking IS confirmed, and the seats were never marked SOLD. There is no retry
+      # left to try — ticket-inventory-service has answered that these seats belong to a different
+      # booking (or that the showtime has no inventory at all), and it will keep answering that.
+      # InventoryConfirmationReconciler drops these rows from its queue precisely so they stop
+      # looking like a backlog that is draining, which is what makes this gauge the only thing
+      # that still knows about them.
+      - alert: BookingSeatsSoldToSomeoneElse
+        expr: booking_inventory_sale_refused_count > 0
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "a paid, confirmed booking has seats it does not own"
+          description: >-
+            InventoryConfirmationReconciler has been reporting bookings whose seat sale
+            ticket-inventory-service refused for 15 minutes. Each one is CONFIRMED, paid for, and
+            has already had its confirmation email sent, for seats that belong to another booking.
+            Nothing retries these — grep the logs for "ALERT:" to find which, then refund or
+            reseat by hand.
+
+      # The transient half of the same path, and deliberately a warning rather than a page: a
+      # ticket-inventory restart puts bookings here for a cycle or two and the next run clears
+      # them. Half an hour of it is not a restart, and every minute of it is a window in which a
+      # sold seat's Redis hold (TTL 10 minutes) has lapsed and the seat is bookable by somebody
+      # else — which is how a booking ends up in BookingSeatsSoldToSomeoneElse above.
+      - alert: SeatSalesNotFinalizing
+        expr: booking_inventory_unconfirmed_count > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "paid bookings are not getting their seats marked sold"
+          description: >-
+            InventoryConfirmationReconciler has had CONFIRMED bookings awaiting their seat sale
+            for 30 minutes. Their seat holds have long since expired, so those seats are on sale
+            again to other customers while the original buyers hold paid, confirmed bookings for
+            them.

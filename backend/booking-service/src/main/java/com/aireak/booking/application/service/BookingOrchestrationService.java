@@ -343,9 +343,25 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
     // Called only by InventoryConfirmationReconciler for a booking its own query already found
     // CONFIRMED with inventoryConfirmed=false — unlike confirmBooking(), this has no
     // PENDING_PAYMENT guard, since the booking is expected to already be CONFIRMED.
-    public void retryInventoryConfirmation(Booking booking) {
-        confirmInventoryReservation(booking.getBookingId(), booking.getShowtimeId(),
+    public InventoryConfirmationOutcome retryInventoryConfirmation(Booking booking) {
+        return confirmInventoryReservation(booking.getBookingId(), booking.getShowtimeId(),
                 booking.getSeatSelection().seatCodes());
+    }
+
+    /**
+     * What one attempt at finalizing a booking's seat sale actually did. Returned rather than
+     * merely logged because {@code InventoryConfirmationReconciler} could not otherwise tell:
+     * confirmInventoryReservation catches every exception, so the job's own try/catch never fired
+     * and every run logged the same "reconciling N bookings" line whether the backlog was draining
+     * or permanently stuck.
+     */
+    public enum InventoryConfirmationOutcome {
+        /** The seats are now SOLD to this booking. Nothing further to do. */
+        CONFIRMED,
+        /** ticket-inventory-service refused for good. Recorded; only a human can resolve it. */
+        REFUSED,
+        /** Something that might clear. Stays in the reconciler's queue. */
+        UNRESOLVED
     }
 
     // Best-effort: confirmReservation is called after the booking is already durably CONFIRMED,
@@ -354,12 +370,15 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
     // InventoryConfirmationReconciler retries later — the Redis hold otherwise just expires via
     // TTL despite payment having succeeded (see TicketInventoryRestAdapter#confirmReservationFallback).
     // On a refusal that never will, records that instead and stops — see recordInventorySaleRefused.
-    private void confirmInventoryReservation(String bookingId, String showtimeId, List<String> seatCodes) {
+    private InventoryConfirmationOutcome confirmInventoryReservation(String bookingId, String showtimeId,
+                                                                     List<String> seatCodes) {
         try {
             ticketInventoryPort.confirmReservation(showtimeId, bookingId, seatCodes);
             sagaSteps.markInventoryConfirmed(bookingId);
+            return InventoryConfirmationOutcome.CONFIRMED;
         } catch (InventoryConfirmationRefusedException refused) {
             recordInventorySaleRefused(bookingId, showtimeId, seatCodes, refused);
+            return InventoryConfirmationOutcome.REFUSED;
         } catch (Exception e) {
             // Deliberately does not name confirmReservation: the try above covers
             // markInventoryConfirmed too, so a database blip on the way to recording a call that
@@ -368,6 +387,7 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
             // safe -- confirmReservation is idempotent for a booking that already owns its seats.
             log.error("Could not finalize the seat sale for booking {}; left for reconciliation: {}",
                     bookingId, e.getMessage());
+            return InventoryConfirmationOutcome.UNRESOLVED;
         }
     }
 
