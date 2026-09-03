@@ -27,7 +27,7 @@ import java.util.concurrent.TimeoutException;
  * own inline {@code ProblemDetail} responses (401/403/429 — see JwtAuthenticationWebFilter,
  * ActuatorAccessWebFilter, RateLimitingWebFilter) — namely errors raised by Spring Cloud
  * Gateway's own routing machinery: a downstream service refusing the connection, a route timing
- * out, or an unmapped route. Without this bean, those fall through to Boot's
+ * out, an oversized body, or an unmapped route. Without this bean, those fall through to Boot's
  * {@code DefaultErrorWebExceptionHandler}, which returns a plain {@code {"error": "..."}} shape
  * instead of the {@code application/problem+json} (RFC 7807) shape every backend service and
  * this gateway's own filters already use.
@@ -127,6 +127,11 @@ public class GatewayExceptionHandler implements ErrorWebExceptionHandler {
             case GATEWAY_TIMEOUT -> "gateway-timeout";
             case SERVICE_UNAVAILABLE -> "service-unavailable";
             case NOT_FOUND -> "route-not-found";
+            // The RequestSize filter on the payments and bookings routes raises this, and it is by
+            // some distance the most likely non-5xx to arrive here. Left to the default it was
+            // reported as "internal-error" / "An unexpected error occurred", which tells a caller
+            // to retry something that will fail identically every time.
+            case CONTENT_TOO_LARGE -> "request-too-large";
             case BAD_REQUEST -> "bad-request";
             default -> "internal-error";
         };
@@ -137,6 +142,7 @@ public class GatewayExceptionHandler implements ErrorWebExceptionHandler {
             case GATEWAY_TIMEOUT -> "The downstream service took too long to respond";
             case SERVICE_UNAVAILABLE -> "The downstream service is currently unavailable";
             case NOT_FOUND -> "No route matches this request";
+            case CONTENT_TOO_LARGE -> "The request body is larger than this endpoint accepts";
             default -> "An unexpected error occurred";
         };
     }

@@ -158,6 +158,20 @@ class GatewayExceptionHandlerTest {
         assertThat(bodyOf(exchange).get("correlationId").asString()).isEqualTo(applied);
     }
 
+    /** A 413 is a known, actionable client error, not an unexplained internal one. */
+    @Test
+    void describesAnOversizedRequestAsWhatItIs() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/v1/payments/webhook").build());
+
+        handler.handle(exchange, new ResponseStatusException(HttpStatus.CONTENT_TOO_LARGE))
+                .block(Duration.ofSeconds(5));
+
+        JsonNode body = bodyOf(exchange);
+        assertThat(body.get("type").asString()).endsWith("request-too-large");
+        assertThat(body.get("detail").asString()).isNotEqualTo("An unexpected error occurred");
+    }
+
     /**
      * RFC 7807 puts extension members at the top level, and so does every backend service —
      * Spring's message converter applies {@code ProblemDetailJacksonMixin}. A gateway filter
