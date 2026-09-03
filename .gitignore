@@ -67,7 +67,9 @@ yarn-error.log*
 # =========================
 .env
 .env.*
-!/.env.example
+# Unanchored on purpose: `!/.env.example` rescued the root template and nothing else, so
+# frontend/.env.example -- the only record of VITE_API_BASE_URL -- was never committable.
+!.env.example
 
 *.local.properties
 *.secret.properties
