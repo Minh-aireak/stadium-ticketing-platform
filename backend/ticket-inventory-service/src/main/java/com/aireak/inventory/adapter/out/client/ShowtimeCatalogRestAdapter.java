@@ -3,11 +3,13 @@ package com.aireak.inventory.adapter.out.client;
 import com.aireak.common.cache.LocalStringCache;
 import com.aireak.inventory.application.port.out.ShowtimeCatalogPort;
 import com.aireak.inventory.domain.exception.ShowtimeBookingClosedException;
+import com.aireak.inventory.domain.exception.ShowtimeCatalogUnavailableException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -83,18 +85,24 @@ public class ShowtimeCatalogRestAdapter implements ShowtimeCatalogPort {
             }
         } catch (ShowtimeBookingClosedException exception) {
             throw exception;
+        } catch (HttpClientErrorException exception) {
+            // catalog-service answered, definitively, about THIS showtime — 404 for one it does
+            // not know, or another 4xx. That is a real "not bookable", so it stays the 422 it has
+            // always been; waiting and retrying could not change it.
+            log.warn("match-catalog-service refused to confirm showtimeId={}: {}",
+                    showtimeId, exception.getStatusCode());
+            throw new ShowtimeBookingClosedException(showtimeId, exception);
         } catch (RestClientException exception) {
-            // A dependency failure, deliberately surfaced as the same exception type as a real
-            // closure: fail closed, since an unanswerable "is this bookable?" must never read as
-            // yes. Nothing in the class javadoc above covers this — it is about the two local
-            // caches — so the two cases are told apart only by the message
-            // (ShowtimeBookingClosedException has a constructor for each) and by this log line;
-            // without it, a catalog-service outage is indistinguishable in ELK from a legitimate
-            // rejection. It reaches the customer as 422, not 503: DomainException maps there in
-            // GlobalExceptionHandler and nothing here overrides it.
+            // No usable answer: connection refused, timeout, or a 5xx (catalog shedding load
+            // through its own CatalogOverloadExceptionHandler counts here). Still fails closed —
+            // an unanswerable "is this bookable?" must never read as yes — but it is no longer
+            // told as a closed booking window. Reporting an outage as a DomainException gave it
+            // GlobalExceptionHandler's 422, which blamed the customer for it, told them sales had
+            // closed on a match that was still selling, and cost them the correlation id the
+            // frontend only attaches to a 5xx.
             log.error("Failed to verify booking window with match-catalog-service for showtimeId={}: {}",
                     showtimeId, exception.getMessage(), exception);
-            throw new ShowtimeBookingClosedException(showtimeId, exception);
+            throw new ShowtimeCatalogUnavailableException(showtimeId, exception);
         }
     }
 

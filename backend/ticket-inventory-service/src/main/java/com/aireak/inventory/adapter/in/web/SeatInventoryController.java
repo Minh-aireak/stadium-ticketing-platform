@@ -17,15 +17,22 @@ import com.aireak.inventory.application.port.in.command.HoldSeatsCommand;
 import com.aireak.inventory.application.port.in.command.ReleaseSeatsCommand;
 import com.aireak.inventory.application.port.in.command.ReserveSeatsCommand;
 import com.aireak.inventory.application.port.in.command.UnholdSeatsCommand;
+import com.aireak.inventory.domain.exception.ShowtimeCatalogUnavailableException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
+import java.net.URI;
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -33,11 +40,14 @@ import java.util.List;
  * reserve/release/confirm are called synchronously by booking-service during saga execution;
  * hold/unhold/seat-map GET below are called directly by the frontend for seat selection.
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/v1/inventory")
 @RequiredArgsConstructor
 @Validated
 public class SeatInventoryController {
+
+    private static final String RETRY_AFTER_SECONDS = "1";
 
     private final ReserveSeatsUseCase reserveSeatsUseCase;
     private final ReleaseSeatsUseCase releaseSeatsUseCase;
@@ -190,6 +200,36 @@ public class SeatInventoryController {
     private BlockResponse toBlockResponse(String tierSlug, GetSeatingLayoutUseCase.BlockSummary block) {
         String rowSlug = block.row().toLowerCase();
         return new BlockResponse("blk-" + tierSlug + "-" + rowSlug, block.row(), block.seatCodes());
+    }
+
+    /**
+     * match-catalog-service unreachable → 503 with a Retry-After, rather than the 422 this used to
+     * share with a genuinely closed booking window (see
+     * {@link ShowtimeCatalogUnavailableException} for why that was three bugs, not one).
+     *
+     * <p>Controller-local rather than another {@code @ControllerAdvice}: a handler on the
+     * controller beats every advice regardless of order, which is exactly the failure mode
+     * {@code InventoryOverloadExceptionHandler}'s javadoc exists to document. It also belongs
+     * here rather than in that class, which is about load-shedding — this is a dependency being
+     * down, and putting it there would make that class's name describe half of what it does.
+     *
+     * <p>The detail is a constant: the exception's own message names the showtimeId, and this
+     * response is rendered straight into a browser toast (errors.ts prints ProblemDetail's detail
+     * verbatim). The adapter has already logged the cause with a stack trace, so this does not
+     * repeat it.
+     */
+    @ExceptionHandler(ShowtimeCatalogUnavailableException.class)
+    public ResponseEntity<ProblemDetail> handleCatalogUnavailable(ShowtimeCatalogUnavailableException ex) {
+        log.warn("Rejecting a seat request because match-catalog-service is unavailable: {}",
+                ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
+                "Ticket availability cannot be verified right now");
+        problem.setType(URI.create("https://aireak.com/errors/catalog-unavailable"));
+        problem.setTitle("Service Unavailable");
+        problem.setProperty("timestamp", Instant.now());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, RETRY_AFTER_SECONDS)
+                .body(problem);
     }
 
     // JwtAuthenticationFilter runs for every non-excluded path (no exclusion here), so this is

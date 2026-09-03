@@ -204,7 +204,8 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
      * endpoint. It is the one call ticket-inventory-service's
      * {@code ShowtimeCatalogRestAdapter#requireBookable} makes in front of every seat hold and
      * every reservation, and that adapter has no cache for a positive answer — a rejection here
-     * reaches it as a 503, which it reports to the customer as a closed booking window.
+     * reaches it as a 503, which it now passes on to the customer as a 503 of its own rather than
+     * as a closed booking window (see {@code ShowtimeCatalogUnavailableException}).
      *
      * <p>Sharing browse's budget therefore meant anonymous, unauthenticated traffic could take
      * the entire buy path down: browse floods first (it is the endpoint a flash sale hammers),

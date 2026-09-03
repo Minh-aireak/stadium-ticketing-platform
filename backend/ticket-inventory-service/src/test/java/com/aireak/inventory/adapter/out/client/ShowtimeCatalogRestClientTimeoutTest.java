@@ -1,7 +1,7 @@
 package com.aireak.inventory.adapter.out.client;
 
 import com.aireak.inventory.config.InfraConfig;
-import com.aireak.inventory.domain.exception.ShowtimeBookingClosedException;
+import com.aireak.inventory.domain.exception.ShowtimeCatalogUnavailableException;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -71,6 +71,6 @@ class ShowtimeCatalogRestClientTimeoutTest {
     void requireBookable_whenCatalogAcceptsTheConnectionButNeverAnswers_givesUpInsteadOfBlockingForever() {
         assertTimeoutPreemptively(GIVE_UP_AFTER, () ->
                 assertThatThrownBy(() -> adapter.requireBookable("showtime-1"))
-                        .isInstanceOf(ShowtimeBookingClosedException.class));
+                        .isInstanceOf(ShowtimeCatalogUnavailableException.class));
     }
 }
