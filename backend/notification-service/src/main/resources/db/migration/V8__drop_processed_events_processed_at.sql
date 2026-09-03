@@ -1,0 +1,22 @@
+-- ============================================================
+-- V8: drop processed_events.processed_at, which nothing maps and nothing reads
+--
+-- V1 created it as this table's only timestamp. V3 then added created_at/updated_at,
+-- because ProcessedEventJpaEntity extends BaseAuditEntity and Hibernate's schema
+-- validation refused to start without them -- which left two columns recording the
+-- same instant, and the entity mapping only one of them. processed_at has been filled
+-- by its own DEFAULT NOW() on every insert since, read by nobody: the idempotency check
+-- is existsById, and the retention delete filters on created_at (see V6 and
+-- ProcessedEventJpaRepository#deleteByCreatedAtBefore).
+--
+-- Dropped rather than mapped. created_at already IS the processed-at timestamp for this
+-- table -- a row exists here precisely because the event was processed -- and a second
+-- column holding the same value is what misleads an operator reading the table by hand,
+-- which V6 records as the only reason event_type is kept at all.
+--
+-- catalog's processed_inventory_events deliberately keeps its own processed_at: that
+-- entity does not extend BaseAuditEntity, so there is one such column there and it is
+-- mapped.
+-- ============================================================
+
+ALTER TABLE processed_events DROP COLUMN IF EXISTS processed_at;
