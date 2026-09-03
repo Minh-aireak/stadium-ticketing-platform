@@ -19,6 +19,12 @@ export default defineConfig({
     include: ['src/**/*.test.{ts,tsx}'],
     setupFiles: ['src/test/setup.ts'],
     restoreMocks: true,
+    // vitest's default is 5000ms. StadiumSeatMap renders my-dinh's full 432-slot grid and its
+    // tests are the suite's slowest by a wide margin -- 1.5s alone, 1.8s under the full run's
+    // parallel load on a quiet developer machine, and 3.5s measured on a busy one. That is a
+    // 1.4x margin on a shared CI runner, for a suite whose entire wall time is ten seconds.
+    // Nothing here is worth waiting 15s for except a genuine hang.
+    testTimeout: 15000,
   },
   build: {
     rollupOptions: {
