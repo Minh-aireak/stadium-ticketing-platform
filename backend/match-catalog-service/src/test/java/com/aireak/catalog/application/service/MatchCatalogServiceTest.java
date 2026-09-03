@@ -28,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -232,6 +233,43 @@ class MatchCatalogServiceTest {
         var event = (com.aireak.catalog.domain.event.MatchCancelledEvent) published2.getValue().get(0);
         assertThat(event.showtimeIds()).containsExactly("showtime-1");
         assertThat(event.reason()).isEqualTo("Stadium closed for safety inspection");
+    }
+
+    @Test
+    void completeMatchReindexesSoTheSearchDocumentStopsSayingPublished() {
+        // The index used to be written on publish() and never again, which is what made
+        // listMatches report a total that counted matches it had already filtered out of the page.
+        Match published = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
+                MatchStatus.PUBLISHED, Instant.now(), List.of());
+        when(matchRepository.findById("match-1")).thenReturn(Optional.of(published));
+
+        service.completeMatch("match-1");
+
+        ArgumentCaptor<Match> reindexed = ArgumentCaptor.forClass(Match.class);
+        verify(matchSearchIndexer).indexAsync(reindexed.capture());
+        assertThat(reindexed.getValue().getStatus()).isEqualTo(MatchStatus.COMPLETED);
+    }
+
+    @Test
+    void cancelMatchReindexesAPublishedMatchAndLeavesADraftOutOfTheIndex() {
+        Match published = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
+                MatchStatus.PUBLISHED, Instant.now(), List.of());
+        when(matchRepository.findById("match-1")).thenReturn(Optional.of(published));
+
+        service.cancelMatch("match-1", "Stadium closed");
+
+        ArgumentCaptor<Match> reindexed = ArgumentCaptor.forClass(Match.class);
+        verify(matchSearchIndexer).indexAsync(reindexed.capture());
+        assertThat(reindexed.getValue().getStatus()).isEqualTo(MatchStatus.CANCELLED);
+
+        // A DRAFT match can be cancelled too, but was never indexed — writing it now would put a
+        // match that was never public into a public search index for the status filter to hide.
+        Match draft = matchWithShowtime("match-2");
+        when(matchRepository.findById("match-2")).thenReturn(Optional.of(draft));
+
+        service.cancelMatch("match-2", "Never went on sale");
+
+        verify(matchSearchIndexer, never()).indexAsync(argThat(m -> "match-2".equals(m.getMatchId())));
     }
 
     @Test

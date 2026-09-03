@@ -113,6 +113,9 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
         Match match = findOrThrow(matchId);
         match.complete();
         matchRepository.save(match);
+        // complete() only accepts a PUBLISHED match, so there is always a search document to
+        // correct here. Re-indexing is what keeps the browse total honest — see listMatches.
+        matchSearchIndexer.indexAsync(match);
         eventPublisher.publishAll(match.pullDomainEvents());
         log.info("Match completed: id={}", matchId);
     }
@@ -121,8 +124,15 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
     @Transactional
     public void cancelMatch(String matchId, String reason) {
         Match match = findOrThrow(matchId);
+        // cancel() also accepts a DRAFT match, which was never indexed; re-indexing only when
+        // there is a stale document to correct keeps unpublished matches out of a public
+        // search index entirely, rather than relying on the query's status filter to hide them.
+        boolean wasIndexed = match.getStatus() == MatchStatus.PUBLISHED;
         match.cancel(reason);
         matchRepository.save(match);
+        if (wasIndexed) {
+            matchSearchIndexer.indexAsync(match);
+        }
         eventPublisher.publishAll(match.pullDomainEvents());
         log.info("Match cancelled: id={}, reason={}", matchId, reason);
     }
@@ -148,13 +158,20 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
     public MatchPage listMatches(String query, int page, int size) {
         if (query != null && !query.isBlank()) {
             // Elasticsearch documents carry summary fields only (no showtimes — see
-            // MatchSearchPort) and can go stale after a match completes/cancels (the index is
-            // only ever written on publish()), so every hit is re-read from the write-side JPA
-            // repository for full showtime data and re-filtered to currently-PUBLISHED.
+            // MatchSearchPort), so every hit is re-read from the write-side JPA repository for
+            // full showtime data.
             //
             // Re-read as ONE batch, not one findById per hit: findAllByIds keeps the hits in
             // relevance order and drops ids that no longer resolve, so the only thing lost versus
             // the old per-hit loop is the query-per-hit.
+            //
+            // The PUBLISHED filter below is now a backstop, not the only guard: the query itself
+            // asks Elasticsearch for PUBLISHED documents (see the adapter), and completeMatch and
+            // cancelMatch re-index so it can answer that truthfully. That is what makes totalHits
+            // describe the same set as `items` — it used to count matches this filter then
+            // dropped, because the index was written on publish() and never again. What is left
+            // for the filter to catch is the indexing lag: indexAsync runs off the request thread,
+            // so a match completed a moment ago can still be a PUBLISHED document.
             MatchSearchPort.SearchResult searchResult = matchSearchPort.search(query, page, size);
             List<String> hitIds = searchResult.matches().stream().map(Match::getMatchId).toList();
             List<Match> items = matchRepository.findAllByIds(hitIds).stream()

@@ -37,6 +37,14 @@ public class ElasticsearchMatchSearchAdapter implements MatchSearchPort {
      */
     private static final int MAX_RESULT_WINDOW = 10_000;
 
+    /**
+     * The index has no explicit mapping, so Elasticsearch's dynamic mapping makes {@code status} a
+     * {@code text} field with a {@code keyword} sub-field. A term query has to go to the sub-field:
+     * the analyzed {@code text} one holds {@code published}, lowercased, and would never match the
+     * enum constant.
+     */
+    private static final String STATUS_KEYWORD_FIELD = "status.keyword";
+
     private final ElasticsearchClient elasticsearchClient;
 
     @Override
@@ -68,13 +76,23 @@ public class ElasticsearchMatchSearchAdapter implements MatchSearchPort {
         }
         int from = (int) offset;
         try {
+            // Restricted to PUBLISHED here rather than only after the fact, so that totalHits
+            // counts the same matches the caller is given. MatchCatalogService re-filters the
+            // page it gets back, and used to be the ONLY thing that did: the total came straight
+            // from Elasticsearch and therefore counted completed and cancelled matches that the
+            // re-filter then removed, so a page of 10 could report 47 results and hand back 6.
+            // A `filter` clause, not a `must`: match status contributes nothing to relevance.
             SearchResponse<MatchDocument> response = elasticsearchClient.search(req -> req
                             .index(INDEX)
                             .from(from)
                             .size(safeSize)
-                            .query(q -> q.multiMatch(m -> m
-                                    .query(query)
-                                    .fields("homeTeam", "awayTeam", "competition"))),
+                            .query(q -> q.bool(b -> b
+                                    .must(mustQuery -> mustQuery.multiMatch(m -> m
+                                            .query(query)
+                                            .fields("homeTeam", "awayTeam", "competition")))
+                                    .filter(filterQuery -> filterQuery.term(t -> t
+                                            .field(STATUS_KEYWORD_FIELD)
+                                            .value(MatchStatus.PUBLISHED.name()))))),
                     MatchDocument.class);
 
             List<Match> matches = response.hits().hits().stream()

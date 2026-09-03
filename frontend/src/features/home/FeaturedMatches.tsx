@@ -58,8 +58,9 @@ export function FeaturedMatches() {
     }
   }, [query, page, toast])
 
-  // The search path (q param) delegates to Elasticsearch and returns an unpaginated
-  // result set — pagination only applies to the plain "browse all published" listing.
+  // Both listing modes paginate. The search path (q param) forwards page/size to Elasticsearch
+  // and reports its totalHits, and since 90b96a2 that total counts the same PUBLISHED matches the
+  // page hands back — so it divides into pages exactly as the browse total does.
   const totalPages = Math.max(1, Math.ceil(totalElements / PAGE_SIZE))
 
   // No dedicated leagues endpoint — derive the chip list from whatever matches are already
@@ -151,7 +152,7 @@ export function FeaturedMatches() {
               ))}
             </div>
 
-            {!query && totalPages > 1 && (
+            {totalPages > 1 && (
               <div className="mt-10 flex items-center justify-center gap-4">
                 <Button
                   variant="outline"
