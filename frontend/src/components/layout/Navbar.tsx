@@ -100,9 +100,15 @@ export function Navbar() {
           )}
         </div>
 
+        {/*
+          One control for both directions, so its name has to move with it — it read "Mở menu"
+          while it was the button that closes the menu. aria-expanded is what actually announces
+          the state change; the label says what pressing it will do next.
+        */}
         <button
           type="button"
-          aria-label="Mở menu"
+          aria-label={open ? 'Đóng menu' : 'Mở menu'}
+          aria-expanded={open}
           className="text-foreground md:hidden"
           onClick={() => setOpen((v) => !v)}
         >
