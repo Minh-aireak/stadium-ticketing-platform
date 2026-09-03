@@ -56,18 +56,32 @@ class EmailTest {
     }
 
     /**
-     * accounts.email is VARCHAR(255). Nothing bounded the address before: @Email on
-     * RegisterRequest checks shape and not length, and the pattern here accepts a local part of
-     * any size -- so an over-long address was accepted all the way to the INSERT, where Postgres
-     * raised "value too long for type character varying(255)". That arrives as a
-     * DataIntegrityViolationException at commit, which GlobalExceptionHandler can only answer as
-     * 409 "The request conflicts with existing data".
+     * The address that started this: 312 characters, which accounts.email VARCHAR(255) genuinely
+     * cannot hold. Nothing bounded it before -- @Email on RegisterRequest checks shape and not
+     * length, and the pattern here accepts a local part of any size -- so it was accepted all the
+     * way to the INSERT, where Postgres raised "value too long for type character varying(255)".
+     * That arrives as a DataIntegrityViolationException at commit, which GlobalExceptionHandler
+     * can only answer as 409 "The request conflicts with existing data".
      */
     @Test
-    void rejectsAnAddressLongerThanTheAccountsEmailColumnCanHold() {
-        String tooLong = "a".repeat(243) + "@example.com"; // 255 characters
+    void rejectsAnAddressTheAccountsEmailColumnCouldNotHold() {
+        String tooLong = "a".repeat(300) + "@example.com"; // 312 characters
 
         assertThatThrownBy(() -> new Email(tooLong))
+                .isInstanceOf(InvalidEmailException.class)
+                .hasMessageContaining("254");
+    }
+
+    /**
+     * 255 fits the column and is still refused: the bound is RFC 5321's 254, not the column width,
+     * so that the value has room to be copied onto booking-service's and payment-service's own
+     * VARCHAR(255) customer_email without sitting exactly at their edge.
+     */
+    @Test
+    void rejectsAnAddressOneCharacterPastTheLimit() {
+        String justOver = "a".repeat(243) + "@example.com"; // 255 characters
+
+        assertThatThrownBy(() -> new Email(justOver))
                 .isInstanceOf(InvalidEmailException.class)
                 .hasMessageContaining("254");
     }
