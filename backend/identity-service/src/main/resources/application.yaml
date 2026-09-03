@@ -67,6 +67,13 @@ password-reset:
   # Minutes, not a day: a reset link is a live credential for an existing account. Default 30 min.
   ttl-seconds: ${PASSWORD_RESET_TTL_SECONDS:1800}
 
+login-throttle:
+  # Supplements the gateway's per-IP login limit, which an attacker with many addresses walks
+  # straight past while aiming at one account. Not a lock: the count expires on its own and a
+  # successful login clears it, so no one can shut a real user out by guessing at their email.
+  max-failures: ${LOGIN_THROTTLE_MAX_FAILURES:10}
+  window-seconds: ${LOGIN_THROTTLE_WINDOW_SECONDS:900}
+
 admin-bootstrap:
   email: ${ADMIN_BOOTSTRAP_EMAIL:}
   password: ${ADMIN_BOOTSTRAP_PASSWORD:}

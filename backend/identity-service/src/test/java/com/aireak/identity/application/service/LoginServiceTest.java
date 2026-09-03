@@ -3,6 +3,7 @@ package com.aireak.identity.application.service;
 import com.aireak.identity.application.port.in.command.LoginCommand;
 import com.aireak.identity.application.port.in.dto.AuthResult;
 import com.aireak.identity.application.port.out.AccountRepository;
+import com.aireak.identity.application.port.out.LoginAttemptLimiterPort;
 import com.aireak.identity.application.port.out.PasswordHashPort;
 import com.aireak.identity.application.port.out.RefreshSessionStorePort;
 import com.aireak.identity.application.port.out.TokenGeneratorPort;
@@ -29,6 +30,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -41,6 +43,8 @@ class LoginServiceTest {
 
     @Mock
     private AccountRepository accountRepository;
+    @Mock
+    private LoginAttemptLimiterPort loginAttemptLimiterPort;
     @Mock
     private PasswordHashPort passwordHashPort;
     @Mock
@@ -56,8 +60,8 @@ class LoginServiceTest {
     void setUp() {
         // @PostConstruct isn't invoked by plain `new` outside a Spring container.
         when(passwordHashPort.hash(any(RawPassword.class))).thenReturn(DUMMY_HASH);
-        service = new LoginService(accountRepository, passwordHashPort, tokenGeneratorPort,
-                refreshSessionStorePort, jwtProperties);
+        service = new LoginService(accountRepository, loginAttemptLimiterPort, passwordHashPort,
+                tokenGeneratorPort, refreshSessionStorePort, jwtProperties);
         service.initDummyHash();
     }
 
@@ -143,5 +147,72 @@ class LoginServiceTest {
         assertThatThrownBy(() -> service.execute(new LoginCommand(EMAIL.value(), "Abcdefg1")))
                 .isInstanceOf(InvalidCredentialsException.class);
         verify(tokenGeneratorPort, never()).generateToken(any());
+    }
+
+    @Test
+    void aThrottledEmailIsRejectedBeforeAnyLookupOrHashing() {
+        when(loginAttemptLimiterPort.isThrottled(EMAIL)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.execute(new LoginCommand(EMAIL.value(), "Abcdefg1")))
+                .isInstanceOf(InvalidCredentialsException.class);
+
+        // The point of refusing early: an attacker who has already burnt the budget must not be
+        // able to keep spending a database read and a bcrypt comparison per request.
+        verifyNoInteractions(accountRepository);
+        verify(passwordHashPort, never()).matches(any(), any());
+    }
+
+    @Test
+    void aWrongPasswordIsCountedAgainstTheEmail() {
+        Account account = activeAccount();
+        when(accountRepository.findByEmail(EMAIL)).thenReturn(java.util.Optional.of(account));
+        when(passwordHashPort.matches(any(RawPassword.class), eq(STORED_HASH))).thenReturn(false);
+
+        assertThatThrownBy(() -> service.execute(new LoginCommand(EMAIL.value(), "Wrongpass1")))
+                .isInstanceOf(InvalidCredentialsException.class);
+
+        verify(loginAttemptLimiterPort).recordFailure(EMAIL);
+    }
+
+    @Test
+    void anUnknownEmailIsCountedTooSoTheThrottleCannotBeUsedToEnumerateAccounts() {
+        when(accountRepository.findByEmail(EMAIL)).thenReturn(java.util.Optional.empty());
+
+        assertThatThrownBy(() -> service.execute(new LoginCommand(EMAIL.value(), "Abcdefg1")))
+                .isInstanceOf(InvalidCredentialsException.class);
+
+        // Counting only known emails would make the throttle answer the question the dummy-hash
+        // comparison exists to keep quiet: an attacker could tell a registered address from an
+        // unregistered one by which of them can be throttled.
+        verify(loginAttemptLimiterPort).recordFailure(EMAIL);
+    }
+
+    @Test
+    void anInactiveAccountIsCountedAgainstTheEmail() {
+        Account account = Account.register(EMAIL, STORED_HASH, VERIFICATION_TOKEN);
+        when(accountRepository.findByEmail(EMAIL)).thenReturn(java.util.Optional.of(account));
+
+        assertThatThrownBy(() -> service.execute(new LoginCommand(EMAIL.value(), "Abcdefg1")))
+                .isInstanceOf(InvalidCredentialsException.class);
+
+        verify(loginAttemptLimiterPort).recordFailure(EMAIL);
+    }
+
+    @Test
+    void aSuccessfulLoginClearsTheCount() {
+        Account account = activeAccount();
+        when(accountRepository.findByEmail(EMAIL)).thenReturn(java.util.Optional.of(account));
+        when(passwordHashPort.matches(any(RawPassword.class), eq(STORED_HASH))).thenReturn(true);
+        when(tokenGeneratorPort.generateToken(account)).thenReturn("signed.jwt.token");
+        when(refreshSessionStorePort.createSession(account.getId())).thenReturn(
+                new IssuedRefreshToken("session-1", "session-1", account.getId().toString(),
+                        "raw-refresh-token", Instant.now().plusSeconds(2_592_000)));
+
+        service.execute(new LoginCommand(EMAIL.value(), "Abcdefg1"));
+
+        // Otherwise a user's own earlier typos would keep counting against them after they had
+        // proved they hold the password.
+        verify(loginAttemptLimiterPort).reset(EMAIL);
+        verify(loginAttemptLimiterPort, never()).recordFailure(any());
     }
 }
