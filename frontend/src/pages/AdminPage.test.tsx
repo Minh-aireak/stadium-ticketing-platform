@@ -173,4 +173,27 @@ describe('AdminPage draft flow', () => {
     )
     expect(addShowtime).not.toHaveBeenCalled()
   })
+
+  /**
+   * handlePublish already resets to page 0. Calling loadMatches() as well fires a second
+   * request for the page being left behind, and nothing orders the two responses — the stale
+   * one can land last and paint the old page's rows under a pager that says page 1.
+   */
+  it('reloads exactly once, for page 0, after publishing from a later page', async () => {
+    await goToLastPage()
+    await openDraft()
+
+    fireEvent.change(screen.getByLabelText('Thời gian bắt đầu'), {
+      target: { value: '2026-10-01T19:30' },
+    })
+    fireEvent.change(screen.getByLabelText('Giá vé cơ bản'), { target: { value: '200000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Thêm suất bán vé' }))
+    await waitFor(() => expect(addShowtime).toHaveBeenCalled())
+
+    listActiveMatches.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: 'Xuất bản trận đấu' }))
+
+    await screen.findByText('Trận 1 vs Đối thủ 1')
+    expect(listActiveMatches.mock.calls.map(([args]) => (args as { page: number }).page)).toEqual([0])
+  })
 })

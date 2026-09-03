@@ -190,8 +190,17 @@ export function AdminPage() {
       await publishMatch(draft.matchId)
       toast({ title: 'Đã xuất bản trận đấu', variant: 'success' })
       setDraft(null)
-      setPage(0)
-      loadMatches()
+      // Either setPage(0) or loadMatches(), never both. loadMatches is what the list effect
+      // depends on and it is rebuilt whenever `page` changes, so setPage(0) already reloads;
+      // calling loadMatches() alongside it fired a second request for the page being left
+      // behind, and nothing orders the two responses. The stale one landing last painted the
+      // old page's rows under a pager that had already moved to page 1. From page 0 setPage(0)
+      // is a no-op and the explicit call is the only thing that refreshes.
+      if (page === 0) {
+        loadMatches()
+      } else {
+        setPage(0)
+      }
     } catch (err) {
       toast({ title: 'Không thể xuất bản trận đấu', description: getErrorMessage(err), variant: 'error' })
     } finally {
