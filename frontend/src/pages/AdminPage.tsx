@@ -77,6 +77,18 @@ export function AdminPage() {
     setError(null)
     listActiveMatches({ page, size: PAGE_SIZE })
       .then((res) => {
+        // Completing or cancelling the only match on a page removes it from the PUBLISHED list
+        // the server pages over, so this request comes back empty while `page` still points
+        // past the end. The pager below is rendered inside the `matches.length > 0` branch, so
+        // an empty page takes "Trước" away with it and leaves the admin on "Chưa có trận đấu
+        // nào đang mở bán." with no control left to reach the rows one page back — recoverable
+        // only by reloading, since `page` is component state and the route carries no query.
+        // page - 1 rather than the computed last page alone, so each retry is strictly closer
+        // to 0 and the walk back always terminates.
+        if (res.items.length === 0 && res.totalElements > 0 && page > 0) {
+          setPage(Math.min(page - 1, Math.ceil(res.totalElements / PAGE_SIZE) - 1))
+          return
+        }
         setMatches(res.items)
         setTotalElements(res.totalElements)
       })
