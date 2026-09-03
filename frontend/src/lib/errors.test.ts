@@ -1,7 +1,13 @@
 import { AxiosError, AxiosHeaders } from 'axios'
 import { describe, expect, it } from 'vitest'
 
-import { getCorrelationId, getErrorMessage, isDuplicateEmailError, isInvalidResetTokenError } from './errors'
+import {
+  getCorrelationId,
+  getErrorMessage,
+  isDuplicateEmailError,
+  isInvalidResetTokenError,
+  isSeatsUnavailableError,
+} from './errors'
 
 const GENERIC = 'Đã có lỗi xảy ra, vui lòng thử lại.'
 
@@ -113,5 +119,20 @@ describe('domain error predicates', () => {
   it('recognises the reset-token 422 and nothing else', () => {
     expect(isInvalidResetTokenError(responseError(422, { detail: 'Password reset token is invalid' }))).toBe(true)
     expect(isInvalidResetTokenError(responseError(422, { detail: 'Password too weak' }))).toBe(false)
+  })
+
+  /**
+   * ticket-inventory-service answers a seat another shopper already holds with
+   * SeatsNotAvailableException — a 422 whose detail is English and names the internal showtimeId.
+   * Distinguished from the other 422 the same endpoint raises (ShowtimeBookingClosedException),
+   * which is about the whole showtime rather than the one seat just clicked.
+   */
+  it('recognises the seats-unavailable 422 and nothing else', () => {
+    const taken = { detail: 'Seats not available for showtime show-1: A14' }
+    expect(isSeatsUnavailableError(responseError(422, taken))).toBe(true)
+    expect(isSeatsUnavailableError(responseError(422, { detail: 'Ticket booking is closed for showtime: show-1' })))
+      .toBe(false)
+    expect(isSeatsUnavailableError(responseError(503, taken))).toBe(false)
+    expect(isSeatsUnavailableError(new Error('Seats not available'))).toBe(false)
   })
 })

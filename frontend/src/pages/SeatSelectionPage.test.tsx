@@ -1,3 +1,4 @@
+import { AxiosError, AxiosHeaders } from 'axios'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -17,7 +18,13 @@ vi.mock('@/features/seats/seatsApi', () => ({
   holdSeats: (...args: unknown[]) => holdSeats(...args),
   unholdSeats: (...args: unknown[]) => unholdSeats(...args),
 }))
-vi.mock('@/hooks/useToast', () => ({ useToast: () => ({ toast: vi.fn() }) }))
+// One fixed object, created once by the factory: a fresh `{ toast: vi.fn() }` per call would give
+// every render a new identity and re-fire each effect that lists `toast` in its deps.
+const toast = vi.fn()
+vi.mock('@/hooks/useToast', () => {
+  const api = { toast: (...args: unknown[]) => toast(...args) }
+  return { useToast: () => api }
+})
 
 function seat(code: string, overrides: Partial<Seat> = {}): Seat {
   return {
@@ -141,5 +148,40 @@ describe('SeatSelectionPage', () => {
       currency: 'USD',
       seatCodes: ['A1'],
     })
+  })
+
+  /**
+   * The regression. When another shopper already holds the seat just clicked, inventory answers
+   * 422 with a ProblemDetail whose detail is English and names the internal showtimeId. Because
+   * getErrorMessage renders any detail it finds verbatim, the Vietnamese sentence this call site
+   * passes as getErrorMessage's fallback could only ever have appeared if the backend had sent no
+   * detail at all — so the one case it was written for was the one case that could not reach it,
+   * and the customer got "Seats not available for showtime show-1: A1" instead.
+   */
+  it('explains a seat lost to another shopper in Vietnamese, not in the backend’s English', async () => {
+    getSeatMap.mockResolvedValue({ showtimeId: 'show-1', seats: [seat('A1'), seat('A2')] })
+    const conflict = new AxiosError('Request failed', 'ERR_BAD_RESPONSE')
+    conflict.config = { headers: new AxiosHeaders() } as never
+    conflict.response = {
+      status: 422,
+      statusText: '',
+      data: { detail: 'Seats not available for showtime show-1: A1' },
+      headers: {},
+      config: conflict.config,
+    } as never
+    holdSeats.mockRejectedValue(conflict)
+
+    renderSeatSelection()
+
+    await waitFor(() => expect(screen.getByTitle(/^A1 ·/)).toBeDefined())
+    fireEvent.click(screen.getByTitle(/^A1 ·/))
+
+    await waitFor(() => expect(toast).toHaveBeenCalled())
+    expect(toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Không thể giữ ghế',
+        description: 'Ghế này vừa được người khác chọn. Vui lòng chọn ghế khác.',
+      }),
+    )
   })
 })

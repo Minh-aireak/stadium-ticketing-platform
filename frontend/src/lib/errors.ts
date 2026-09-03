@@ -88,3 +88,16 @@ export function isInvalidResetTokenError(error: unknown): boolean {
   const detail = error.response?.data?.detail
   return typeof detail === 'string' && /reset token/i.test(detail)
 }
+
+/**
+ * True for the 422 raised by the seat hold/reserve endpoints when one or more requested seats are
+ * already held or sold (see ticket-inventory-service SeatsNotAvailableException). Its detail is
+ * English and names the internal showtimeId, so a caller with a seat-specific sentence of its own
+ * has to recognise this case rather than pass that sentence to getErrorMessage as a fallback —
+ * the fallback only applies when the response carried no detail at all.
+ */
+export function isSeatsUnavailableError(error: unknown): boolean {
+  if (!isAxiosError(error) || error.response?.status !== 422) return false
+  const detail = error.response?.data?.detail
+  return typeof detail === 'string' && /seats not available/i.test(detail)
+}

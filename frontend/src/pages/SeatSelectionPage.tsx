@@ -12,7 +12,7 @@ import { getSeatLayout, getSeatMap, holdSeats, unholdSeats } from '@/features/se
 import { buildStadiumMap } from '@/features/seats/stadiumLayout'
 import type { Seat, SeatLayout } from '@/features/seats/types'
 import { useToast } from '@/hooks/useToast'
-import { getErrorMessage } from '@/lib/errors'
+import { getErrorMessage, isSeatsUnavailableError } from '@/lib/errors'
 import { formatCurrency } from '@/lib/format'
 import { memoComponent, useMemoizedKeyMap, useMemoizedSet } from '@/lib/memo'
 import type { CheckoutState } from './CheckoutPage'
@@ -248,7 +248,13 @@ export function SeatSelectionPage() {
       setSelected((current) => current.filter((seatCode) => seatCode !== code))
       toast({
         title: 'Không thể giữ ghế',
-        description: getErrorMessage(err, 'Ghế này vừa được người khác chọn. Vui lòng chọn ghế khác.'),
+        // Inventory answers a seat someone else holds with an English detail naming the
+        // internal showtimeId, and getErrorMessage renders any detail it finds verbatim. So this
+        // case has to be recognised here: passing the sentence as getErrorMessage's fallback put
+        // it behind a condition (no detail at all) that this endpoint never satisfies.
+        description: isSeatsUnavailableError(err)
+          ? 'Ghế này vừa được người khác chọn. Vui lòng chọn ghế khác.'
+          : getErrorMessage(err),
         variant: 'error',
       })
       getSeatMap(showtimeId).then((data) => setSeats(data.seats)).catch(() => {})
