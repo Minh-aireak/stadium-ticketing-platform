@@ -227,6 +227,14 @@ public class SeatInventoryService implements ReserveSeatsUseCase, ReleaseSeatsUs
      * <p>The Postgres write is delegated to {@link SeatSaleConfirmer#confirmSale}, its own
      * {@code @Transactional} bean, so the JPA transaction only opens after the distributed
      * lock below is already held — not while {@code tryLock()} is still waiting for it.
+     *
+     * <p><strong>No {@code @Bulkhead} or {@code @RateLimiter} here, unlike every other method on
+     * this class</strong>, and not by oversight. Those shed load on the contended buy path, where
+     * a rejected request costs a customer a retry. This runs after the money has already been
+     * taken: shedding it leaves a paid booking whose seats were never marked SOLD, which is worse
+     * than queueing behind the lock. It is also internal-only (see
+     * {@code SeatInventoryController#requireInternalService}) and bounded by the payment rate
+     * rather than by public traffic, so there is nothing here for a limiter to shape.
      */
     @Override
     public void execute(ConfirmSeatsCommand command) {

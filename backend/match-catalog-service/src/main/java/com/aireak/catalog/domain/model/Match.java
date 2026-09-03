@@ -96,7 +96,8 @@ public class Match {
     /**
      * Cancels the match and raises {@link MatchCancelledEvent} carrying every showtime id —
      * booking-service consumes it to cancel active bookings for those showtimes and refund the
-     * ones already paid (see AUDIT_FINAL_REPORT.md MEDIUM_match_cancel_unreachable).
+     * ones already paid (see {@code MatchCancelledConsumer} there, and
+     * {@code MatchCancelledEventConsumer} in ticket-inventory-service).
      */
     public void cancel(String reason) {
         if (status == MatchStatus.COMPLETED || status == MatchStatus.CANCELLED) {

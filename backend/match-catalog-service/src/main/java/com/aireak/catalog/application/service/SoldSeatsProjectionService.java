@@ -127,8 +127,15 @@ public class SoldSeatsProjectionService implements ApplySoldSeatsUseCase {
 
     /**
      * Hands back exactly what the script took — {@link DecrementResult#deductedSeats()}, not the
-     * requested count, since a clamped decrement took less than it was asked for. A leg that never
-     * wrote (Redis down, key absent) has nothing to undo; the reconcile path covers those instead.
+     * requested count, since a clamped decrement took less than it was asked for.
+     *
+     * <p>A leg that never wrote (Redis down, key absent) has nothing to undo, and nothing else
+     * happens to it either: both callers — the Postgres failure and the duplicate — leave this
+     * method by throwing or returning, so {@link #reconcileFromDatabase} is NOT reached on either
+     * branch. This javadoc used to say the reconcile covered them, which is only true of the
+     * success path. The counter is left absent until the next real sale for that showtime reports
+     * {@code NOT_INITIALIZED} and reseeds it — the same self-healing the TTL already relies on,
+     * but that, not a reconcile here.
      */
     private void undoRedisLeg(String showtimeId, DecrementResult redisLeg) {
         if (!redisLeg.wrote()) {

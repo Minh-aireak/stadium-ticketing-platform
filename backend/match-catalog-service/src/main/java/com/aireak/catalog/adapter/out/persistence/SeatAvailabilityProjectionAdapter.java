@@ -21,9 +21,20 @@ import java.util.Optional;
  * atomically by {@code RedisSeatAvailabilityCounter} instead, and orchestrated alongside this
  * method by {@code SoldSeatsProjectionService}.
  *
- * <p>The idempotency check and the decrement share one transaction, which is what makes replayed
- * Kafka deliveries safe: a concurrent duplicate cannot slip between the {@code existsById} and the
- * insert, because the second one blocks on the first's uncommitted primary key.
+ * <p>The idempotency check and the decrement share one transaction, which is what makes a replayed
+ * Kafka delivery safe: the second delivery sees the committed {@code processed_inventory_events}
+ * row and skips.
+ *
+ * <p>Two duplicates running CONCURRENTLY are stopped differently, and it is worth being exact
+ * because this javadoc used to claim the second one "blocks on the first's uncommitted primary
+ * key". It does not. {@code SimpleJpaRepository.save()} does not flush and the id is assigned, so
+ * the INSERT is queued until commit — there is no uncommitted key to block on, and the second
+ * transaction's {@code existsById} really does return false and proceed. What actually stops it is
+ * the row lock its {@code UPDATE showtimes} takes (it waits for the first to commit) followed by a
+ * duplicate-key violation on its own commit, which rolls that whole transaction back, decrement
+ * included. Correct outcome, different mechanism. In this deployment the case does not arise at
+ * all: sold-seat events are keyed by {@code showtimeId}, so one showtime's events are consumed in
+ * order by one consumer.
  */
 @Slf4j
 @Component

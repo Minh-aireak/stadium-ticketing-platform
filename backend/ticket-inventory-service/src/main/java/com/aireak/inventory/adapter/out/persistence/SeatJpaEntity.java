@@ -8,8 +8,12 @@ import lombok.*;
 import java.math.BigDecimal;
 
 /**
- * JPA entity for Seat tInventoryJpaEntity.
- * Mapped as @ElementCollection equivalent via @OneToMany.
+ * JPA entity for one seat of one showtime, owned by {@link SeatInventoryJpaEntity} through its
+ * {@code @OneToMany} join column.
+ *
+ * <p>A full entity, not an element collection: it has its own sequence-generated {@code @Id} and
+ * its own repository ({@link SeatJpaRepository}), which is what lets the confirm path read and
+ * write a handful of seats without hydrating the aggregate's EAGER seat list.
  */
 @Getter
 @Setter

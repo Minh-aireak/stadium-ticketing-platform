@@ -84,9 +84,14 @@ public class ShowtimeCatalogRestAdapter implements ShowtimeCatalogPort {
         } catch (ShowtimeBookingClosedException exception) {
             throw exception;
         } catch (RestClientException exception) {
-            // Surfaced to the caller as the same domain exception as a real closure (see class
-            // javadoc), so without logging here the two are indistinguishable in ELK — an outage
-            // in catalog-service would look identical to a legitimate "booking closed" rejection.
+            // A dependency failure, deliberately surfaced as the same exception type as a real
+            // closure: fail closed, since an unanswerable "is this bookable?" must never read as
+            // yes. Nothing in the class javadoc above covers this — it is about the two local
+            // caches — so the two cases are told apart only by the message
+            // (ShowtimeBookingClosedException has a constructor for each) and by this log line;
+            // without it, a catalog-service outage is indistinguishable in ELK from a legitimate
+            // rejection. It reaches the customer as 422, not 503: DomainException maps there in
+            // GlobalExceptionHandler and nothing here overrides it.
             log.error("Failed to verify booking window with match-catalog-service for showtimeId={}: {}",
                     showtimeId, exception.getMessage(), exception);
             throw new ShowtimeBookingClosedException(showtimeId, exception);
