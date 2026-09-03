@@ -19,7 +19,10 @@ export function memoComponent<Props extends object>(
   propsAreEqual?: PropsComparator<Props>,
 ): MemoExoticComponent<ComponentType<Props>> {
   const MemoizedComponent = memo(Component, propsAreEqual)
-  MemoizedComponent.displayName = `Memo(${Component.displayName ?? Component.name ?? 'Component'})`
+  // ||, not ??: Function.prototype.name is '' for an unnamed function, never undefined, so
+  // the nullish form could not reach the last arm and an anonymous component was labelled
+  // 'Memo()' — worse than the name React would have inferred on its own.
+  MemoizedComponent.displayName = `Memo(${Component.displayName || Component.name || 'Component'})`
   return MemoizedComponent
 }
 
