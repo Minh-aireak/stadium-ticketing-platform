@@ -32,7 +32,15 @@ public class AccountPersistenceAdapter implements AccountRepository {
                     .orElseGet(() -> toNewJpaEntity(account));
             jpaRepository.save(entity);
         } catch (DataIntegrityViolationException ex) {
-            // Unique constraint race: two concurrent registrations for the same email.
+            // Reached only when something forces a flush inside this call -- an auto-flush ahead of
+            // a query in the same persistence context, say. It does NOT cover the concurrent-
+            // registration race it reads like it does: Spring Data's save() is persist() for a new
+            // entity (its @Version is null, so JpaMetamodelEntityInformation#isNew answers true)
+            // and persist() does not flush, so uq_accounts_email is checked at commit -- after this
+            // method, and after RegisterAccountService, have both returned. That race surfaces as
+            // GlobalExceptionHandler's 409, not as this 422. Left in place because the translation
+            // is right whenever it does fire; making the race itself land here needs a flush on the
+            // write path, which is a behaviour change of its own and wants its own commit.
             throw new EmailAlreadyRegisteredException(account.getEmail().value());
         }
     }
