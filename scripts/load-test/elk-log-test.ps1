@@ -13,13 +13,32 @@
     per-IP rate limiter -- especially LOGIN's ~1 req/12s sustained rate -- doesn't throttle the
     run down to a crawl or silently swallow requests as 429s before they ever reach a service.
 
-    Scenarios (default 1000 total):
-      - CatalogSearch        GET  /api/v1/matches?q=...          success (bulk of the volume)
-      - CatalogNotFoundById  GET  /api/v1/matches/{random-id}     404, no matching match
-      - CatalogUnmappedRoute GET  /api/v1/does-not-exist          404, no matching route at all
-      - RegisterDuplicate    POST /api/v1/auth/register           422, EmailAlreadyRegisteredException
-      - LoginUnknownEmail    POST /api/v1/auth/login               401, "no account for supplied email"
-      - LoginWrongPassword   POST /api/v1/auth/login               401, "bad-password" (existing account)
+    Scenarios (default 1000 total). Each is a DISTINCT LOG LINE, which is the whole point:
+    every login and register failure below answers 401 or 422, so the status summary this
+    script prints cannot tell them apart and only Kibana can.
+      - CatalogSearch          GET  /api/v1/matches?q=...       success (bulk of the volume)
+      - CatalogNotFoundById    GET  /api/v1/matches/{random-id} 404, no matching match
+      - CatalogUnmappedRoute   GET  /api/v1/does-not-exist      404, no matching route at all
+      - RegisterDuplicate      POST /api/v1/auth/register       422, EmailAlreadyRegisteredException
+      - LoginUnknownEmail      POST /api/v1/auth/login          401, "no account for supplied email"
+      - LoginUnverifiedAccount POST /api/v1/auth/login          401, "status=PENDING_VERIFICATION"
+      - LoginThrottled         POST /api/v1/auth/login          401, "too many recent failures"
+      - LoginWrongPassword     POST /api/v1/auth/login          401, "reason=bad-password"
+                                                                (opt-in, see -ActiveEmail)
+
+    The last three replace one scenario that claimed all 125 of its requests logged
+    "bad-password" and produced that line zero times. Two independent reasons, both invisible
+    from here: the account this script seeds is registered and never verified, and
+    LoginService checks account status BEFORE comparing the password, so every attempt logged
+    status=PENDING_VERIFICATION; and all 125 used one address, so from the 11th on the
+    per-email throttle short-circuited them to "too many recent failures". All three branches
+    throw the same InvalidCredentialsException and answer 401, so the summary table read
+    "LoginWrongPassword | 401 | 125" and looked perfect.
+
+    Reaching the real bad-password branch needs an account that is already ACTIVE, which this
+    script cannot produce for itself -- verification needs the emailed token. Supply one with
+    -ActiveEmail/-ActivePassword and the scenario runs; leave them unset and it is skipped
+    with a message, rather than silently logging something else under its name.
 
     Every request carries a unique X-Correlation-Id ("<prefix>-<n>") built from -CorrelationPrefix,
     which lands as a top-level `correlationId` field in each service's ECS-formatted log line
@@ -38,8 +57,9 @@
 
     Per-scenario request counts follow. Each needs its own .PARAMETER block: comment-based help
     reads everything after the tag to end of line as the parameter NAME, so listing several on one
-    line documents a parameter that does not exist and leaves all six of the real ones blank in
-    Get-Help. The defaults below sum to 1000; override any of them to change the mix or the volume.
+    line documents a parameter that does not exist and leaves every real one blank in Get-Help.
+    The defaults below sum to 1000 for an unattended run; override any of them to change the mix
+    or the volume.
 
 .PARAMETER CatalogSearchCount
     Successful catalog searches. Default 500 — the bulk of the run's volume.
@@ -58,16 +78,46 @@
     Logins for an address with no account, logging 401 "no account for supplied email".
     Default 125.
 
+.PARAMETER LoginUnverifiedAccountCount
+    Logins against the freshly seeded, never-verified account, logging 401
+    "status=PENDING_VERIFICATION". Default 10, and capped at -LoginThrottleMaxFailures: past
+    that the throttle answers first and the line changes to the next scenario's.
+
+.PARAMETER LoginThrottledCount
+    Further logins against that same address once its failure count is spent, logging 401
+    "too many recent failures for the supplied email". Default 115.
+
 .PARAMETER LoginWrongPasswordCount
-    Logins for an existing account with the wrong password, logging 401 "bad-password".
-    Default 125.
+    Logins for an ACTIVE account with the wrong password, logging 401 "reason=bad-password".
+    Default 10, also capped at -LoginThrottleMaxFailures. Skipped entirely unless
+    -ActiveEmail/-ActivePassword are supplied.
+
+.PARAMETER ActiveEmail
+    An already-verified account, used only by LoginWrongPassword. Falls back to ELK_TEST_EMAIL.
+    The script finishes that scenario with one successful login, which resets the account's
+    failure counter -- otherwise it would leave a real account throttled for the rest of
+    LOGIN_THROTTLE_WINDOW_SECONDS.
+
+.PARAMETER ActivePassword
+    Correct password for -ActiveEmail. Falls back to ELK_TEST_PASSWORD. Prefer the environment
+    variable: a password passed as an argument lands in the shell's history.
+
+.PARAMETER LoginThrottleMaxFailures
+    Must match identity-service's login-throttle.max-failures (default 10). It is what splits
+    LoginUnverifiedAccount from LoginThrottled, so a stack running a different value needs it
+    passed here or the two scenarios blur back into one.
 
 .EXAMPLE
     ./elk-log-test.ps1
 
 .EXAMPLE
-    # Smaller, faster run against a differently-mapped identity-service port
-    ./elk-log-test.ps1 -IdentityUrl "http://localhost:18081" -LoginUnknownEmailCount 20 -LoginWrongPasswordCount 20 -CatalogSearchCount 100 -CatalogNotFoundByIdCount 20 -CatalogUnmappedRouteCount 10 -RegisterDuplicateCount 20
+    # Smaller, faster run
+    ./elk-log-test.ps1 -CatalogSearchCount 100 -CatalogNotFoundByIdCount 20 -CatalogUnmappedRouteCount 10 -RegisterDuplicateCount 20 -LoginUnknownEmailCount 20 -LoginThrottledCount 15
+
+.EXAMPLE
+    # Include the bad-password branch, using an account that has already been verified.
+    # Set the two variables in the environment rather than passing the password as an argument.
+    ./elk-log-test.ps1
 #>
 
 param(
@@ -79,7 +129,12 @@ param(
     [int]$CatalogUnmappedRouteCount = 50,
     [int]$RegisterDuplicateCount = 100,
     [int]$LoginUnknownEmailCount = 125,
-    [int]$LoginWrongPasswordCount = 125
+    [int]$LoginUnverifiedAccountCount = 10,
+    [int]$LoginThrottledCount = 115,
+    [int]$LoginWrongPasswordCount = 10,
+    [string]$ActiveEmail = $env:ELK_TEST_EMAIL,
+    [string]$ActivePassword = $env:ELK_TEST_PASSWORD,
+    [int]$LoginThrottleMaxFailures = 10
 )
 
 $ErrorActionPreference = "Stop"
@@ -144,8 +199,17 @@ function Show-Progress {
     }
 }
 
+# Both scenarios that hammer one address are bounded by identity-service's per-email throttle:
+# past maxFailures, isThrottled short-circuits and the log line stops being the one being aimed
+# at. Capping here rather than trusting the caller keeps each scenario honest about what it
+# actually produced, however the counts are overridden.
+$runWrongPassword = [bool]($ActiveEmail -and $ActivePassword)
+$unverifiedCount = [Math]::Min($LoginUnverifiedAccountCount, $LoginThrottleMaxFailures)
+$wrongPasswordCount = [Math]::Min($LoginWrongPasswordCount, $LoginThrottleMaxFailures)
+
 $totalRequests = $CatalogSearchCount + $CatalogNotFoundByIdCount + $CatalogUnmappedRouteCount `
-    + $RegisterDuplicateCount + $LoginUnknownEmailCount + $LoginWrongPasswordCount
+    + $RegisterDuplicateCount + $LoginUnknownEmailCount + $unverifiedCount + $LoginThrottledCount
+if ($runWrongPassword) { $totalRequests += $wrongPasswordCount }
 $done = 0
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
@@ -201,12 +265,46 @@ for ($i = 0; $i -lt $LoginUnknownEmailCount; $i++) {
     $done++; Show-Progress -Done $done -Total $totalRequests
 }
 
-Write-Host "`n--- LoginWrongPassword ($LoginWrongPasswordCount) ---" -ForegroundColor Cyan
-$wrongBody = (@{ email = $seedEmail; password = $wrongPassword } | ConvertTo-Json -Compress)
-for ($i = 0; $i -lt $LoginWrongPasswordCount; $i++) {
-    Invoke-TestRequest -Scenario "LoginWrongPassword" -Method "POST" `
-        -Uri "$IdentityUrl/api/v1/auth/login" -Body $wrongBody
+# The seed account was registered and never verified, and LoginService checks account status
+# before it compares the password -- so these log status=PENDING_VERIFICATION, not a password
+# failure. Bounded by the throttle; the next scenario is what happens past it.
+Write-Host "`n--- LoginUnverifiedAccount ($unverifiedCount) ---" -ForegroundColor Cyan
+$seedWrongBody = (@{ email = $seedEmail; password = $wrongPassword } | ConvertTo-Json -Compress)
+for ($i = 0; $i -lt $unverifiedCount; $i++) {
+    Invoke-TestRequest -Scenario "LoginUnverifiedAccount" -Method "POST" `
+        -Uri "$IdentityUrl/api/v1/auth/login" -Body $seedWrongBody
     $done++; Show-Progress -Done $done -Total $totalRequests
+}
+
+# Same address, its failure count now spent, so isThrottled answers before the repository read
+# and the bcrypt compare. This is the line these requests were already producing before anyone
+# labelled them -- worth having as a scenario in its own right.
+Write-Host "`n--- LoginThrottled ($LoginThrottledCount) ---" -ForegroundColor Cyan
+for ($i = 0; $i -lt $LoginThrottledCount; $i++) {
+    Invoke-TestRequest -Scenario "LoginThrottled" -Method "POST" `
+        -Uri "$IdentityUrl/api/v1/auth/login" -Body $seedWrongBody
+    $done++; Show-Progress -Done $done -Total $totalRequests
+}
+
+if ($runWrongPassword) {
+    Write-Host "`n--- LoginWrongPassword ($wrongPasswordCount, as $ActiveEmail) ---" -ForegroundColor Cyan
+    $activeWrongBody = (@{ email = $ActiveEmail; password = $wrongPassword } | ConvertTo-Json -Compress)
+    for ($i = 0; $i -lt $wrongPasswordCount; $i++) {
+        Invoke-TestRequest -Scenario "LoginWrongPassword" -Method "POST" `
+            -Uri "$IdentityUrl/api/v1/auth/login" -Body $activeWrongBody
+        $done++; Show-Progress -Done $done -Total $totalRequests
+    }
+    # LoginService resets the counter on a successful login. Without this the script would walk
+    # away leaving somebody's real account throttled for the rest of the window.
+    Write-Host "Clearing $ActiveEmail's failure count with one successful login ..." -ForegroundColor DarkGray
+    Invoke-TestRequest -Scenario "LoginSuccessCleanup" -Method "POST" `
+        -Uri "$IdentityUrl/api/v1/auth/login" `
+        -Body (@{ email = $ActiveEmail; password = $ActivePassword } | ConvertTo-Json -Compress)
+} else {
+    Write-Host "`n--- LoginWrongPassword SKIPPED ---" -ForegroundColor Yellow
+    Write-Host "  Needs an already-ACTIVE account: pass -ActiveEmail/-ActivePassword, or set" -ForegroundColor Yellow
+    Write-Host "  ELK_TEST_EMAIL/ELK_TEST_PASSWORD. The account this script seeds is never" -ForegroundColor Yellow
+    Write-Host "  verified, so a wrong password on it logs status=PENDING_VERIFICATION instead." -ForegroundColor Yellow
 }
 
 $sw.Stop()
