@@ -44,7 +44,6 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
     private final MatchRepository matchRepository;
     private final MatchSearchPort matchSearchPort;
     private final DomainEventPublisher eventPublisher;
-    private final MatchSearchIndexer matchSearchIndexer;
     private final ShowtimeSeatCounterInitializer showtimeSeatCounterInitializer;
 
     @Override
@@ -97,12 +96,11 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
         match.publish();
         matchRepository.save(match);
 
-        // Off the request thread and outside this transaction (see MatchSearchIndexer javadoc for
-        // why @Async instead of self-consuming MatchPublishedEvent) — a slow/unavailable ES
-        // cluster must not hold this DB transaction, or the whole publish, open.
-        matchSearchIndexer.indexAsync(match);
-
-        // Publish domain events (consumed by other services)
+        // Publish domain events — consumed by other services, and by this one: the search index
+        // is written by MatchSearchIndexConsumer off MatchPublishedEvent, never from here, so a
+        // slow or absent Elasticsearch cannot hold this transaction open and a failed index
+        // write is retried and dead-lettered like any other event instead of being lost. See
+        // MatchSearchIndexReconciler.
         eventPublisher.publishAll(match.pullDomainEvents());
         log.info("Match published: id={}", matchId);
     }
@@ -114,8 +112,8 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
         match.complete();
         matchRepository.save(match);
         // complete() only accepts a PUBLISHED match, so there is always a search document to
-        // correct here. Re-indexing is what keeps the browse total honest — see listMatches.
-        matchSearchIndexer.indexAsync(match);
+        // remove. MatchCompletedEvent is what removes it (see MatchSearchIndexReconciler), and
+        // that is what keeps the search total honest — see listMatches.
         eventPublisher.publishAll(match.pullDomainEvents());
         log.info("Match completed: id={}", matchId);
     }
@@ -124,15 +122,12 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
     @Transactional
     public void cancelMatch(String matchId, String reason) {
         Match match = findOrThrow(matchId);
-        // cancel() also accepts a DRAFT match, which was never indexed; re-indexing only when
-        // there is a stale document to correct keeps unpublished matches out of a public
-        // search index entirely, rather than relying on the query's status filter to hide them.
-        boolean wasIndexed = match.getStatus() == MatchStatus.PUBLISHED;
+        // cancel() also accepts a DRAFT match, which was never indexed. MatchCancelledEvent drives
+        // the index either way: the reconciler deletes a non-PUBLISHED match's document, and
+        // deleting one that was never written is a no-op — so an unpublished match stays out of
+        // the public search index entirely, rather than sitting in it for the status filter to hide.
         match.cancel(reason);
         matchRepository.save(match);
-        if (wasIndexed) {
-            matchSearchIndexer.indexAsync(match);
-        }
         eventPublisher.publishAll(match.pullDomainEvents());
         log.info("Match cancelled: id={}, reason={}", matchId, reason);
     }
@@ -176,8 +171,9 @@ public class MatchCatalogService implements CreateMatchUseCase, AddShowtimeUseCa
             // cancelMatch re-index so it can answer that truthfully. That is what makes totalHits
             // describe the same set as `items` — it used to count matches this filter then
             // dropped, because the index was written on publish() and never again. What is left
-            // for the filter to catch is the indexing lag: indexAsync runs off the request thread,
-            // so a match completed a moment ago can still be a PUBLISHED document.
+            // for the filter to catch is the indexing lag: the index follows the lifecycle event
+            // through the outbox and Kafka, so a match completed a moment ago can still be a
+            // PUBLISHED document.
             MatchSearchPort.SearchResult searchResult = matchSearchPort.search(query, page, size);
             List<String> hitIds = searchResult.matches().stream().map(Match::getMatchId).toList();
             List<Match> items = matchRepository.findAllByIds(hitIds).stream()

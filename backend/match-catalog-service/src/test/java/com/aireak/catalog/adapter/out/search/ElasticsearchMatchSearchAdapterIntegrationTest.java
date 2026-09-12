@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /**
  * Integration test for ElasticsearchMatchSearchAdapter running elasticsearch-java 9.5.1
@@ -66,10 +67,10 @@ class ElasticsearchMatchSearchAdapterIntegrationTest {
 
     /**
      * Built PUBLISHED rather than through {@code Match.create()}, which yields a DRAFT: the search
-     * index is only ever written for a match that has been published (MatchCatalogService calls
-     * the indexer from publishMatch, completeMatch and cancelMatch), so a DRAFT document was never
-     * a state this adapter had to handle — and since the query filters on status, indexing one
-     * would only have tested that a document nobody writes cannot be found.
+     * index is only ever written for a PUBLISHED match (MatchSearchIndexReconciler indexes that
+     * status and deletes every other), so a DRAFT document was never a state this adapter had to
+     * handle — and since the query filters on status, indexing one would only have tested that a
+     * document nobody writes cannot be found.
      */
     private static Match publishedMatch(String homeTeam, String awayTeam, String competition) {
         return Match.reconstitute(UUID.randomUUID().toString(), homeTeam, awayTeam, competition,
@@ -88,6 +89,35 @@ class ElasticsearchMatchSearchAdapterIntegrationTest {
         assertThat(results.matches())
                 .extracting(Match::getMatchId)
                 .contains(match.getMatchId());
+    }
+
+    /** How a cancelled or completed match leaves search: the reconciler deletes, it does not re-index. */
+    @Test
+    void deleteRemovesTheDocumentFromSearch() throws IOException {
+        // A token no other test in this class indexes, so the search below sees only this document.
+        Match match = publishedMatch("Zebra Delete FC", "Yak Delete United", "Deletion Cup");
+        adapter.index(match);
+        client.indices().refresh(r -> r.index("matches"));
+        assertThat(adapter.search("Zebra", 0, 10).matches()).extracting(Match::getMatchId)
+                .containsExactly(match.getMatchId());
+
+        adapter.delete(match.getMatchId());
+        client.indices().refresh(r -> r.index("matches"));
+
+        assertThat(adapter.search("Zebra", 0, 10).matches()).isEmpty();
+        assertThat(adapter.search("Zebra", 0, 10).totalHits()).isZero();
+    }
+
+    /**
+     * The reconciler deletes for every non-PUBLISHED match, including a cancelled DRAFT that was
+     * never indexed and a record Kafka delivered twice. Both reach the adapter as a delete of a
+     * document that is not there, and that has to be a quiet round trip — not a
+     * MatchSearchException that would send the record through the retries and onto the
+     * dead-letter topic for nothing.
+     */
+    @Test
+    void deletingADocumentThatWasNeverIndexedIsNotAnError() {
+        assertThatCode(() -> adapter.delete(UUID.randomUUID().toString())).doesNotThrowAnyException();
     }
 
     /**

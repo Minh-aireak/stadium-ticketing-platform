@@ -1,6 +1,7 @@
 package com.aireak.catalog.adapter.out.search;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch._types.Result;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import com.aireak.catalog.application.port.out.MatchSearchException;
 import com.aireak.catalog.application.port.out.MatchSearchPort;
@@ -60,6 +61,24 @@ public class ElasticsearchMatchSearchAdapter implements MatchSearchPort {
                     match.getMatchId(), match.getHomeTeam(), match.getAwayTeam(), match.getStatus());
         } catch (IOException e) {
             throw new MatchSearchException("Failed to index match " + match.getMatchId(), e);
+        }
+    }
+
+    /**
+     * The delete endpoint answers 404 for a document that is not there, and the Java client's
+     * {@code delete} returns that as {@code Result.NotFound} rather than throwing — so a repeat
+     * delivery, or a cancelled DRAFT that was never indexed, costs one round trip and nothing
+     * else. Only a cluster that cannot be reached is an error, and it is the caller's to retry.
+     */
+    @Override
+    public void delete(String matchId) {
+        try {
+            Result result = elasticsearchClient.delete(req -> req
+                    .index(INDEX)
+                    .id(matchId)).result();
+            log.info("Deleted match from search index: id={}, result={}", matchId, result);
+        } catch (IOException e) {
+            throw new MatchSearchException("Failed to delete match " + matchId + " from the search index", e);
         }
     }
 

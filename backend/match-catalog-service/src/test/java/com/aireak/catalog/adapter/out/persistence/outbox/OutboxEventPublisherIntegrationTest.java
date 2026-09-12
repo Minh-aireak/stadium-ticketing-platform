@@ -3,7 +3,6 @@ package com.aireak.catalog.adapter.out.persistence.outbox;
 import com.aireak.catalog.adapter.out.persistence.MatchPersistenceAdapter;
 import com.aireak.catalog.application.port.out.MatchSearchPort;
 import com.aireak.catalog.application.service.MatchCatalogService;
-import com.aireak.catalog.application.service.MatchSearchIndexer;
 import com.aireak.catalog.application.service.ShowtimeSeatCounterInitializer;
 import com.aireak.catalog.config.InfraConfig;
 import com.aireak.catalog.domain.model.Match;
@@ -54,7 +53,6 @@ import static org.mockito.Mockito.mock;
         MatchPersistenceAdapter.class,
         OutboxConfig.class, // @EntityScan/@EnableJpaRepositories for com.aireak.common.outbox
         OutboxEventPublisher.class,
-        MatchSearchIndexer.class,
         MatchCatalogService.class,
         OutboxEventPublisherIntegrationTest.TestSupportConfig.class
 })
@@ -192,6 +190,11 @@ class OutboxEventPublisherIntegrationTest {
                 @Override
                 public void index(Match match) {
                     // no-op: Elasticsearch is out of scope for this outbox transaction test
+                }
+
+                @Override
+                public void delete(String matchId) {
+                    // no-op, same reason
                 }
 
                 @Override

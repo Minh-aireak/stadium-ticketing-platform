@@ -29,7 +29,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.argThat;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -44,15 +43,13 @@ class MatchCatalogServiceTest {
     @Mock
     private DomainEventPublisher eventPublisher;
     @Mock
-    private MatchSearchIndexer matchSearchIndexer;
-    @Mock
     private ShowtimeSeatCounterInitializer showtimeSeatCounterInitializer;
 
     private MatchCatalogService service;
 
     @BeforeEach
     void setUp() {
-        service = new MatchCatalogService(matchRepository, matchSearchPort, eventPublisher, matchSearchIndexer,
+        service = new MatchCatalogService(matchRepository, matchSearchPort, eventPublisher,
                 showtimeSeatCounterInitializer);
     }
 
@@ -163,8 +160,14 @@ class MatchCatalogServiceTest {
         verify(matchRepository, never()).save(any());
     }
 
+    /**
+     * No search-index write is expected here, and that is the point: the index is written by
+     * MatchSearchIndexConsumer off the MatchPublishedEvent this publishes through the outbox
+     * (see MatchSearchIndexReconciler), so the event IS the index write — asserting on it is
+     * asserting that the match will be searchable.
+     */
     @Test
-    void publishMatchSavesIndexesAndPublishesEvent() {
+    void publishMatchSavesAndPublishesTheEventThatIndexesIt() {
         Match existing = matchWithShowtime("match-1");
         when(matchRepository.findByIdForUpdate("match-1")).thenReturn(Optional.of(existing));
 
@@ -174,16 +177,16 @@ class MatchCatalogServiceTest {
         verify(matchRepository).save(saved.capture());
         assertThat(saved.getValue().getStatus()).isEqualTo(MatchStatus.PUBLISHED);
 
-        verify(matchSearchIndexer).indexAsync(eq(saved.getValue()));
-
         ArgumentCaptor<List<Object>> published = ArgumentCaptor.forClass(List.class);
         verify(eventPublisher).publishAll(published.capture());
         assertThat(published.getValue()).hasSize(1);
         assertThat(published.getValue().get(0)).isInstanceOf(MatchPublishedEvent.class);
+        assertThat(((MatchPublishedEvent) published.getValue().get(0)).matchId()).isEqualTo("match-1");
+        verify(matchSearchPort, never()).index(any());
     }
 
     @Test
-    void publishMatchPropagatesDomainInvariantViolationWithoutIndexingOrPublishing() {
+    void publishMatchPropagatesDomainInvariantViolationWithoutPublishing() {
         // No showtimes attached — Match.publish() enforces this invariant, the service must not
         // swallow it or index/publish a match that never actually transitioned.
         Match draftWithNoShowtimes = Match.reconstitute("match-1", "Home FC", "Away FC",
@@ -194,7 +197,6 @@ class MatchCatalogServiceTest {
                 .isInstanceOf(InvalidMatchStatusException.class);
 
         verify(matchRepository, never()).save(any());
-        verify(matchSearchIndexer, never()).indexAsync(any());
         verify(eventPublisher, never()).publishAll(any());
     }
 
@@ -235,41 +237,55 @@ class MatchCatalogServiceTest {
         assertThat(event.reason()).isEqualTo("Stadium closed for safety inspection");
     }
 
+    /**
+     * The index used to be written on publish() and never again, which is what made
+     * listMatches report a total that counted matches it had already filtered out of the page.
+     * The correction now rides MatchCompletedEvent: MatchSearchIndexReconciler deletes the
+     * document of any non-PUBLISHED match it is asked about, so the event is all this has to emit.
+     */
     @Test
-    void completeMatchReindexesSoTheSearchDocumentStopsSayingPublished() {
-        // The index used to be written on publish() and never again, which is what made
-        // listMatches report a total that counted matches it had already filtered out of the page.
+    void completeMatchPublishesTheEventThatRemovesItFromSearch() {
         Match published = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
                 MatchStatus.PUBLISHED, Instant.now(), List.of());
         when(matchRepository.findByIdForUpdate("match-1")).thenReturn(Optional.of(published));
 
         service.completeMatch("match-1");
 
-        ArgumentCaptor<Match> reindexed = ArgumentCaptor.forClass(Match.class);
-        verify(matchSearchIndexer).indexAsync(reindexed.capture());
-        assertThat(reindexed.getValue().getStatus()).isEqualTo(MatchStatus.COMPLETED);
+        ArgumentCaptor<List<Object>> published2 = ArgumentCaptor.forClass(List.class);
+        verify(eventPublisher).publishAll(published2.capture());
+        assertThat(published2.getValue()).singleElement()
+                .isInstanceOf(com.aireak.catalog.domain.event.MatchCompletedEvent.class);
+        verify(matchSearchPort, never()).index(any());
+        verify(matchSearchPort, never()).delete(any());
     }
 
+    /**
+     * A DRAFT match can be cancelled too, and was never indexed. The service no longer decides
+     * whether a document exists to correct: it emits MatchCancelledEvent either way, and the
+     * reconciler deletes for any non-PUBLISHED match, which is a no-op for a document that was
+     * never written (MatchSearchIndexReconcilerTest covers that side). What this must hold is
+     * that the event goes out for the draft as well, or a cancellation could never reach the
+     * index at all.
+     */
     @Test
-    void cancelMatchReindexesAPublishedMatchAndLeavesADraftOutOfTheIndex() {
+    void cancelMatchPublishesTheEventForAPublishedMatchAndForADraft() {
         Match published = Match.reconstitute("match-1", "Home FC", "Away FC", "Premier League",
                 MatchStatus.PUBLISHED, Instant.now(), List.of());
         when(matchRepository.findByIdForUpdate("match-1")).thenReturn(Optional.of(published));
-
-        service.cancelMatch("match-1", "Stadium closed");
-
-        ArgumentCaptor<Match> reindexed = ArgumentCaptor.forClass(Match.class);
-        verify(matchSearchIndexer).indexAsync(reindexed.capture());
-        assertThat(reindexed.getValue().getStatus()).isEqualTo(MatchStatus.CANCELLED);
-
-        // A DRAFT match can be cancelled too, but was never indexed — writing it now would put a
-        // match that was never public into a public search index for the status filter to hide.
         Match draft = matchWithShowtime("match-2");
         when(matchRepository.findByIdForUpdate("match-2")).thenReturn(Optional.of(draft));
 
+        service.cancelMatch("match-1", "Stadium closed");
         service.cancelMatch("match-2", "Never went on sale");
 
-        verify(matchSearchIndexer, never()).indexAsync(argThat(m -> "match-2".equals(m.getMatchId())));
+        verify(eventPublisher).publishAll(argThat(events -> events.size() == 1
+                && events.get(0) instanceof com.aireak.catalog.domain.event.MatchCancelledEvent e
+                && "match-1".equals(e.matchId())));
+        verify(eventPublisher).publishAll(argThat(events -> events.size() == 1
+                && events.get(0) instanceof com.aireak.catalog.domain.event.MatchCancelledEvent e
+                && "match-2".equals(e.matchId())));
+        verify(matchSearchPort, never()).index(any());
+        verify(matchSearchPort, never()).delete(any());
     }
 
     @Test

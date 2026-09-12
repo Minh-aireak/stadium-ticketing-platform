@@ -7,10 +7,19 @@ import java.util.List;
 /**
  * Outbound port: Elasticsearch search index.
  * Implemented by ElasticsearchMatchSearchAdapter.
- * CQRS read model — updated asynchronously after match state changes.
+ * CQRS read model — reconciled by {@code MatchSearchIndexReconciler} from the match lifecycle
+ * events this service publishes through its outbox.
  */
 public interface MatchSearchPort {
     void index(Match match);
+
+    /**
+     * Removes the match's document; a match that has no document is not an error. The index holds
+     * PUBLISHED matches only — {@code MatchSearchIndexReconciler} deletes on any other status —
+     * so this is how a cancelled or completed match leaves search, and how a match that was
+     * never public stays out of it.
+     */
+    void delete(String matchId);
 
     /**
      * @throws MatchSearchException if the cluster cannot be reached. Callers on a request thread
