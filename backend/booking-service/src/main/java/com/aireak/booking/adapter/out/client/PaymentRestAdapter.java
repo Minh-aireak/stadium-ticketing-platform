@@ -13,11 +13,11 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
-import java.util.Optional;
 
 // Outbound REST adapter: calls payment-service, decorated with @CircuitBreaker + @Retry.
 // The fallback rides @Retry rather than @CircuitBreaker for the reason spelled out on
@@ -80,11 +80,15 @@ public class PaymentRestAdapter implements PaymentPort {
 
     // No @CircuitBreaker/@Retry: this only fires after an already-ambiguous initiatePayment
     // failure, so retrying would just add latency to an already-degraded call. Every failure
-    // mode here degrades to Optional.empty() (caller already treats that as "stay ambiguous"),
-    // and the scheduled reconciliation job is the real backstop — paymentStatusRestClient's
-    // short timeouts (InfraConfig) just bound how much latency this can add.
+    // mode here degrades to UNKNOWN (callers already treat that as "stay ambiguous"), and the
+    // scheduled reconciliation job is the real backstop — paymentStatusRestClient's short
+    // timeouts (InfraConfig) just bound how much latency this can add.
+    //
+    // A 404 is the one failure that is an answer rather than the absence of one, and it is kept
+    // apart from the rest — see PaymentOutcome#NOT_FOUND for why it can be trusted. Only 404,
+    // though: a 401/403 is this side's token being refused, and says nothing about the payment.
     @Override
-    public Optional<PaymentOutcome> checkOutcome(String bookingId) {
+    public PaymentOutcome checkOutcome(String bookingId) {
         try {
             PaymentStatusResponse response = paymentStatusRestClient.get()
                     .uri(baseUrl + "/api/v1/payments/{bookingId}", bookingId)
@@ -92,19 +96,21 @@ public class PaymentRestAdapter implements PaymentPort {
                     .retrieve()
                     .body(PaymentStatusResponse.class);
             if (response == null) {
-                return Optional.empty();
+                return PaymentOutcome.UNKNOWN;
             }
             return switch (response.status()) {
-                case "SUCCEEDED" -> Optional.of(PaymentOutcome.SUCCEEDED);
-                case "FAILED" -> Optional.of(PaymentOutcome.FAILED);
-                // INITIATED (still in flight) or anything else — not a terminal outcome.
-                default -> Optional.empty();
+                case "SUCCEEDED" -> PaymentOutcome.SUCCEEDED;
+                case "FAILED" -> PaymentOutcome.FAILED;
+                // INITIATED, or a status this side does not know — a row exists, so something
+                // will still arrive for it.
+                default -> PaymentOutcome.IN_FLIGHT;
             };
+        } catch (HttpClientErrorException.NotFound e) {
+            return PaymentOutcome.NOT_FOUND;
         } catch (Exception e) {
-            // Includes 404: indistinguishable from "still mid-flight, not committed yet" — never a signal.
             log.warn("Payment status reconciliation query failed for booking {}: {}",
                     bookingId, e.getMessage());
-            return Optional.empty();
+            return PaymentOutcome.UNKNOWN;
         }
     }
 

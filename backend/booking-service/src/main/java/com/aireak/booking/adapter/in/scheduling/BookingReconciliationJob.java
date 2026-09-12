@@ -4,7 +4,8 @@ import com.aireak.booking.application.port.out.BookingRepository;
 import com.aireak.booking.application.port.out.PaymentPort;
 import com.aireak.booking.application.service.BookingOrchestrationService;
 import com.aireak.booking.domain.model.Booking;
-import lombok.RequiredArgsConstructor;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,7 +15,6 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * Inbound scheduling adapter: backstop for a booking that never receives a payment result.
@@ -37,18 +37,50 @@ import java.util.Optional;
  *
  * <p>Only considers bookings last updated more than {@code graceMinutes} ago, so it never races
  * the normal, still-in-flight case where payment-service simply hasn't responded yet.
+ *
+ * <p>There is a third answer payment-service can give besides an outcome and no answer at all:
+ * that it has no payment for this booking ({@link PaymentPort.PaymentOutcome#NOT_FOUND}). That
+ * is what a booking looks like when payment-service was down for Step 4 of the saga — the
+ * booking committed PENDING_PAYMENT, the initiate call never arrived, and once payment-service
+ * is back it truthfully reports nothing. Until this job learned to act on it, such a booking was
+ * examined every run, logged as "still unresolved", and left PENDING_PAYMENT forever: its seats
+ * came free when the inventory hold expired, but the row — and the customer's "awaiting
+ * payment" ticket — never moved. Now a booking that is still NOT_FOUND {@code abandonAfterMinutes}
+ * after it was created is cancelled through the same path a FAILED payment takes, which also
+ * releases the seats. The threshold is set to the inventory hold TTL rather than the
+ * milliseconds it would take to be safe, so that by the time this fires the checkout it belonged
+ * to is long gone either way. Should a PaymentSucceededEvent nonetheless turn up for a booking
+ * cancelled here, {@link BookingOrchestrationService#confirmBooking} answers it with a refund.
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class BookingReconciliationJob {
 
     private final BookingRepository bookingRepository;
     private final PaymentPort paymentPort;
     private final BookingOrchestrationService bookingOrchestrationService;
+    // Counted rather than gauged: each abandonment is a customer whose checkout silently died,
+    // and the interesting number is how often that happens, not how many are pending right now.
+    private final Counter abandonedCounter;
+
+    public BookingReconciliationJob(BookingRepository bookingRepository, PaymentPort paymentPort,
+                                    BookingOrchestrationService bookingOrchestrationService,
+                                    MeterRegistry meterRegistry) {
+        this.bookingRepository = bookingRepository;
+        this.paymentPort = paymentPort;
+        this.bookingOrchestrationService = bookingOrchestrationService;
+        this.abandonedCounter = meterRegistry.counter("booking.payment.abandoned");
+    }
 
     @Value("${booking.payment-reconciliation-job.grace-minutes:5}")
     private long graceMinutes;
+
+    // How long a PENDING_PAYMENT booking may keep answering NOT_FOUND before it is given up on.
+    // Measured from the booking's creation, not its last update: a booking reaches
+    // PENDING_PAYMENT within seconds of being created and is not touched again until it
+    // resolves, so the two are the same clock, and creation is the one the domain object carries.
+    @Value("${booking.payment-reconciliation-job.abandon-after-minutes:10}")
+    private long abandonAfterMinutes;
 
     // Caps how many bookings a single run reconciles — same rationale as
     // InventoryConfirmationReconciler's batch-size: an extended payment-service outage shouldn't
@@ -59,9 +91,11 @@ public class BookingReconciliationJob {
     @Scheduled(fixedDelayString = "${booking.payment-reconciliation-job.fixed-delay-ms:300000}")
     @SchedulerLock(name = "booking-paymentReconciliation", lockAtMostFor = "PT10M", lockAtLeastFor = "PT1M")
     public void reconcile() {
-        Instant cutoff = Instant.now().minus(graceMinutes, ChronoUnit.MINUTES);
-        reconcileDraftBookings(cutoff);
-        reconcilePendingPaymentBookings(cutoff);
+        Instant now = Instant.now();
+        Instant graceCutoff = now.minus(graceMinutes, ChronoUnit.MINUTES);
+        Instant abandonCutoff = now.minus(abandonAfterMinutes, ChronoUnit.MINUTES);
+        reconcileDraftBookings(graceCutoff);
+        reconcilePendingPaymentBookings(graceCutoff, abandonCutoff);
     }
 
     private void reconcileDraftBookings(Instant cutoff) {
@@ -83,8 +117,8 @@ public class BookingReconciliationJob {
         }
     }
 
-    private void reconcilePendingPaymentBookings(Instant cutoff) {
-        List<Booking> pending = bookingRepository.findPendingPaymentOlderThan(cutoff, batchSize);
+    private void reconcilePendingPaymentBookings(Instant graceCutoff, Instant abandonCutoff) {
+        List<Booking> pending = bookingRepository.findPendingPaymentOlderThan(graceCutoff, batchSize);
         if (pending.isEmpty()) {
             return;
         }
@@ -92,7 +126,7 @@ public class BookingReconciliationJob {
         log.warn("Reconciling {} PENDING_PAYMENT booking(s) with no resolved payment outcome", pending.size());
         for (Booking booking : pending) {
             try {
-                reconcileOnePendingPayment(booking);
+                reconcileOnePendingPayment(booking, abandonCutoff);
             } catch (Exception e) {
                 log.error("Payment reconciliation failed for booking {}: {}",
                         booking.getBookingId(), e.getMessage());
@@ -100,15 +134,9 @@ public class BookingReconciliationJob {
         }
     }
 
-    private void reconcileOnePendingPayment(Booking booking) {
+    private void reconcileOnePendingPayment(Booking booking, Instant abandonCutoff) {
         String bookingId = booking.getBookingId();
-        Optional<PaymentPort.PaymentOutcome> outcome = paymentPort.checkOutcome(bookingId);
-        if (outcome.isEmpty()) {
-            log.debug("Payment outcome for booking {} still unresolved; will retry next run", bookingId);
-            return;
-        }
-
-        switch (outcome.get()) {
+        switch (paymentPort.checkOutcome(bookingId)) {
             case SUCCEEDED -> {
                 log.warn("Reconciled booking {} as SUCCEEDED via payment-service query; confirming", bookingId);
                 bookingOrchestrationService.confirmBooking(bookingId);
@@ -117,6 +145,23 @@ public class BookingReconciliationJob {
                 log.warn("Reconciled booking {} as FAILED via payment-service query; cancelling", bookingId);
                 bookingOrchestrationService.cancelBookingOnPaymentFailure(bookingId, "Payment failed (reconciled)");
             }
+            case NOT_FOUND -> abandonIfOldEnough(booking, abandonCutoff);
+            case IN_FLIGHT, UNKNOWN ->
+                log.debug("Payment outcome for booking {} still unresolved; will retry next run", bookingId);
         }
+    }
+
+    private void abandonIfOldEnough(Booking booking, Instant abandonCutoff) {
+        String bookingId = booking.getBookingId();
+        if (booking.getCreatedAt().isAfter(abandonCutoff)) {
+            log.debug("payment-service has no payment for booking {} yet; created {}, giving it until {}",
+                    bookingId, booking.getCreatedAt(),
+                    booking.getCreatedAt().plus(abandonAfterMinutes, ChronoUnit.MINUTES));
+            return;
+        }
+        log.warn("payment-service has no payment for booking {} created {} — no charge was ever " +
+                "initiated; cancelling and releasing seats", bookingId, booking.getCreatedAt());
+        bookingOrchestrationService.cancelBookingOnPaymentFailure(bookingId, "No payment was ever initiated");
+        abandonedCounter.increment();
     }
 }

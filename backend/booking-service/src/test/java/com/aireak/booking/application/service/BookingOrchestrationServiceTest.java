@@ -356,8 +356,7 @@ class BookingOrchestrationServiceTest {
             OutboundServiceUnavailableException ambiguous = new OutboundServiceUnavailableException(
                     "Payment service unavailable", new RuntimeException("timeout"));
             doThrow(ambiguous).when(paymentPort).initiatePayment(BOOKING_ID, SERVER_AMOUNT, CURRENCY);
-            when(paymentPort.checkOutcome(BOOKING_ID))
-                    .thenReturn(Optional.of(PaymentPort.PaymentOutcome.SUCCEEDED));
+            when(paymentPort.checkOutcome(BOOKING_ID)).thenReturn(PaymentPort.PaymentOutcome.SUCCEEDED);
             when(sagaSteps.findOrThrow(BOOKING_ID)).thenReturn(pendingPaymentBooking(BOOKING_ID));
             when(bookingRepository.findById(BOOKING_ID))
                     .thenReturn(Optional.of(confirmedBooking(BOOKING_ID)));
@@ -383,8 +382,7 @@ class BookingOrchestrationServiceTest {
             OutboundServiceUnavailableException ambiguous = new OutboundServiceUnavailableException(
                     "Payment service unavailable", new RuntimeException("timeout"));
             doThrow(ambiguous).when(paymentPort).initiatePayment(BOOKING_ID, SERVER_AMOUNT, CURRENCY);
-            when(paymentPort.checkOutcome(BOOKING_ID))
-                    .thenReturn(Optional.of(PaymentPort.PaymentOutcome.SUCCEEDED));
+            when(paymentPort.checkOutcome(BOOKING_ID)).thenReturn(PaymentPort.PaymentOutcome.SUCCEEDED);
             // PaymentResultConsumer already resolved this booking on another thread —
             // confirmBooking()'s own guard/state-check fails.
             when(sagaSteps.findOrThrow(BOOKING_ID))
@@ -408,8 +406,7 @@ class BookingOrchestrationServiceTest {
             OutboundServiceUnavailableException ambiguous = new OutboundServiceUnavailableException(
                     "Payment service unavailable", new RuntimeException("timeout"));
             doThrow(ambiguous).when(paymentPort).initiatePayment(BOOKING_ID, SERVER_AMOUNT, CURRENCY);
-            when(paymentPort.checkOutcome(BOOKING_ID))
-                    .thenReturn(Optional.of(PaymentPort.PaymentOutcome.FAILED));
+            when(paymentPort.checkOutcome(BOOKING_ID)).thenReturn(PaymentPort.PaymentOutcome.FAILED);
 
             assertThatThrownBy(() ->
                     service.createBooking("idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
@@ -428,7 +425,7 @@ class BookingOrchestrationServiceTest {
             OutboundServiceUnavailableException ambiguous = new OutboundServiceUnavailableException(
                     "Payment service unavailable", new RuntimeException("timeout"));
             doThrow(ambiguous).when(paymentPort).initiatePayment(BOOKING_ID, SERVER_AMOUNT, CURRENCY);
-            when(paymentPort.checkOutcome(BOOKING_ID)).thenReturn(Optional.empty());
+            when(paymentPort.checkOutcome(BOOKING_ID)).thenReturn(PaymentPort.PaymentOutcome.UNKNOWN);
 
             assertThatThrownBy(() ->
                     service.createBooking("idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
@@ -436,6 +433,31 @@ class BookingOrchestrationServiceTest {
 
             // Genuinely unknown outcome: must NOT cancel/release seats — the async
             // PaymentResultConsumer or the reconciliation job is the real backstop.
+            verify(sagaSteps, never()).cancelBooking(anyString(), anyString());
+            verify(ticketInventoryPort, never()).releaseSeats(anyString(), anyString(), any());
+            verify(idempotencyStore).release("idem-1");
+        }
+
+        /**
+         * NOT_FOUND is a firm answer from payment-service, and BookingReconciliationJob does act
+         * on it — but not here. This is the one moment the initiate request may still be on its
+         * way to payment-service's INITIATED commit, so in-line it has to be treated exactly like
+         * no answer at all.
+         */
+        @Test
+        void paymentNotFoundRightAfterTheTimeoutIsNotYetGroundsToCancel() {
+            when(idempotencyStore.claim("idem-1")).thenReturn(new IdempotencyClaim.Claimed());
+            stubCreateDraftBooking();
+            stubReserveSeats();
+            OutboundServiceUnavailableException ambiguous = new OutboundServiceUnavailableException(
+                    "Payment service unavailable", new RuntimeException("timeout"));
+            doThrow(ambiguous).when(paymentPort).initiatePayment(BOOKING_ID, SERVER_AMOUNT, CURRENCY);
+            when(paymentPort.checkOutcome(BOOKING_ID)).thenReturn(PaymentPort.PaymentOutcome.NOT_FOUND);
+
+            assertThatThrownBy(() ->
+                    service.createBooking("idem-1", CUSTOMER_ID, CUSTOMER_EMAIL, SHOWTIME_ID, SEAT_CODES, AMOUNT, CURRENCY))
+                    .isSameAs(ambiguous);
+
             verify(sagaSteps, never()).cancelBooking(anyString(), anyString());
             verify(ticketInventoryPort, never()).releaseSeats(anyString(), anyString(), any());
             verify(idempotencyStore).release("idem-1");

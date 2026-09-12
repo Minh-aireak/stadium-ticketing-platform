@@ -84,6 +84,11 @@ booking:
     grace-minutes: ${PAYMENT_RECONCILER_GRACE_MINUTES:5}
     fixed-delay-ms: ${PAYMENT_RECONCILER_FIXED_DELAY_MS:300000}
     batch-size: ${PAYMENT_RECONCILER_BATCH_SIZE:200}
+    # A PENDING_PAYMENT booking that payment-service still has no payment for this long after it
+    # was created is cancelled and its seats released (see BookingReconciliationJob). Matches
+    # ticket-inventory-service's inventory.hold.ttl-minutes on purpose: the hold has lapsed by
+    # then anyway, so this only ever settles the booking row, never a seat someone is waiting on.
+    abandon-after-minutes: ${PAYMENT_RECONCILER_ABANDON_AFTER_MINUTES:10}
 
 outbox:
   cleanup:

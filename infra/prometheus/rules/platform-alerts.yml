@@ -233,3 +233,22 @@ groups:
             for 30 minutes. Their seat holds have long since expired, so those seats are on sale
             again to other customers while the original buyers hold paid, confirmed bookings for
             them.
+
+      # The other end of the saga, and a counter rather than a gauge because nothing is left
+      # pending by the time it moves: each increment is a booking that reached Step 4 while
+      # payment-service was unreachable, answered its customer with a 503, sat PENDING_PAYMENT
+      # ("Chờ thanh toán" on their account page) and was cancelled by BookingReconciliationJob
+      # once payment-service, back up, confirmed it had never heard of it. Nobody was charged.
+      # One in an hour is worth a look; several is the tail of a payment-service outage, and
+      # ServiceDown may already have said so.
+      - alert: BookingsAbandonedWithoutPayment
+        expr: increase(booking_payment_abandoned_total[1h]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "bookings cancelled because no payment was ever initiated"
+          description: >-
+            BookingReconciliationJob cancelled {{ $value | printf "%.0f" }} booking(s) in the last
+            hour because payment-service has no payment for them — it was unreachable when they
+            reached Step 4. The customers were never charged; they saw a 503 at checkout and a
+            cancelled booking afterwards.

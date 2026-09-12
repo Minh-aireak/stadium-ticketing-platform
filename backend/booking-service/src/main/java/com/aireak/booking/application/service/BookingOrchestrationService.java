@@ -165,8 +165,9 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
             // to commit left the guard held for its full 5-minute TTL, PaymentRestAdapter's @Retry
             // re-send was answered 202 about a payment that did not exist and never would, and the
             // booking was accepted as PENDING_PAYMENT with no payment row, no charge, and no
-            // outcome BookingReconciliationJob could ever resolve it from — checkOutcome maps
-            // payment-service's 404 to empty. See PaymentIdempotencyPort#release.
+            // outcome BookingReconciliationJob could resolve it from except giving up on it
+            // (checkOutcome answers NOT_FOUND, and the job only abandons a booking that has
+            // sat that way for abandonAfterMinutes). See PaymentIdempotencyPort#release.
             if (isPaymentAlreadyBeingProcessed(e)) {
                 log.warn("Payment is already being processed for booking {}; treating the " +
                         "idempotent retry as accepted", bookingId);
@@ -182,11 +183,13 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
             } else {
                 // No HTTP response (timeout/reset/circuit open) — payment may have already
                 // started. Ask payment-service directly before giving up on it: only a definite
-                // SUCCEEDED/FAILED is safe to act on here (see PaymentPort#checkOutcome — a "not
-                // found" result is indistinguishable from "still mid-flight" and must NOT be
-                // treated as safe-to-compensate).
-                Optional<PaymentPort.PaymentOutcome> outcome = paymentPort.checkOutcome(bookingId);
-                if (outcome.isPresent() && outcome.get() == PaymentPort.PaymentOutcome.SUCCEEDED) {
+                // SUCCEEDED/FAILED is safe to act on here. NOT_FOUND is deliberately not: this is
+                // the one moment the initiate request may still be on its way to payment-service's
+                // INITIATED commit, so "no row" right now is not yet "no payment". The scheduled
+                // BookingReconciliationJob acts on NOT_FOUND once the booking is old enough for
+                // that to be impossible (see its abandonAfterMinutes).
+                PaymentPort.PaymentOutcome outcome = paymentPort.checkOutcome(bookingId);
+                if (outcome == PaymentPort.PaymentOutcome.SUCCEEDED) {
                     try {
                         log.warn("Payment initiation was ambiguous for booking {} but reconciliation " +
                                 "confirmed success; confirming booking synchronously", bookingId);
@@ -207,7 +210,7 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
                         log.error("Failed to apply reconciled SUCCEEDED outcome for booking {}: {}",
                                 bookingId, confirmEx.getMessage());
                     }
-                } else if (outcome.isPresent() && outcome.get() == PaymentPort.PaymentOutcome.FAILED) {
+                } else if (outcome == PaymentPort.PaymentOutcome.FAILED) {
                     try {
                         log.warn("Payment initiation was ambiguous for booking {} but reconciliation " +
                                 "confirmed failure; cancelling booking synchronously", bookingId);
