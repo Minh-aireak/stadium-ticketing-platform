@@ -15,8 +15,10 @@ import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -44,6 +46,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * {@code @Valid} argument resolution (400) without needing Elasticsearch/DB up for a real create.
  */
 @WebMvcTest(MatchController.class)
+// The web slice registers every @ControllerAdvice, and CatalogOverloadExceptionHandler counts
+// its rejections on a MeterRegistry — which @WebMvcTest does not auto-configure.
+@Import(SimpleMeterRegistry.class)
 @TestPropertySource(properties = {
         "jwt.secret=test-secret-key-at-least-32-bytes-long-for-hs256!!",
         "jwt.issuer=identity-service",
