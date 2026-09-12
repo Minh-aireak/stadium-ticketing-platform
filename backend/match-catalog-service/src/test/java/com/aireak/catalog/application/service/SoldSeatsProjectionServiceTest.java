@@ -248,8 +248,30 @@ class SoldSeatsProjectionServiceTest {
 
         service.applySoldSeats(EVENT_ID, SHOWTIME_ID, 3);
 
-        assertThat(meterRegistry.find("catalog.seat_counter.drift").counters()).isEmpty();
-        assertThat(meterRegistry.find("catalog.seat_counter.oversell").counters()).isEmpty();
+        assertThat(meterRegistry.find("catalog.seat_counter.drift").counters())
+                .allSatisfy(counter -> assertThat(counter.count()).isZero());
+        assertThat(count("catalog.seat_counter.oversell")).isZero();
+    }
+
+    /**
+     * A counter Micrometer has never seen is a series Prometheus does not have, and "no data" on
+     * the oversell panel is indistinguishable from a catalog that is not being scraped. Every
+     * meter, with every tag value the service can emit, has to exist at zero before the first sale.
+     */
+    @Test
+    void registersEveryMeterAtZeroBeforeTheFirstSale() {
+        assertThat(meterRegistry.find("catalog.seat_counter.oversell").counter()).isNotNull();
+        assertThat(count("catalog.seat_counter.oversell")).isZero();
+
+        assertThat(meterRegistry.find("catalog.seat_projection").counters())
+                .extracting(counter -> counter.getId().getTag("outcome"))
+                .containsExactlyInAnyOrder("applied", "duplicate", "failed");
+
+        assertThat(meterRegistry.find("catalog.seat_counter.drift").counters())
+                .extracting(counter -> counter.getId().getTag("reason"))
+                .containsExactlyInAnyOrder("clamped", "not_initialized", "corrupt", "unavailable");
+        assertThat(meterRegistry.find("catalog.seat_counter.drift").counters())
+                .allSatisfy(counter -> assertThat(counter.count()).isZero());
     }
 
     private void givenRedisDecrement(DecrementResult result) {

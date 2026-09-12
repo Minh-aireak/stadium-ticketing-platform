@@ -5,13 +5,14 @@ import com.aireak.catalog.application.port.in.CheckSeatCapacityUseCase;
 import com.aireak.catalog.application.port.out.SeatAvailabilityProjectionPort;
 import com.aireak.catalog.application.port.out.SeatCounterUpdatePort;
 import com.aireak.catalog.application.port.out.SeatCounterUpdatePort.DecrementResult;
+import com.aireak.catalog.application.port.out.SeatCounterUpdatePort.DecrementStatus;
 import com.aireak.catalog.application.port.out.ShowtimeSeatCountPort;
 import com.aireak.catalog.domain.model.SeatCapacityCheck;
 import io.micrometer.core.instrument.MeterRegistry;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -70,18 +71,60 @@ import java.util.Locale;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class SoldSeatsProjectionService implements ApplySoldSeatsUseCase {
 
     private static final String PROJECTION_METRIC = "catalog.seat_projection";
     private static final String OVERSELL_METRIC = "catalog.seat_counter.oversell";
     private static final String DRIFT_METRIC = "catalog.seat_counter.drift";
 
+    private static final String OUTCOME_APPLIED = "applied";
+    private static final String OUTCOME_DUPLICATE = "duplicate";
+    private static final String OUTCOME_FAILED = "failed";
+    private static final List<String> PROJECTION_OUTCOMES =
+            List.of(OUTCOME_APPLIED, OUTCOME_DUPLICATE, OUTCOME_FAILED);
+
     private final CheckSeatCapacityUseCase seatCapacityCheck;
     private final SeatCounterUpdatePort seatCounterUpdatePort;
     private final SeatAvailabilityProjectionPort seatAvailabilityProjectionPort;
     private final ShowtimeSeatCountPort showtimeSeatCountPort;
     private final MeterRegistry meterRegistry;
+
+    public SoldSeatsProjectionService(CheckSeatCapacityUseCase seatCapacityCheck,
+                                      SeatCounterUpdatePort seatCounterUpdatePort,
+                                      SeatAvailabilityProjectionPort seatAvailabilityProjectionPort,
+                                      ShowtimeSeatCountPort showtimeSeatCountPort,
+                                      MeterRegistry meterRegistry) {
+        this.seatCapacityCheck = seatCapacityCheck;
+        this.seatCounterUpdatePort = seatCounterUpdatePort;
+        this.seatAvailabilityProjectionPort = seatAvailabilityProjectionPort;
+        this.showtimeSeatCountPort = showtimeSeatCountPort;
+        this.meterRegistry = meterRegistry;
+        registerMetersAtZero();
+    }
+
+    /**
+     * Micrometer creates a counter on its first increment, and Prometheus has no series for a
+     * counter that was never created. So a catalog that had never oversold answered
+     * {@code increase(catalog_seat_counter_oversell_total[5m])} with "no data" — the same thing a
+     * catalog that is not being scraped at all answers, and the UC-03 metric check could not tell
+     * the two apart. Registering every meter up front makes the healthy answer a plain {@code 0}
+     * from the first scrape; an absent series now means the scrape itself is broken.
+     *
+     * <p>Every tag value the service can ever emit is registered, so a {@code sum by (reason)} or
+     * {@code by (outcome)} panel shows all of its legs at zero instead of growing a new one the
+     * first time that branch fires.
+     */
+    private void registerMetersAtZero() {
+        meterRegistry.counter(OVERSELL_METRIC);
+        for (String outcome : PROJECTION_OUTCOMES) {
+            meterRegistry.counter(PROJECTION_METRIC, "outcome", outcome);
+        }
+        for (DecrementStatus status : DecrementStatus.values()) {
+            if (!DecrementResult.nothingWritten(status).isClean()) {
+                meterRegistry.counter(DRIFT_METRIC, "reason", tagValue(status.name()));
+            }
+        }
+    }
 
     @Override
     public boolean applySoldSeats(String eventId, String showtimeId, int soldSeatCount) {
@@ -102,7 +145,7 @@ public class SoldSeatsProjectionService implements ApplySoldSeatsUseCase {
             log.error("Sold-seat projection failed in Postgres, rolling the Redis counter back: "
                             + "eventId={}, showtime={}, seats={}, deductedFromRedis={}",
                     eventId, showtimeId, soldSeatCount, redisLeg.deductedSeats(), e);
-            recordOutcome("failed");
+            recordOutcome(OUTCOME_FAILED);
             undoRedisLeg(showtimeId, redisLeg);
             throw e;
         }
@@ -113,14 +156,14 @@ public class SoldSeatsProjectionService implements ApplySoldSeatsUseCase {
             log.info("Sold-seat event had already been projected, undoing the Redis decrement it repeated: "
                             + "eventId={}, showtime={}, seats={}",
                     eventId, showtimeId, soldSeatCount);
-            recordOutcome("duplicate");
+            recordOutcome(OUTCOME_DUPLICATE);
             undoRedisLeg(showtimeId, redisLeg);
             return false;
         }
 
         log.info("Sold-seat projection applied: eventId={}, showtime={}, seats={}, redis={}, remaining={}",
                 eventId, showtimeId, soldSeatCount, redisLeg.status(), redisLeg.remainingSeats());
-        recordOutcome("applied");
+        recordOutcome(OUTCOME_APPLIED);
         reconcileFromDatabase(showtimeId, redisLeg);
         return true;
     }
