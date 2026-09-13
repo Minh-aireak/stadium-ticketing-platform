@@ -1,7 +1,7 @@
 # Stadium Ticketing Platform
 
 An event-driven stadium ticket booking platform: browse matches, hold seats, pay, and get
-confirmed — built as seven Spring Boot microservices behind a reactive gateway, with a React
+confirmed — built as seven Spring Boot services, one of them a reactive gateway, with a React
 storefront.
 
 The interesting part of this codebase is not the CRUD; it is what happens when a step fails
