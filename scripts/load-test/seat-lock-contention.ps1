@@ -3,7 +3,7 @@
     Proves the Redisson seat lock actually serializes across BOTH ticket-inventory instances.
 
 .DESCRIPTION
-    Fires N simultaneous "hold this one seat" requests at ticket-inventory-lb and asserts that
+    Fires N simultaneous "take this one seat" requests at ticket-inventory-lb and asserts that
     exactly one of them wins. This is the test a single instance cannot provide: with one JVM a
     plain synchronized block passes it just as happily, so the result only means something once
     nginx has spread the attempts over more than one instance -- which is why the X-Upstream
@@ -21,12 +21,23 @@
       - at least 2 distinct X-Upstream values, or the run proves nothing about distribution
 
     The winner's hold survives for inventory.hold.ttl-minutes (10 by default), so the script
-    releases it again on the way out. Without that cleanup a second run against the same seat
-    would see zero winners and N failures -- a real result, but not the one being measured.
+    releases it again on the way out, by the winning bookingId -- a reserve-placed hold is stored
+    against that, and DELETE /hold would not match it. Without that cleanup a second run against
+    the same seat would see zero winners and N failures -- a real result, but not the one being
+    measured.
 
-    One customer account is enough. RedissonSeatHoldAdapter#holdSeats uses putIfAbsent and does
-    not special-case the seat's existing owner, so a customer racing itself still produces exactly
-    one winner.
+    One customer account is enough, but every attempt must carry its OWN bookingId -- which is
+    why this fires at /reserve and not at /hold. Since 570bf87 both hold paths treat a hold the
+    same owner already placed as success rather than as a conflict (see SeatHoldPort#holdSeats),
+    so twenty /hold calls on one account all return 200 and the run proves nothing about locking.
+    /reserve confirms the hold into a bookingId (RedissonSeatHoldAdapter#confirmHold), and twenty
+    distinct bookingIds are twenty distinct owners -- exactly one of which can win the key.
+
+    This used to target /hold on the strength of a claim that holdSeats "does not special-case
+    the seat's existing owner". 570bf87 made that false and the docs commit four seconds later
+    carried the sentence forward unread, so the script went on asserting 1 winner and N-1 losers
+    against a path that had started answering 200 to all of them -- a FAIL that said the lock had
+    broken when nothing had.
 
 .PARAMETER ShowtimeId
     Showtime to contend over. Find one with:
@@ -133,7 +144,7 @@ Write-Host ""
 #    rest reach tryLock, and then the lock is never contended at all.
 # ---------------------------------------------------------------------------
 $worker = {
-    param($Url, $Token, $Body, $Gate, $Index)
+    param($Url, $Token, $Body, $Gate, $Index, $BookingId)
 
     [void]$Gate.Wait(30000)
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -172,6 +183,7 @@ $worker = {
     $sw.Stop()
     [pscustomobject]@{
         Index     = $Index
+        BookingId = $BookingId
         Status    = $status
         Upstream  = $upstream
         Detail    = $detail
@@ -179,18 +191,23 @@ $worker = {
     }
 }
 
-$url = "$LbUrl/api/v1/inventory/$ShowtimeId/hold"
-$body = @{ seatCodes = @($SeatCode) } | ConvertTo-Json -Compress
+$url = "$LbUrl/api/v1/inventory/$ShowtimeId/reserve"
+# Distinct owners are what makes the key contended, so each attempt gets its own bookingId.
+# The run id keeps a repeat run from reusing ids a previous run may still hold.
+$runId = [guid]::NewGuid().ToString("N").Substring(0, 8)
 $gate = New-Object System.Threading.ManualResetEventSlim($false)
 $pool = [runspacefactory]::CreateRunspacePool(1, $Concurrency)
 $pool.Open()
 
 $pending = @()
 foreach ($i in 1..$Concurrency) {
+    $bookingId = "loadtest-$runId-$i"
+    $body = @{ bookingId = $bookingId; seatCodes = @($SeatCode) } | ConvertTo-Json -Compress
     $ps = [powershell]::Create()
     $ps.RunspacePool = $pool
     [void]$ps.AddScript($worker).
-        AddArgument($url).AddArgument($token).AddArgument($body).AddArgument($gate).AddArgument($i)
+        AddArgument($url).AddArgument($token).AddArgument($body).AddArgument($gate).AddArgument($i).
+        AddArgument($bookingId)
     $pending += [pscustomobject]@{ Ps = $ps; Handle = $ps.BeginInvoke() }
 }
 
@@ -279,10 +296,11 @@ if ($unexpected.Count -gt 0) {
 # ---------------------------------------------------------------------------
 if (-not $SkipCleanup -and $winners.Count -gt 0) {
     Write-Host ""
-    Write-Host "Releasing the hold on $SeatCode ..." -ForegroundColor Cyan
+    $winningBookingId = $winners[0].BookingId
+    Write-Host "Releasing the reservation on $SeatCode ..." -ForegroundColor Cyan
     try {
         Invoke-RestMethod -Method Delete -Headers $authHeader `
-            -Uri "$LbUrl/api/v1/inventory/$ShowtimeId/hold?seatCodes=$SeatCode" | Out-Null
+            -Uri "$LbUrl/api/v1/inventory/$ShowtimeId/reserve/$($winningBookingId)?seatCodes=$SeatCode" | Out-Null
         Write-Host "Released."
     } catch {
         Write-Host ("Could not release the hold: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
