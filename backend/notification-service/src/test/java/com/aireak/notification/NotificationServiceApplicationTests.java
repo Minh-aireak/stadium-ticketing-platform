@@ -22,7 +22,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 		"jwt.previous-secret=",
 		"jwt.internal-secret=",
 		"spring.kafka.bootstrap-servers=localhost:9092",
-		"app.identity-service-base-url=http://localhost:8081",
+		"app.public-api-base-url=http://localhost:8080",
 		"app.frontend-base-url=http://localhost:5173",
 		"brevo.api-key=test-brevo-api-key",
 		"brevo.sender-email=no-reply@stadium.test",

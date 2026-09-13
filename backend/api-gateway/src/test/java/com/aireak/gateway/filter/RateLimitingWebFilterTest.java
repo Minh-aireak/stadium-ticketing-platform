@@ -55,6 +55,7 @@ class RateLimitingWebFilterTest {
             SECRET, null, ISSUER, AUDIENCE,
             List.of("/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh",
                     "/api/v1/auth/logout", "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password",
+                    "GET:/api/v1/auth/verify-email",
                     "/actuator/health", "/actuator/info"));
     private final com.aireak.gateway.config.GatewayProperties gatewayProperties = new com.aireak.gateway.config.GatewayProperties(
             List.of("127.0.0.1", "10.0.0.0/8", "203.0.113.99"));
@@ -159,6 +160,28 @@ class RateLimitingWebFilterTest {
 
         verify(limiters.get(RateLimitPolicy.PASSWORD_RESET_CONFIRM))
                 .isAllowed("PASSWORD_RESET_CONFIRM", "ip:203.0.113.8");
+    }
+
+    /**
+     * Same guard as the two above, for the path a customer reaches by clicking the link in their
+     * verification email. It is public, so a missing entry drops it to DEFAULT_ANONYMOUS; it must
+     * also not land on VERIFICATION_RESEND, whose one-per-20-minutes email allowance would strand
+     * anyone whose mail client prefetches the link before they click it.
+     */
+    @Test
+    void verifyEmailIsKeyedByIpUnderItsOwnConfirmPolicy() {
+        allow(RateLimitPolicy.EMAIL_VERIFICATION_CONFIRM);
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/auth/verify-email?token=tok-abc")
+                        .remoteAddress(new InetSocketAddress("203.0.113.9", 5557))
+                        .build());
+
+        filter.filter(exchange, ex -> Mono.empty()).block(Duration.ofSeconds(5));
+
+        verify(limiters.get(RateLimitPolicy.EMAIL_VERIFICATION_CONFIRM))
+                .isAllowed("EMAIL_VERIFICATION_CONFIRM", "ip:203.0.113.9");
+        verify(limiters.get(RateLimitPolicy.VERIFICATION_RESEND), never()).isAllowed(anyString(), anyString());
+        verify(limiters.get(RateLimitPolicy.DEFAULT_ANONYMOUS), never()).isAllowed(anyString(), anyString());
     }
 
     @Test

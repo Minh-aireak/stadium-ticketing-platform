@@ -910,9 +910,12 @@ services:
       DB_USERNAME: ${DB_USERNAME}
       DB_PASSWORD: ${DB_PASSWORD}
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      # The verify-email link is opened by the end user's browser, so it must point at the
-      # host-mapped port, not identity-service's container DNS name.
-      IDENTITY_SERVICE_BASE_URL: http://localhost:8081
+      # The verify-email link is opened by the end user's browser out of a mail client, so it must
+      # point at api-gateway's publicly reachable origin -- not a container DNS name, and not
+      # identity-service's own port, which a real deployment does not publish. Read from .env
+      # rather than pinned here, so moving to a domain is a config change and not an edit to this
+      # file (it was pinned to localhost before, which silently ignored the .env entry).
+      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL}
       # Same reasoning for the reset-password link, which lands on a frontend page.
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL}
       BREVO_API_KEY: ${BREVO_API_KEY}

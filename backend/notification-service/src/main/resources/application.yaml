@@ -28,7 +28,10 @@ server:
   port: 8085
 
 app:
-  identity-service-base-url: ${IDENTITY_SERVICE_BASE_URL}
+  # Base URL the verify-email link points at: api-gateway's public origin, since a deployment
+  # exposes the gateway alone and identity-service's own port is not reachable from a mail client.
+  # Must be browser-reachable, not a docker-internal hostname.
+  public-api-base-url: ${PUBLIC_API_BASE_URL}
   # Base URL the reset-password email links to — a frontend page, since submitting a new password
   # is a POST. Must be browser-reachable, not a docker-internal hostname.
   frontend-base-url: ${FRONTEND_BASE_URL}

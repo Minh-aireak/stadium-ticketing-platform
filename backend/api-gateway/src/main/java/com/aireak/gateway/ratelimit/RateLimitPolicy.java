@@ -36,6 +36,14 @@ public enum RateLimitPolicy {
     // each other -- a customer waiting on a verification mail has no way to ask for a password
     // reset, and vice versa.
     VERIFICATION_RESEND(KeyStrategy.IP, 1, 3600, 1200),
+    // Following the link in the verification email. Link-shaped, not email-shaped: no accepted
+    // request sends mail, so VERIFICATION_RESEND's numbers would punish the customer this endpoint
+    // exists to serve. Sized like PASSWORD_RESET_CONFIRM, the other "user arrives holding a token
+    // out of an email" endpoint, so a couple of double-clicks or a mail client that prefetches the
+    // link do not lock someone out of activating their own account. Guessing the token is not what
+    // this bounds -- it is 32 SecureRandom bytes (see RedisEmailVerificationTokenAdapter) -- it
+    // bounds cheap anonymous noise on a path that is public by necessity.
+    EMAIL_VERIFICATION_CONFIRM(KeyStrategy.IP, 1, 120, 12),
     REFRESH_TOKEN(KeyStrategy.USER_OR_IP, 1, 60, 3),
     // Stripe's webhook deliveries. Keyed by IP because there is no platform user behind them, and
     // sized for a provider that legitimately bursts (a backlog being flushed, retries of earlier

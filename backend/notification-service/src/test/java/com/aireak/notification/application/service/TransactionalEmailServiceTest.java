@@ -53,7 +53,7 @@ class TransactionalEmailServiceTest {
     void sendWelcomeEmail_sendsHtmlAndTextBothCarryingTheVerificationLink() {
         Optional<EmailContent> content = service.sendWelcomeEmail(
                 new WelcomeEmail("jane.doe@example.com", "acc-1",
-                        "http://localhost:8081/api/v1/auth/verify-email?token=tok-123"));
+                        "http://localhost:8080/api/v1/auth/verify-email?token=tok-123"));
 
         EmailMessage sent = captureSent();
         assertThat(sent.to()).isEqualTo("jane.doe@example.com");

@@ -82,7 +82,7 @@ public class NotificationDispatchService implements SendNotificationUseCase {
 
     private Optional<Notification> welcome(Object payload) {
         AccountRegisteredEvent event = (AccountRegisteredEvent) payload;
-        String verificationUrl = links.identityServiceBaseUrl()
+        String verificationUrl = links.publicApiBaseUrl()
                 + "/api/v1/auth/verify-email?token=" + event.verificationToken();
         Optional<EmailContent> content = transactionalEmailService.sendWelcomeEmail(
                 new WelcomeEmail(event.email().value(), event.accountId().value(), verificationUrl));

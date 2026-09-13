@@ -78,7 +78,7 @@ class NotificationDispatchServiceTest {
         service = new NotificationDispatchService(
                 new TransactionalEmailService(emailSenderPort, freemarkerConfig),
                 new NotificationRecordingSteps(notificationRepository, processedEventRepository),
-                new AppLinkProperties("http://localhost:8081", "http://localhost:5173"));
+                new AppLinkProperties("http://localhost:8080", "http://localhost:5173"));
     }
 
     @Test
@@ -161,9 +161,9 @@ class NotificationDispatchServiceTest {
         EmailMessage sent = captureSent();
         assertThat(sent.to()).isEqualTo("new-user@example.com");
         assertThat(sent.htmlBody())
-                .contains("http://localhost:8081/api/v1/auth/verify-email?token=test-verification-token");
+                .contains("http://localhost:8080/api/v1/auth/verify-email?token=test-verification-token");
         assertThat(sent.textBody())
-                .contains("http://localhost:8081/api/v1/auth/verify-email?token=test-verification-token");
+                .contains("http://localhost:8080/api/v1/auth/verify-email?token=test-verification-token");
 
         assertThat(captureSavedNotification().getRecipientId()).isEqualTo("acc-1");
     }

@@ -87,6 +87,13 @@ jwt:
     - /api/v1/auth/reset-password
     # Same: an account still awaiting verification cannot log in, so it has no token to send.
     - /api/v1/auth/resend-verification
+    # The target of the link in the verification email. The browser following it out of a mail
+    # client carries no token at all, and the account it activates cannot log in to obtain one.
+    # Method-scoped to GET, the only verb identity-service maps for it. Without this entry the
+    # gateway rejects every click 401 -- which only stayed hidden while the email pointed straight
+    # at identity-service's own port, bypassing the gateway. Production publishes the gateway
+    # alone, so the link now goes through here and this entry is what makes it resolvable.
+    - "GET:/api/v1/auth/verify-email"
     # Catalog browsing is public, but the ADMIN-only mutations live on these same paths
     # (POST /api/v1/matches, PUT /api/v1/matches/{id}/publish|cancel|complete). Scoping to GET
     # keeps those behind token validation AND behind PreAuthRateLimitingWebFilter's per-IP flood
