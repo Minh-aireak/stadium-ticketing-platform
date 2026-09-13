@@ -1,13 +1,16 @@
 package com.aireak.booking.adapter.in.web;
 
+import com.aireak.booking.application.port.in.CancelBookingUseCase;
 import com.aireak.booking.application.port.in.CreateBookingUseCase;
 import com.aireak.booking.application.port.in.GetBookingUseCase;
 import com.aireak.booking.application.port.in.ListBookingsUseCase;
 import com.aireak.booking.application.port.in.dto.BookingCreationResult;
+import com.aireak.booking.domain.exception.InvalidBookingStatusException;
 import com.aireak.booking.domain.model.Booking;
 import com.aireak.booking.domain.model.BookingAmount;
 import com.aireak.booking.domain.model.BookingStatus;
 import com.aireak.booking.domain.model.SeatSelection;
+import com.aireak.common.exception.IdentityMismatchException;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
@@ -42,6 +45,8 @@ import static org.mockito.Mockito.when;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -79,6 +84,9 @@ class BookingControllerJwtAuthenticationIntegrationTest {
 
     @MockitoBean
     private ListBookingsUseCase listBookingsUseCase;
+
+    @MockitoBean
+    private CancelBookingUseCase cancelBookingUseCase;
 
     @Test
     void rejectsRequestWithoutBearerToken() throws Exception {
@@ -294,6 +302,55 @@ class BookingControllerJwtAuthenticationIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated());
+    }
+
+    // ---- PUT /api/v1/bookings/{id}/cancel (FR-21) ----------------------------------------------
+
+    @Test
+    void rejectsCancelWithoutBearerToken() throws Exception {
+        mockMvc.perform(put("/api/v1/bookings/{id}/cancel", "booking-1"))
+                .andExpect(status().isUnauthorized());
+        verifyNoInteractions(cancelBookingUseCase);
+    }
+
+    @Test
+    void cancelPassesTheAuthenticatedCallerNotAnythingFromTheRequestAndReturnsTheBooking() throws Exception {
+        String accountId = UUID.randomUUID().toString();
+        Booking cancelled = Booking.reconstitute("booking-1", accountId, "owner@example.com", "showtime-1",
+                new SeatSelection(List.of("A1")), BookingAmount.of(new BigDecimal("50.00"), "USD"),
+                BookingStatus.CANCELLED, Instant.now(), null, 0L, false, false);
+        when(cancelBookingUseCase.cancelBooking("booking-1", accountId)).thenReturn(cancelled);
+
+        mockMvc.perform(put("/api/v1/bookings/{id}/cancel", "booking-1")
+                        .header("Authorization", "Bearer " + validToken(accountId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bookingId").value("booking-1"))
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+
+        verify(cancelBookingUseCase).cancelBooking("booking-1", accountId);
+    }
+
+    @Test
+    void cancelOfSomeoneElsesBookingIs403() throws Exception {
+        String caller = UUID.randomUUID().toString();
+        when(cancelBookingUseCase.cancelBooking("booking-1", caller))
+                .thenThrow(new IdentityMismatchException("Booking does not belong to the authenticated caller"));
+
+        mockMvc.perform(put("/api/v1/bookings/{id}/cancel", "booking-1")
+                        .header("Authorization", "Bearer " + validToken(caller)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void cancelOfAPaidBookingIs422NotA500() throws Exception {
+        String caller = UUID.randomUUID().toString();
+        when(cancelBookingUseCase.cancelBooking("booking-1", caller))
+                .thenThrow(new InvalidBookingStatusException("A paid booking cannot be cancelled by the customer"));
+
+        mockMvc.perform(put("/api/v1/bookings/{id}/cancel", "booking-1")
+                        .header("Authorization", "Bearer " + validToken(caller)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.detail").value("A paid booking cannot be cancelled by the customer"));
     }
 
     private String validToken(String subject) {

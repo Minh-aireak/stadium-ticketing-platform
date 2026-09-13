@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { useAuth } from '@/features/auth/AuthContext'
-import { listMyBookings } from '@/features/booking/bookingApi'
+import { cancelBooking, listMyBookings } from '@/features/booking/bookingApi'
 import type { BookingStatus, BookingSummary } from '@/features/booking/types'
 import { useToast } from '@/hooks/useToast'
 import { getErrorMessage } from '@/lib/errors'
@@ -34,6 +34,9 @@ export function AccountPage() {
   const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // The booking whose cancel request is in flight, so its button reads "Đang huỷ…" and cannot be
+  // clicked twice. One at a time is enough: a customer has at most a couple of unpaid bookings.
+  const [cancellingId, setCancellingId] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -60,6 +63,34 @@ export function AccountPage() {
       cancelled = true
     }
   }, [page, toast])
+
+  // FR-21. Only reachable for PENDING_PAYMENT (see the button below). The confirm() is the whole
+  // safeguard against a mis-click: booking-service releases the seats the moment it answers, and
+  // another customer can take them, so there is no undo. The list is patched in place from the
+  // response rather than refetched: the page the customer is on stays put, and the status badge
+  // flips right where they were looking.
+  async function handleCancel(booking: BookingSummary) {
+    const seats = booking.seatCodes.join(', ')
+    if (!window.confirm(`Huỷ đơn ghế ${seats}? Ghế sẽ được trả lại cho người khác và không thể hoàn tác.`)) {
+      return
+    }
+    setCancellingId(booking.bookingId)
+    try {
+      const updated = await cancelBooking(booking.bookingId)
+      setBookings((current) =>
+        current.map((b) => (b.bookingId === updated.bookingId ? { ...b, status: updated.status } : b)),
+      )
+      toast({ title: 'Đã huỷ đơn', description: `Ghế ${seats} đã được trả lại.` })
+    } catch (err: unknown) {
+      toast({
+        title: 'Không thể huỷ đơn',
+        description: getErrorMessage(err, 'Vui lòng tải lại trang và thử lại.'),
+        variant: 'error',
+      })
+    } finally {
+      setCancellingId(null)
+    }
+  }
 
   async function handleLogout() {
     try {
@@ -141,9 +172,21 @@ export function AccountPage() {
                           </div>
                         </div>
                       </div>
-                      <Badge variant={statusMeta[booking.status].variant}>
-                        {statusMeta[booking.status].label}
-                      </Badge>
+                      <div className="flex items-center gap-3">
+                        <Badge variant={statusMeta[booking.status].variant}>
+                          {statusMeta[booking.status].label}
+                        </Badge>
+                        {booking.status === 'PENDING_PAYMENT' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={cancellingId !== null}
+                            onClick={() => void handleCancel(booking)}
+                          >
+                            {cancellingId === booking.bookingId ? 'Đang huỷ…' : 'Huỷ đơn'}
+                          </Button>
+                        )}
+                      </div>
                     </CardContent>
                   </Card>
                 ))}

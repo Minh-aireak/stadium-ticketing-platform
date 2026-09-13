@@ -1,5 +1,6 @@
 package com.aireak.booking.adapter.in.web;
 
+import com.aireak.booking.application.port.in.CancelBookingUseCase;
 import com.aireak.booking.application.port.in.CreateBookingUseCase;
 import com.aireak.booking.application.port.in.GetBookingUseCase;
 import com.aireak.booking.application.port.in.ListBookingsUseCase;
@@ -56,6 +57,7 @@ public class BookingController {
     private final CreateBookingUseCase createBookingUseCase;
     private final GetBookingUseCase getBookingUseCase;
     private final ListBookingsUseCase listBookingsUseCase;
+    private final CancelBookingUseCase cancelBookingUseCase;
 
     @PostMapping
     public ResponseEntity<CreateBookingResponse> createBooking(
@@ -106,6 +108,24 @@ public class BookingController {
                             b.getAmount().amount(), b.getAmount().currency()));
                 })
                 .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    /**
+     * PUT /api/v1/bookings/{bookingId}/cancel — the customer gives up a booking they have not
+     * paid for (FR-21). PUT, like match-catalog's publish/cancel/complete: the target state is
+     * fixed and a repeat is a no-op, so the verb's idempotency promise actually holds — and it
+     * means nginx and the gateway may safely retry it, unlike the POST that creates a booking.
+     *
+     * <p>The ownership check lives in the use case (bookingId is enumerable); this method only
+     * says who is asking. Answers 200 with the booking as it now stands, 404 for an unknown id,
+     * 403 for someone else's booking, 422 when the booking is DRAFT or already CONFIRMED.
+     */
+    @PutMapping("/{bookingId}/cancel")
+    public ResponseEntity<BookingStatusResponse> cancelBooking(@PathVariable("bookingId") String bookingId) {
+        Booking booking = cancelBookingUseCase.cancelBooking(bookingId, currentUser().userId());
+        return ResponseEntity.ok(new BookingStatusResponse(
+                booking.getBookingId(), booking.getStatus().name(),
+                booking.getAmount().amount(), booking.getAmount().currency()));
     }
 
     /**

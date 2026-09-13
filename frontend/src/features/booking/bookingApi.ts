@@ -44,3 +44,12 @@ export async function listMyBookings(params: ListBookingsParams = {}): Promise<B
   const { data } = await api.get<BookingListResponse>('/bookings', { params })
   return data
 }
+
+// FR-21: the customer gives up a booking that has not been paid for. PUT because a repeat is a
+// no-op server-side (an already-CANCELLED booking is answered as-is), so a retried click cannot
+// do anything the first one did not. Only offered for PENDING_PAYMENT bookings; anything else is
+// refused by booking-service with a 422 the caller sees as a toast.
+export async function cancelBooking(bookingId: string): Promise<BookingStatusResponse> {
+  const { data } = await api.put<BookingStatusResponse>(`/bookings/${bookingId}/cancel`)
+  return data
+}

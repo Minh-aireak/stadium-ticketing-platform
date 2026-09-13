@@ -8,10 +8,13 @@ import com.aireak.booking.application.port.out.InventoryConfirmationRefusedExcep
 import com.aireak.booking.application.port.out.OutboundServiceUnavailableException;
 import com.aireak.booking.application.port.out.PaymentPort;
 import com.aireak.booking.application.port.out.TicketInventoryPort;
+import com.aireak.booking.domain.exception.InvalidBookingStatusException;
 import com.aireak.booking.domain.model.Booking;
 import com.aireak.booking.domain.model.BookingAmount;
 import com.aireak.booking.domain.model.BookingStatus;
 import com.aireak.booking.domain.model.SeatSelection;
+import com.aireak.common.exception.IdentityMismatchException;
+import com.aireak.common.exception.ResourceNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -610,6 +613,78 @@ class BookingOrchestrationServiceTest {
 
             verify(sagaSteps).markInventorySaleRefused(BOOKING_ID);
             verify(sagaSteps, never()).markInventoryConfirmed(anyString());
+        }
+    }
+
+    /**
+     * FR-21: the customer gives up an unpaid booking. Same shape as the payment-failure path
+     * (cancel step first, best-effort seat release after), but reached over HTTP by an
+     * enumerable id, so ownership and status gates are the point of these tests.
+     */
+    @Nested
+    class CancelBookingByCustomer {
+
+        @Test
+        void cancelsReleasesSeatsAndReturnsTheCancelledBookingWhenPendingPayment() {
+            when(bookingRepository.findById(BOOKING_ID)).thenReturn(Optional.of(pendingPaymentBooking(BOOKING_ID)));
+            when(sagaSteps.findOrThrow(BOOKING_ID)).thenReturn(cancelledBooking(BOOKING_ID));
+
+            Booking result = service.cancelBooking(BOOKING_ID, CUSTOMER_ID);
+
+            assertThat(result.getStatus()).isEqualTo(BookingStatus.CANCELLED);
+            verify(sagaSteps).cancelBooking(BOOKING_ID, BookingOrchestrationService.CUSTOMER_CANCELLATION_REASON);
+            verify(ticketInventoryPort).releaseSeats(SHOWTIME_ID, BOOKING_ID, SEAT_CODES);
+        }
+
+        @Test
+        void isIdempotentWhenAlreadyCancelled() {
+            when(bookingRepository.findById(BOOKING_ID)).thenReturn(Optional.of(cancelledBooking(BOOKING_ID)));
+
+            Booking result = service.cancelBooking(BOOKING_ID, CUSTOMER_ID);
+
+            assertThat(result.getStatus()).isEqualTo(BookingStatus.CANCELLED);
+            verify(sagaSteps, never()).cancelBooking(anyString(), anyString());
+            verify(ticketInventoryPort, never()).releaseSeats(anyString(), anyString(), any());
+        }
+
+        @Test
+        void refusesAPaidBookingSoSoldSeatsAreNeverReleasedAndNoRefundIsImplied() {
+            when(bookingRepository.findById(BOOKING_ID)).thenReturn(Optional.of(confirmedBooking(BOOKING_ID)));
+
+            assertThatThrownBy(() -> service.cancelBooking(BOOKING_ID, CUSTOMER_ID))
+                    .isInstanceOf(InvalidBookingStatusException.class)
+                    .hasMessageContaining("paid");
+            verify(sagaSteps, never()).cancelBooking(anyString(), anyString());
+            verify(ticketInventoryPort, never()).releaseSeats(anyString(), anyString(), any());
+        }
+
+        @Test
+        void refusesADraftBecauseTheCreationSagaStillOwnsIt() {
+            when(bookingRepository.findById(BOOKING_ID)).thenReturn(Optional.of(reconstituted(BOOKING_ID, BookingStatus.DRAFT)));
+
+            assertThatThrownBy(() -> service.cancelBooking(BOOKING_ID, CUSTOMER_ID))
+                    .isInstanceOf(InvalidBookingStatusException.class)
+                    .hasMessageContaining("still being created");
+            verify(sagaSteps, never()).cancelBooking(anyString(), anyString());
+        }
+
+        @Test
+        void refusesSomeoneElsesBookingBeforeTouchingAnything() {
+            when(bookingRepository.findById(BOOKING_ID)).thenReturn(Optional.of(pendingPaymentBooking(BOOKING_ID)));
+
+            assertThatThrownBy(() -> service.cancelBooking(BOOKING_ID, "another-customer"))
+                    .isInstanceOf(IdentityMismatchException.class);
+            verify(sagaSteps, never()).cancelBooking(anyString(), anyString());
+            verify(ticketInventoryPort, never()).releaseSeats(anyString(), anyString(), any());
+        }
+
+        @Test
+        void reportsAnUnknownBookingAsNotFound() {
+            when(bookingRepository.findById("missing")).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.cancelBooking("missing", CUSTOMER_ID))
+                    .isInstanceOf(ResourceNotFoundException.class);
+            verifyNoInteractions(sagaSteps, ticketInventoryPort);
         }
     }
 

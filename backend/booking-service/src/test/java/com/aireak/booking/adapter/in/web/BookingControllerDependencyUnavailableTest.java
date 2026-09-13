@@ -1,5 +1,6 @@
 package com.aireak.booking.adapter.in.web;
 
+import com.aireak.booking.application.port.in.CancelBookingUseCase;
 import com.aireak.booking.application.port.in.CreateBookingUseCase;
 import com.aireak.booking.application.port.in.GetBookingUseCase;
 import com.aireak.booking.application.port.in.ListBookingsUseCase;
@@ -48,7 +49,8 @@ class BookingControllerDependencyUnavailableTest {
 
     private final MockMvc mockMvc = MockMvcBuilders
             .standaloneSetup(new BookingController(createBooking,
-                    mock(GetBookingUseCase.class), mock(ListBookingsUseCase.class)))
+                    mock(GetBookingUseCase.class), mock(ListBookingsUseCase.class),
+                    mock(CancelBookingUseCase.class)))
             .setControllerAdvice(new GlobalExceptionHandler())
             .build();
 

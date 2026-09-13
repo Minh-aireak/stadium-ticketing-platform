@@ -2,7 +2,7 @@ import axios from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 import { api, registerSessionExpiredHandler, setAccessToken } from '@/lib/api'
-import { createBooking, getBooking } from './bookingApi'
+import { cancelBooking, createBooking, getBooking } from './bookingApi'
 import type { CreateBookingRequest } from './types'
 
 const payload: CreateBookingRequest = {
@@ -90,5 +90,23 @@ describe('getBooking', () => {
     expect(booking.status).toBe('CONFIRMED')
     expect(booking.amount).toBe(400000)
     expect(booking.currency).toBe('VND')
+  })
+})
+
+describe('cancelBooking', () => {
+  /**
+   * FR-21 goes over PUT, not DELETE: the booking row stays (CANCELLED is a state the customer
+   * can still read on the account page), and the verb's idempotency is real — booking-service
+   * answers a second cancel of the same booking exactly like the first.
+   */
+  it('puts to the cancel action and returns the booking as it now stands', async () => {
+    const put = vi.spyOn(api, 'put').mockResolvedValue({
+      data: { bookingId: 'b-1', status: 'CANCELLED', amount: 400000, currency: 'VND' },
+    })
+
+    const booking = await cancelBooking('b-1')
+
+    expect(put).toHaveBeenCalledWith('/bookings/b-1/cancel')
+    expect(booking.status).toBe('CANCELLED')
   })
 })
