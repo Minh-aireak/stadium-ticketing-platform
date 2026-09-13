@@ -9,6 +9,33 @@ halfway. Seats are held under a distributed lock, payment runs as a saga with co
 every cross-service event goes out through a transactional outbox read by Debezium — so a broker
 hiccup between "money taken" and "booking confirmed" cannot lose the event.
 
+```mermaid
+flowchart TB
+    fe["React storefront · :5173"] --> gw["api-gateway · :8080<br/>JWT validation, rate limits"]
+    gw --> idn & clb & ilb & bk & pay & ntf
+    subgraph svc["Spring Boot services — one Postgres database each"]
+        idn["identity"]
+        clb{{"catalog-lb"}} --> cat["match-catalog ×2"]
+        ilb{{"ticket-inventory-lb"}} --> inv["ticket-inventory ×2"]
+        bk["booking"]
+        pay["payment"]
+        ntf["notification"]
+    end
+    bk -. "REST: reserve / release / confirm" .-> ilb
+    bk -. "REST: charge" .-> pay
+    inv -. "REST: showtime lookup" .-> clb
+    svc -- "outbox_events → Debezium CDC" --> kafka[["Kafka"]]
+    kafka --> svc
+    svc --> redis[("Redis<br/>seat locks & holds, idempotency keys,<br/>live seat counters, login throttling")]
+    cat --> es[("Elasticsearch<br/>match search")]
+    pay --> stripe(["Stripe"])
+    ntf --> brevo(["Brevo"])
+```
+
+Solid arrows are what a request touches; dotted ones are the service-to-service calls inside the
+booking saga. Everything else between services is an event — see *Who produces and consumes what*
+under *Architecture notes*.
+
 ---
 
 ## Stack
@@ -62,6 +89,9 @@ reasons.
 | Redisson seat lock | A JVM-local lock and a Redis-backed one behave identically until a second process competes for the same seat. |
 | ShedLock on the reconcilers and outbox cleanup | The `shedlock` row only ever has one claimant, so the guard never has to reject anyone. |
 | Kafka consumer-group rebalancing | A group of one is never rebalanced. |
+
+`scripts/load-test/seat-lock-contention.ps1` is the test that needs both instances up — see
+*Load and contention tests* under *Tests and CI*.
 
 **match-catalog-service** — nothing here is unsafe across instances; what a second one exposes is
 the price of its local cache tier. `CachingMatchRepository.save()` invalidates Redis and the
@@ -132,6 +162,38 @@ branch where the two disagree rebuilds the counter from the committed row.
 **Idempotency everywhere a retry can reach.** Redis-backed idempotency keys on booking and payment
 initiation; a `processed_events` table in notification-service; consumers assume redelivery.
 
+**Who produces and consumes what.** Topic names live in `common`'s `KafkaTopics`; each service's
+`OutboxEventPublisher` maps its own domain events onto them, and every consumer below is a
+`@KafkaListener` in that service's `adapter/in/messaging`.
+
+| Topic | Produced by | Consumed by |
+|---|---|---|
+| `identity.account.registered` | identity | notification — verification email |
+| `identity.account.activated` | identity | notification — activation-confirmed email |
+| `identity.account.password-reset-requested` | identity | notification — reset-link email |
+| `catalog.match.published` | match-catalog | match-catalog — re-reads the match and writes the Elasticsearch document |
+| `catalog.match.cancelled` | match-catalog | match-catalog — search index; ticket-inventory — marks the showtimes unbookable; booking — cancels every active booking and requests refunds for the paid ones |
+| `catalog.match.completed` | match-catalog | match-catalog — search index; ticket-inventory — marks the showtimes unbookable |
+| `catalog.showtime.created` | match-catalog | ticket-inventory — generates the seat map for the stadium |
+| `inventory.seats.reserved` | ticket-inventory | *(nobody yet — audit trail)* |
+| `inventory.seats.released` | ticket-inventory | *(nobody yet — audit trail)* |
+| `inventory.seats.sold` | ticket-inventory | match-catalog — decrements the live seat counter |
+| `booking.booking.created` | booking | notification |
+| `booking.booking.confirmed` | booking | notification — ticket confirmation email |
+| `booking.booking.cancelled` | booking | notification |
+| `booking.refund.requested` | booking | payment — refunds the Stripe charge |
+| `payment.payment.initiated` | payment | *(nobody yet — audit trail)* |
+| `payment.payment.succeeded` | payment | booking — drives the saga to CONFIRMED; notification — receipt email |
+| `payment.payment.failed` | payment | booking — compensates: cancels the booking, releases the seats |
+| `payment.payment.refunded` | payment | notification — refund email |
+
+Two things the table makes visible. The catalog consumes its own lifecycle events: the
+Elasticsearch document is written by a consumer that re-reads Postgres, never by the request that
+published the match, so a stale event payload cannot put a stale document in the index. And
+`catalog.match.cancelled` fans out to three services, which is why a cancellation costs one
+transaction in the catalog and nothing else — each downstream reaction is that service's own
+problem, retried and dead-lettered independently.
+
 **Events that exhaust retries go to `<topic>-dlt`** and a dead-letter consumer logs one line
 naming the topic, the offset and the exception that caused it — at ERROR behind an `ALERT:`
 prefix, except ticket-inventory-service's bookability-cache consumer, which logs at WARN because
@@ -139,6 +201,36 @@ a stale cache costs a round trip rather than a booking. A `-dlt` topic belongs t
 a service, so where two services consume the same topic each consumer reports only the failures
 of its own consumer group and skips the other's. Nothing replays them automatically — a poison
 pill would replay identically forever.
+
+---
+
+## API
+
+There is no OpenAPI document — the contract is the controllers under each service's
+`adapter/in/web`, and the gateway's `application.yaml` decides which paths need a token. Every
+path below is relative to the gateway (`http://localhost:8080`), which routes on the first
+segment after `/api/v1/`. Responses are JSON; errors are RFC 7807 problem details.
+
+| Endpoint | Who | What |
+|---|---|---|
+| `POST /api/v1/auth/register` · `/login` · `/refresh` · `/logout` | public | Refresh tokens rotate on every use; presenting an already-rotated one is reuse and revokes the session. |
+| `GET /api/v1/auth/verify-email?token=…` · `POST …/resend-verification` | public | The link the verification email carries lands here, on the gateway. |
+| `POST /api/v1/auth/forgot-password` · `/reset-password` | public | |
+| `GET /api/v1/matches` · `/matches/{id}` · `/matches/stadiums` | public | Browse and search (`q`, paging) — served from Elasticsearch, with `availableSeats` overlaid from the live Redis counter. |
+| `POST /api/v1/matches` · `POST /matches/{id}/showtimes` · `PUT /matches/{id}/publish` · `/cancel` · `/complete` | ADMIN | The match lifecycle. A showtime names one of the three built-in stadiums (`StadiumCatalog`); its seat map is generated by ticket-inventory-service off the resulting event. |
+| `GET /api/v1/inventory/{showtimeId}/layout` · `/seats` | customer | Seat map with live holds; each HELD seat says whether the hold is the caller's own. |
+| `POST` / `DELETE /api/v1/inventory/{showtimeId}/hold` | customer | A pre-booking hold placed the moment a seat is clicked, TTL 10 minutes, owned by the customer. |
+| `POST /api/v1/inventory/{showtimeId}/reserve` · `DELETE …/reserve/{bookingId}` · `POST …/confirm` | booking-service | Saga steps. `reserve` turns the customer's hold into the booking's and returns the server-computed price; `confirm` accepts only an internal-service token, since no genuine post-payment confirmation ever carries a customer's JWT. |
+| `POST /api/v1/bookings` | customer | Runs the saga on the request thread: draft → reserve → PENDING_PAYMENT → charge → `booking.booking.created`. Send an `Idempotency-Key` header; a retry with the same key gets the same booking. |
+| `GET /api/v1/bookings` · `/bookings/{id}` · `PUT /bookings/{id}/cancel` | customer | Own bookings only. Cancel is accepted only from PENDING_PAYMENT — a CONFIRMED booking involves money the customer cannot yet refund alone. |
+| `POST /api/v1/payments` · `POST /payments/{paymentId}/retry` · `GET /payments/{bookingId}` | customer | The charge is always the amount booking-service computed from the seat tiers; the request's own `amount` is checked against it, never trusted. |
+| `POST /api/v1/payments/webhook` | Stripe | Signature-verified. The async backstop for the synchronous charge — e.g. the process dying between Stripe answering and the outcome being persisted. |
+| `GET /api/v1/notifications` · `PATCH /notifications/{id}/read` | customer | The in-app feed notification-service keeps alongside the emails it sends. |
+
+"customer" means any valid access token; the gateway forwards identity as headers it sets itself,
+after stripping any the client sent. `GET /api/v1/showtimes/{id}` also exists on the catalog but
+is not routed by the gateway — it is the lookup ticket-inventory-service makes when it needs to
+know whether a showtime is still bookable.
 
 ---
 
@@ -189,6 +281,53 @@ Once the stack is healthy:
 Services declare healthchecks against `/actuator/health`, and dependants wait on
 `condition: service_healthy` — so `docker compose up` finishing means the platform is actually
 ready to serve, not merely that containers launched.
+
+### Your first booking
+
+The stack comes up empty: there is no seed data, and only an ADMIN can create a match. So before
+`docker compose up`, set two more values in `.env`:
+
+```
+ADMIN_BOOTSTRAP_EMAIL=admin@example.com
+ADMIN_BOOTSTRAP_PASSWORD=<something long>
+```
+
+`AdminBootstrapRunner` in identity-service creates that account on startup — already ACTIVE, with
+the ADMIN role — and does nothing on later starts once any ADMIN exists. If the address is already
+registered as a customer, that account is promoted instead. Then:
+
+1. **Publish a match.** Sign in as the admin at http://localhost:5173/login and open
+   http://localhost:5173/admin. Create a match, add a showtime — one of the three built-in
+   stadiums, a kickoff in the future, a base price — and publish it. That emits
+   `catalog.match.published` and `catalog.showtime.created`: the match shows up on the home page
+   once the catalog's own consumer has indexed it, and ticket-inventory-service has generated its
+   seat map by the time you open it.
+2. **Register a customer.** Sign out and register with an address you can read mail at. The
+   verification email goes out through Brevo and its link points at the gateway
+   (`PUBLIC_API_BASE_URL`), so it works from another device too. Until the link is clicked, login
+   answers 401. The admin account can book as well and is already ACTIVE — the shortcut when Brevo
+   is not set up yet.
+3. **Pick seats.** Open the match, then the seat map. Clicking a seat places a 10-minute hold under
+   your account (`POST /api/v1/inventory/{showtimeId}/hold`); open the same showtime in a second
+   browser and the seat shows as held by someone else.
+4. **Check out.** `POST /api/v1/bookings` runs the saga inside the request: the hold becomes the
+   booking's reservation, ticket-inventory-service reports the price, and payment-service confirms
+   a Stripe PaymentIntent server-side with the test payment method `pm_card_visa` — there is no
+   card form, this is test mode. The status page polls the booking and the payment until one of
+   them is terminal.
+5. **Watch it land.** The confirmation email arrives; the match's `availableSeats` on the home
+   page has dropped (`inventory.seats.sold` → the live counter); Kibana shows the whole request
+   under one `correlationId`; Grafana's Kafka dashboard shows the offsets moving.
+
+The Stripe CLI's `stripe listen --forward-to localhost:8080/api/v1/payments/webhook` is where
+`STRIPE_WEBHOOK_SECRET` comes from, and while it runs it delivers `payment_intent.*` events to the
+webhook. The happy path above does not need it — success is decided from Stripe's synchronous
+answer — but the webhook is the backstop that reconciles a payment when the process dies between
+charging and persisting, and that path is only exercised with the listener running.
+
+To watch the saga compensate, cancel the match from the admin page: every active booking on it is
+cancelled, and the paid ones are refunded through `booking.refund.requested` — a refund email per
+booking is the visible result.
 
 ### Metrics
 
@@ -328,6 +467,22 @@ npm run build   # tsc -b && vite build
    above covers backend services only, so without this `frontend/Dockerfile` and
    `frontend/nginx.conf` could break with CI still green — `npm run build` exercises neither.
 
+### Load and contention tests
+
+`scripts/load-test/` holds three PowerShell scripts, each aimed at a claim the unit and integration
+tests cannot make on their own. They run against the Compose stack and go straight at the service
+or load-balancer ports, bypassing the gateway's rate limits so the only limit in the path is the one
+under test.
+
+| Script | Proves | Needs |
+|---|---|---|
+| `seat-lock-contention.ps1` | The Redisson lock serialises across **both** inventory instances: N simultaneous `/reserve` calls for one seat, each under its own bookingId, produce exactly one 200 and N−1 422s — and the `X-Upstream` breakdown must show both instances took part, or the run proves nothing about distribution. | an ACTIVE customer account (`CONTENTION_TEST_EMAIL` / `_PASSWORD`) and a showtime id |
+| `ramp-test.ps1` | Where catalog browsing saturates. Runs `wrk` (in a container on the Compose network) at rising concurrency against `catalog-lb`. Read `OkReqSec`, not `ReqSec`: the catalog sheds above 600 req/s per instance, so the plateau at ~1200 is the limiter, and everything above it measures how cheaply the service rejects. | Docker only |
+| `elk-log-test.ps1` | The log pipeline captures what the services log. ~1000 requests across eight scenarios that are indistinguishable by status code — four different 401s from login alone — and distinguishable only in Kibana, each run tagged with a `correlationId` prefix to filter on. | Docker only; one optional ACTIVE account for the bad-password scenario |
+
+Each script's header comment explains what its numbers mean and what a false pass looked like
+before it was fixed.
+
 ---
 
 ## Repository layout
@@ -353,9 +508,17 @@ infra/
   kafka-connect/              connector registration script
   nginx/                      load balancers for the two replicated services
   postgres-exporter/          multi-target probe credentials (template only)
+scripts/
+  load-test/                  contention, ramp and log-pipeline scripts against the running stack
 docker-compose.yaml           the whole platform
 .env.example                  documented environment contract
 ```
 
 Each service owns its schema under `src/main/resources/db/migration/`; Flyway runs before
 Hibernate validation on startup.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
