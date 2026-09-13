@@ -768,7 +768,11 @@ services:
       - ./infra/nginx/catalog-lb.conf:/etc/nginx/conf.d/default.conf:ro
     healthcheck:
       # nginx:alpine has BusyBox wget but no curl, unlike the service images.
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8082/nginx-health"]
+      # 127.0.0.1, not localhost: BusyBox's resolver answers localhost as ::1 first, while
+      # catalog-lb.conf declares `listen 8082` (IPv4 only), so the probe was refused on every
+      # run while nginx was serving normally. An unhealthy LB is not cosmetic -- api-gateway and
+      # booking-service wait on it with condition: service_healthy and never start.
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8082/nginx-health"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -823,7 +827,9 @@ services:
       - ./infra/nginx/ticket-inventory-lb.conf:/etc/nginx/conf.d/default.conf:ro
     healthcheck:
       # nginx:alpine has BusyBox wget but no curl, unlike the service images.
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8083/nginx-health"]
+      # 127.0.0.1 for the same reason as catalog-lb: BusyBox resolves localhost to ::1 and this
+      # LB listens on IPv4 only, so the probe never reached the nginx that was answering fine.
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8083/nginx-health"]
       interval: 15s
       timeout: 5s
       retries: 5
