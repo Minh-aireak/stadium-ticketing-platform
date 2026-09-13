@@ -22,9 +22,15 @@ public interface SeatHoldPort {
     /**
      * Attempts to place a hold on every given seat, all-or-nothing.
      *
+     * <p>A seat this same owner already holds counts as placed rather than as a conflict, so a
+     * retried request (a double-click, or a client that timed out and retried one the server
+     * actually completed) succeeds instead of reporting the caller's own seats as taken. Only a
+     * hold belonging to a <em>different</em> owner fails the call.
+     *
      * @throws com.aireak.inventory.domain.exception.SeatsNotAvailableException
-     *         if any seat already has an active hold (any previously-placed
-     *         holds from this call are rolled back before the exception propagates)
+     *         if any seat already has an active hold owned by someone else. Only the holds this
+     *         call itself placed are rolled back before the exception propagates — a seat the
+     *         owner already held predates the call and must survive it.
      */
     void holdSeats(String showtimeId, List<SeatCode> seatCodes, String bookingId);
 
@@ -36,11 +42,17 @@ public interface SeatHoldPort {
      * standalone hold endpoint at seat-selection time) into a booking-owned hold, all-or-nothing.
      * For each seat: if it's currently held by {@code previousOwnerId}, hands it over to
      * {@code newOwnerId} (fresh TTL); otherwise (never pre-held, or the pre-hold already expired)
-     * falls back to placing a brand-new hold, same as {@link #holdSeats}. Any seat held by a
-     * different owner fails the whole call — same rollback semantics as {@link #holdSeats}.
+     * falls back to placing a brand-new hold, same as {@link #holdSeats}.
+     *
+     * <p>A seat already confirmed into <em>this same</em> {@code newOwnerId} counts as placed and
+     * does not fail the call. booking-service calls reserveSeats under {@code @Retry}, so a read
+     * timeout on a request the server actually completed re-enters here; treating that replay as a
+     * conflict used to cancel a booking whose seats were correctly held. Only a hold belonging to
+     * some other owner fails the whole call — same rollback semantics as {@link #holdSeats}.
      *
      * @throws com.aireak.inventory.domain.exception.SeatsNotAvailableException
-     *         if any seat is currently held by an owner other than {@code previousOwnerId}
+     *         if any seat is currently held by an owner that is neither {@code previousOwnerId}
+     *         nor this call's own {@code newOwnerId}
      */
     void confirmHold(String showtimeId, List<SeatCode> seatCodes, String previousOwnerId, String newOwnerId);
 
