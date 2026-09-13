@@ -1,12 +1,14 @@
 import axios, { type InternalAxiosRequestConfig } from 'axios'
 
 import { getCookie } from '@/lib/cookies'
+import { resolveApiBaseUrl } from '@/lib/runtime-config'
 import { randomUuid } from '@/lib/uuid'
 
 // Gateway is the single origin the browser talks to; it routes /api/v1/{auth,matches,
 // inventory,payments,notifications,bookings}/** to the right downstream service.
-export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080/api/v1'
+// Resolved once at module load, after /config.js has run — see runtime-config.ts for why the
+// origin is no longer read straight off import.meta.env.
+export const API_BASE_URL = resolveApiBaseUrl()
 
 // Access token lives in memory only (never localStorage/sessionStorage) — mirrors the
 // backend's security model, where the refresh token is an HttpOnly cookie specifically

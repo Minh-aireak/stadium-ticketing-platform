@@ -1017,11 +1017,14 @@ services:
   frontend:
     build:
       context: ./frontend
-      args:
-        # Baked into the JS bundle at build time — must be reachable from the browser
-        # (host-mapped api-gateway port), not api-gateway's container DNS name.
-        VITE_API_BASE_URL: http://localhost:8080/api/v1
     container_name: frontend_stadium_booking
+    environment:
+      # Written into /config.js at container start (frontend/docker-entrypoint.d) and read by the
+      # bundle before it boots, so pointing the storefront at a domain is a restart rather than a
+      # rebuild — it used to be a build arg vite compiled in, where a changed .env did nothing
+      # until the image was rebuilt. Must be reachable from the user's browser: api-gateway's
+      # public origin, not its container DNS name.
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:8080/api/v1}
     networks: [stadium-net]
     depends_on:
       - api-gateway

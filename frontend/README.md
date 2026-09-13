@@ -26,9 +26,12 @@ while the compose stack is up puts vite on 5174 and the gateway will reject its 
 
 ## How it talks to the backend
 
-`VITE_API_BASE_URL` is the one variable, and vite inlines it into the bundle at build time — so
-it must be an address the *browser* can reach, not a Docker service name. `src/lib/api.ts` holds
-the single axios instance: the access token lives in memory only, the refresh token is an
+The API origin is the one variable, and it must be an address the *browser* can reach, not a
+Docker service name. It is resolved at start-up rather than compiled in: the container writes
+`/config.js` from `API_BASE_URL` (see `docker-entrypoint.d/40-app-config.sh`), `index.html` loads
+that ahead of the bundle, and `src/lib/runtime-config.ts` prefers it over the `VITE_API_BASE_URL`
+vite inlined at build time. So a deployed storefront moves to a new domain on a restart, while
+`npm run dev` still just reads `.env.local`. `src/lib/api.ts` holds the single axios instance: the access token lives in memory only, the refresh token is an
 HttpOnly cookie the browser sends on its own, and every request carries a UUID v4
 `X-Correlation-Id` so a failure can be quoted back to the backend logs.
 

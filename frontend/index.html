@@ -11,6 +11,10 @@
       rel="stylesheet"
     />
     <title>StadiumGo — Đặt vé sân vận động</title>
+    <!-- Rewritten from the container's environment at start-up, so the API origin belongs to the
+         deployment rather than to the image. A classic script executes immediately while the
+         module below is deferred, which is what guarantees it has run before the bundle reads it. -->
+    <script src="/config.js"></script>
   </head>
   <body>
     <div id="root"></div>
