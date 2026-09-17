@@ -5,6 +5,9 @@ import com.aireak.common.security.AuthenticatedUserContext;
 import com.aireak.payment.application.port.in.GetPaymentUseCase;
 import com.aireak.payment.application.port.in.InitiatePaymentUseCase;
 import com.aireak.payment.application.port.in.RetryPaymentUseCase;
+import com.aireak.payment.application.port.in.SyncPaymentUseCase;
+import com.aireak.payment.config.PaymentModeProperties;
+import com.aireak.payment.domain.model.PaymentStatus;
 import com.aireak.payment.application.port.in.command.InitiatePaymentCommand;
 import com.aireak.payment.application.port.out.BookingOwnershipPort;
 import com.aireak.payment.domain.exception.DuplicatePaymentException;
@@ -25,6 +28,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 
 /** Inbound REST adapter: payment initiation and status lookup endpoints. */
 @RestController
@@ -35,7 +39,9 @@ public class PaymentController {
     private final InitiatePaymentUseCase initiatePaymentUseCase;
     private final GetPaymentUseCase getPaymentUseCase;
     private final RetryPaymentUseCase retryPaymentUseCase;
+    private final SyncPaymentUseCase syncPaymentUseCase;
     private final BookingOwnershipPort bookingOwnershipPort;
+    private final PaymentModeProperties paymentMode;
 
     /**
      * POST /api/v1/payments — starts the charge for a booking.
@@ -111,10 +117,38 @@ public class PaymentController {
     public ResponseEntity<PaymentStatusResponse> getByBookingId(@PathVariable("bookingId") String bookingId) {
         enforceBookingOwnership(bookingId);
         return getPaymentUseCase.getByBookingId(bookingId)
-                .map(p -> ResponseEntity.ok(new PaymentStatusResponse(
-                        p.getPaymentId(), p.getBookingId(), p.getStatus().name(),
-                        p.getGatewayTransactionId(), p.getFailureReason())))
+                .map(p -> ResponseEntity.ok(toResponse(p)))
                 .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    /**
+     * POST /api/v1/payments/{bookingId}/sync — card mode: the storefront has just watched Stripe.js
+     * confirm the intent and asks this side to go and read the outcome from the gateway. The
+     * request body carries nothing and the browser's opinion is not consulted; the answer is
+     * whatever the gateway says now, recorded through the same steps a webhook would use. Safe to
+     * repeat, and a no-op for anything that is not an open card payment.
+     */
+    @PostMapping("/{bookingId}/sync")
+    public ResponseEntity<PaymentStatusResponse> sync(@PathVariable("bookingId") String bookingId) {
+        enforceBookingOwnership(bookingId);
+        return syncPaymentUseCase.syncWithGateway(bookingId)
+                .map(p -> ResponseEntity.ok(toResponse(p)))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    /**
+     * The client secret and the deadline travel only while there is something for the customer to
+     * do with them: an INITIATED card-mode payment. Ownership was enforced by the caller, so the
+     * secret reaches the one browser entitled to confirm the intent and nobody else -- an
+     * internal-service caller (booking-service's reconciliation) gets it too, and does nothing with it.
+     */
+    private PaymentStatusResponse toResponse(Payment p) {
+        boolean awaitingCustomer = p.isCardMode() && p.getStatus() == PaymentStatus.INITIATED;
+        return new PaymentStatusResponse(
+                p.getPaymentId(), p.getBookingId(), p.getStatus().name(),
+                p.getGatewayTransactionId(), p.getFailureReason(),
+                awaitingCustomer ? p.getClientSecret() : null,
+                awaitingCustomer ? p.getCreatedAt().plus(paymentMode.window()) : null);
     }
 
     /**
@@ -172,11 +206,18 @@ public class PaymentController {
 
     record InitiatePaymentResponse(String paymentId) {}
 
+    /**
+     * @param clientSecret card mode, while INITIATED: what Stripe.js needs to confirm the intent
+     * @param expiresAt    card mode, while INITIATED: when the payment window closes and the seats
+     *                     go back on sale (see PaymentWindowExpiryJob); the storefront's countdown
+     */
     record PaymentStatusResponse(
             String paymentId,
             String bookingId,
             String status,
             String gatewayTransactionId,
-            String failureReason
+            String failureReason,
+            String clientSecret,
+            Instant expiresAt
     ) {}
 }

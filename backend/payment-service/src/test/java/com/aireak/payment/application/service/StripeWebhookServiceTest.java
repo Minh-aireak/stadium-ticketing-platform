@@ -136,4 +136,43 @@ class StripeWebhookServiceTest {
         verify(paymentRepository, never()).findByBookingId(anyString());
         verify(processedWebhookEventRepository).markProcessed("evt-3", "payment_intent.created");
     }
+
+    // ---- card mode ----
+
+    private Payment openCardPayment(String paymentId) {
+        return Payment.reconstitute(paymentId, "booking-1", "buyer@example.com", new BigDecimal("100.00"), "USD",
+                PaymentStatus.INITIATED, null, null, Instant.now(), 0, 0L, "pi-1", "pi-1_secret");
+    }
+
+    /**
+     * Stripe fires payment_failed for every declined attempt while the intent stays open for
+     * another card. Failing the payment here would cancel the booking under a customer still at
+     * the form; only the window closing may do that.
+     */
+    @Test
+    void cardModeDeclinedAttemptIsNotedNotFailed() {
+        newService();
+        when(processedWebhookEventRepository.existsByEventId("evt-1")).thenReturn(false);
+        when(paymentRepository.findByBookingId("booking-1")).thenReturn(Optional.of(openCardPayment("payment-1")));
+
+        service.handle(new StripeWebhookEventCommand(
+                "evt-1", "payment_intent.payment_failed", "booking-1", "pi-1", "Your card was declined."));
+
+        verify(sagaSteps).noteAttemptFailure("payment-1", "Your card was declined.");
+        verify(sagaSteps, never()).markFailed(anyString(), anyString());
+        verify(processedWebhookEventRepository).markProcessed("evt-1", "payment_intent.payment_failed");
+    }
+
+    @Test
+    void cardModeSuccessGoesThroughTheSameStepAsAutoMode() {
+        newService();
+        when(processedWebhookEventRepository.existsByEventId("evt-2")).thenReturn(false);
+        when(paymentRepository.findByBookingId("booking-1")).thenReturn(Optional.of(openCardPayment("payment-1")));
+
+        service.handle(new StripeWebhookEventCommand(
+                "evt-2", "payment_intent.succeeded", "booking-1", "pi-1", null));
+
+        verify(sagaSteps).markSucceeded("payment-1", "pi-1");
+        verify(sagaSteps, never()).noteAttemptFailure(anyString(), anyString());
+    }
 }

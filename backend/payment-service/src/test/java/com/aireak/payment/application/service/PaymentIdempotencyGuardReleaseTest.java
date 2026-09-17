@@ -2,6 +2,7 @@ package com.aireak.payment.application.service;
 
 import com.aireak.payment.adapter.out.idempotency.RedissonPaymentIdempotencyAdapter;
 import com.aireak.payment.application.port.in.command.InitiatePaymentCommand;
+import com.aireak.payment.config.PaymentModeProperties;
 import com.aireak.payment.application.port.out.PaymentGatewayPort;
 import com.aireak.payment.application.port.out.PaymentReconciliationPort;
 import com.aireak.payment.application.port.out.PaymentRepository;
@@ -49,6 +50,9 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class PaymentIdempotencyGuardReleaseTest {
 
+    private static final PaymentModeProperties AUTO_MODE =
+            new PaymentModeProperties(PaymentModeProperties.Mode.AUTO, null);
+
     @Container
     static final GenericContainer<?> REDIS = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
             .withExposedPorts(6379);
@@ -79,7 +83,7 @@ class PaymentIdempotencyGuardReleaseTest {
     // A separate service instance per attempt — see the class javadoc for why that matters.
     private PaymentService attempt() {
         return new PaymentService(sagaSteps, paymentRepository, paymentGatewayPort,
-                new RedissonPaymentIdempotencyAdapter(redissonClient), reconciliationPort);
+                new RedissonPaymentIdempotencyAdapter(redissonClient), reconciliationPort, AUTO_MODE);
     }
 
     // Distinct per test: the container is static, so the guard Redis holds outlives each test.

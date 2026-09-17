@@ -30,6 +30,21 @@ class PaymentSagaSteps {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void attachIntent(String paymentId, String gatewayIntentId, String clientSecret) {
+        Payment payment = findOrThrow(paymentId);
+        payment.attachIntent(gatewayIntentId, clientSecret);
+        paymentRepository.save(payment);
+    }
+
+    // No event: the payment is still INITIATED (see Payment#noteAttemptFailure).
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void noteAttemptFailure(String paymentId, String reason) {
+        Payment payment = findOrThrow(paymentId);
+        payment.noteAttemptFailure(reason);
+        paymentRepository.save(payment);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markSucceeded(String paymentId, String gatewayTransactionId) {
         Payment payment = findOrThrow(paymentId);
         payment.markSucceeded(gatewayTransactionId);

@@ -884,6 +884,13 @@ services:
       JWT_AUDIENCE: ${JWT_AUDIENCE}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      # card: the customer types a card into the storefront (Stripe.js) and confirms the charge
+      # there; the outcome reaches this service by webhook or by the storefront's /sync call, and
+      # PaymentWindowExpiryJob cancels what nobody confirmed. auto: the old shortcut -- this
+      # service confirms with pm_card_visa itself, for scripts and load tests with no browser.
+      PAYMENT_MODE: ${PAYMENT_MODE:-card}
+      # Must close before ticket-inventory's reservation TTL (INVENTORY_HOLD_TTL_MINUTES, 10).
+      PAYMENT_WINDOW_MINUTES: ${PAYMENT_WINDOW_MINUTES:-8}
 
   # ---- notification-service (Kafka consumer, transactional email) -----
   notification-service:
@@ -1025,6 +1032,9 @@ services:
       # until the image was rebuilt. Must be reachable from the user's browser: api-gateway's
       # public origin, not its container DNS name.
       API_BASE_URL: ${API_BASE_URL:-http://localhost:8080/api/v1}
+      # Same mechanism, same reason. A publishable key is meant for browsers; without one the
+      # payment page says card payments are not configured rather than showing an empty form.
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
     networks: [stadium-net]
     depends_on:
       - api-gateway

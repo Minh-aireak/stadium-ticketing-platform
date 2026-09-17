@@ -6,6 +6,7 @@ import com.aireak.payment.application.port.out.PaymentRepository;
 import com.aireak.payment.application.port.out.ProcessedWebhookEventRepository;
 import com.aireak.payment.domain.exception.InvalidPaymentStatusException;
 import com.aireak.payment.domain.model.Payment;
+import com.aireak.payment.domain.model.PaymentStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -58,6 +59,17 @@ public class StripeWebhookService implements HandleStripeWebhookEventUseCase {
         }
         String paymentId = payment.get().getPaymentId();
         boolean wasAmbiguousFailure = payment.get().isAmbiguousFailure();
+        // Card mode: a declined attempt leaves the intent open for another card, so Stripe's
+        // payment_failed is news about one attempt, not about the payment. Failing the payment here
+        // would cancel the booking and release the seats under a customer still at the form; the
+        // window closing (PaymentWindowExpiryJob) is what ends a card payment that never succeeds.
+        if (outcome == Reconciliation.FAILED && payment.get().isCardMode()
+                && payment.get().getStatus() == PaymentStatus.INITIATED) {
+            sagaSteps.noteAttemptFailure(paymentId, command.failureMessage());
+            log.info("Card payment attempt declined, intent stays open: paymentId={}, bookingId={}, reason={}",
+                    paymentId, command.bookingId(), command.failureMessage());
+            return;
+        }
         try {
             switch (outcome) {
                 case SUCCEEDED -> sagaSteps.markSucceeded(paymentId, command.paymentIntentId());

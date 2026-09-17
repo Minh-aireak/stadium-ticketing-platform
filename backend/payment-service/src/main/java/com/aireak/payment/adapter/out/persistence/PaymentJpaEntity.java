@@ -51,6 +51,14 @@ public class PaymentJpaEntity extends BaseAuditEntity {
     @Column(name = "charge_attempt", nullable = false)
     private int chargeAttempt;
 
+    // Card mode only: the PaymentIntent the customer's browser confirms, and the secret it needs
+    // to do so. See Payment#attachIntent and V11__add_intent_to_payments.sql.
+    @Column(name = "gateway_intent_id", length = 100)
+    private String gatewayIntentId;
+
+    @Column(name = "client_secret", length = 200)
+    private String clientSecret;
+
     @Version
     @Column(name = "version")
     private Long version;

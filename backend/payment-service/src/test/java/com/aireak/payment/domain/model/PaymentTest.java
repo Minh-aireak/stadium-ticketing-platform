@@ -398,4 +398,82 @@ class PaymentTest {
         assertThat(payment.getFailureReason()).startsWith(Payment.GATEWAY_AMBIGUOUS_PREFIX);
         assertThat(payment.isAmbiguousFailure()).isTrue();
     }
+
+    // ---- card mode ----
+
+    @Test
+    void attachIntentMakesThePaymentCardModeWithoutMovingItOrRaisingAnEvent() {
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
+        payment.pullDomainEvents();
+
+        payment.attachIntent("pi_1", "pi_1_secret_x");
+
+        assertThat(payment.isCardMode()).isTrue();
+        assertThat(payment.getGatewayIntentId()).isEqualTo("pi_1");
+        assertThat(payment.getClientSecret()).isEqualTo("pi_1_secret_x");
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.INITIATED);
+        assertThat(payment.getGatewayTransactionId()).isNull();
+        assertThat(payment.pullDomainEvents()).isEmpty();
+    }
+
+    @Test
+    void attachIntentIsOnceOnlyAndOnlyWhileInitiated() {
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
+        payment.attachIntent("pi_1", "secret");
+
+        assertThatThrownBy(() -> payment.attachIntent("pi_2", "secret2"))
+                .isInstanceOf(InvalidPaymentStatusException.class);
+
+        Payment failed = Payment.initiate("booking-2", null, AMOUNT, "USD");
+        failed.markFailed("declined");
+        assertThatThrownBy(() -> failed.attachIntent("pi_3", "secret3"))
+                .isInstanceOf(InvalidPaymentStatusException.class);
+    }
+
+    /** A decline at the form is not a failure of the payment: nothing moves, nothing is raised. */
+    @Test
+    void noteAttemptFailureKeepsTheReasonAndNothingElse() {
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
+        payment.attachIntent("pi_1", "secret");
+        payment.pullDomainEvents();
+
+        payment.noteAttemptFailure("Your card was declined.");
+
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.INITIATED);
+        assertThat(payment.getFailureReason()).isEqualTo("Your card was declined.");
+        assertThat(payment.pullDomainEvents()).isEmpty();
+    }
+
+    @Test
+    void markSucceededClearsAReasonLeftByAnEarlierDeclinedAttempt() {
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
+        payment.attachIntent("pi_1", "secret");
+        payment.noteAttemptFailure("Your card was declined.");
+
+        payment.markSucceeded("pi_1");
+
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.SUCCEEDED);
+        assertThat(payment.getFailureReason()).isNull();
+        assertThat(payment.getGatewayTransactionId()).isEqualTo("pi_1");
+    }
+
+    /** FAILED in card mode means the window closed and the seats are gone; there is nothing to re-charge. */
+    @Test
+    void retryIsRefusedForACardPayment() {
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
+        payment.attachIntent("pi_1", "secret");
+        payment.markFailed("Payment window of 8 minutes expired");
+
+        assertThatThrownBy(payment::retry).isInstanceOf(InvalidPaymentStatusException.class);
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.FAILED);
+    }
+
+    @Test
+    void reconstituteWithoutIntentFieldsIsAutoMode() {
+        Payment payment = Payment.reconstitute("p", "b", null, AMOUNT, "USD", PaymentStatus.INITIATED,
+                null, null, java.time.Instant.now(), 0, 0L);
+
+        assertThat(payment.isCardMode()).isFalse();
+        assertThat(payment.getGatewayIntentId()).isNull();
+    }
 }

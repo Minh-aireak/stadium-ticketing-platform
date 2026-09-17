@@ -62,6 +62,22 @@ services:
   booking:
     base-url: ${BOOKING_SERVICE_URL}
 
+payment:
+  # auto: the server creates AND confirms the charge with stripe.test-payment-method in one call --
+  #       a test shortcut for scripts and load tests that have no browser to type a card into.
+  # card: the server only opens a PaymentIntent; the customer confirms it in the storefront with a
+  #       card of their own (Stripe.js), and the outcome arrives by webhook, by the storefront's
+  #       POST /payments/{bookingId}/sync, or -- if neither -- when the expiry job closes the window.
+  mode: ${PAYMENT_MODE:auto}
+  card:
+    # How long the customer has to confirm. Must end BEFORE ticket-inventory's reservation TTL
+    # (inventory.hold.ttl-minutes, 10) does: once the seats are back on sale, a late success would
+    # be a charge for seats the booking can no longer confirm.
+    window-minutes: ${PAYMENT_WINDOW_MINUTES:8}
+    expiry-job:
+      fixed-delay-ms: ${PAYMENT_EXPIRY_JOB_FIXED_DELAY_MS:30000}
+      batch-size: ${PAYMENT_EXPIRY_JOB_BATCH_SIZE:50}
+
 stripe:
   secret-key: ${STRIPE_SECRET_KEY}
   webhook-secret: ${STRIPE_WEBHOOK_SECRET}

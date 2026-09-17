@@ -8,7 +8,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { getBooking } from '@/features/booking/bookingApi'
 import type { BookingStatusResponse } from '@/features/booking/types'
-import { getPaymentStatus } from '@/features/payment/paymentApi'
+import { CardPaymentForm } from '@/features/payment/CardPaymentForm'
+import { getPaymentStatus, syncPayment } from '@/features/payment/paymentApi'
 import type { PaymentStatusResponse } from '@/features/payment/types'
 
 /** The happy path resolves in seconds — a Kafka round trip — so start tight. */
@@ -34,7 +35,15 @@ const MAX_POLL_DELAY_MS = 30_000
  */
 const GIVE_UP_AFTER_MS = 11 * 60 * 1_000
 
-type ViewState = 'pending' | 'success' | 'failed'
+/**
+ * 'pay' is card mode's extra step: payment-service opened an intent and is waiting for the
+ * customer to confirm it, so the page shows the card form instead of a spinner. It is still a
+ * non-terminal state and keeps polling underneath -- the webhook or the expiry job can end the
+ * payment while the form is on screen, and the form must give way when they do.
+ */
+type ViewState = 'pending' | 'pay' | 'success' | 'failed'
+
+const OPEN_VIEWS: ReadonlySet<ViewState> = new Set<ViewState>(['pending', 'pay'])
 
 /**
  * The booking is the order; the payment is one step inside it. So a cancelled booking is
@@ -54,6 +63,7 @@ function resolveView(
 ): ViewState {
   if (booking?.status === 'CANCELLED' || payment?.status === 'FAILED') return 'failed'
   if (booking?.status === 'CONFIRMED' || payment?.status === 'SUCCEEDED') return 'success'
+  if (payment?.status === 'INITIATED' && payment.clientSecret) return 'pay'
   return 'pending'
 }
 
@@ -119,7 +129,7 @@ export function PaymentStatusPage() {
         if (document.visibilityState === 'visible') {
           await pollOnce()
         }
-        if (cancelled || viewRef.current !== 'pending') return
+        if (cancelled || !OPEN_VIEWS.has(viewRef.current)) return
         if (Date.now() - startedAt >= GIVE_UP_AFTER_MS) {
           setGaveUp(true)
           return
@@ -130,14 +140,14 @@ export function PaymentStatusPage() {
     }
 
     void pollOnce().then(() => {
-      if (!cancelled && viewRef.current === 'pending') scheduleNext()
+      if (!cancelled && OPEN_VIEWS.has(viewRef.current)) scheduleNext()
     })
 
     // Coming back to the tab re-checks immediately rather than waiting out the current delay —
     // and does so even after giving up, since the answer may have arrived while it was hidden.
     function onVisibilityChange() {
       if (cancelled || document.visibilityState !== 'visible') return
-      if (viewRef.current !== 'pending') return
+      if (!OPEN_VIEWS.has(viewRef.current)) return
       void pollOnce()
     }
     document.addEventListener('visibilitychange', onVisibilityChange)
@@ -154,6 +164,20 @@ export function PaymentStatusPage() {
     await pollOnce()
     if (mountedRef.current) setRechecking(false)
   }, [pollOnce])
+
+  // Stripe.js has confirmed the intent in the browser. Ask payment-service to read the outcome
+  // from Stripe and record it; the response is the payment as the server now sees it, which is
+  // what flips the view -- not the browser's own report.
+  const confirmed = useCallback(async () => {
+    if (!bookingId) return
+    try {
+      const synced = await syncPayment(bookingId)
+      if (mountedRef.current) setPayment(synced)
+    } catch {
+      // The webhook or the next poll will still get there; say so rather than fail the page.
+      if (mountedRef.current) setError('Đã thanh toán, đang chờ xác nhận từ cổng thanh toán…')
+    }
+  }, [bookingId])
 
   if (!bookingId) {
     return <Navigate to="/" replace />
@@ -176,6 +200,24 @@ export function PaymentStatusPage() {
                   Đơn đặt vé <span className="font-mono">{bookingId}</span> đang chờ xác
                   nhận từ cổng thanh toán. Trang này sẽ tự cập nhật.
                 </p>
+              </>
+            )}
+
+            {view === 'pay' && payment?.clientSecret && (
+              <>
+                <h1 className="text-xl font-bold">Thanh toán</h1>
+                {context?.matchLabel && (
+                  <p className="text-sm text-muted">
+                    {context.matchLabel} — ghế {context.seatCodes?.join(', ')}
+                  </p>
+                )}
+                <CardPaymentForm
+                  bookingId={bookingId}
+                  clientSecret={payment.clientSecret}
+                  expiresAt={payment.expiresAt}
+                  lastFailureReason={payment.failureReason}
+                  onConfirmed={confirmed}
+                />
               </>
             )}
 

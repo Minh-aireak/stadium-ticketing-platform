@@ -1,11 +1,14 @@
 package com.aireak.payment.application.service;
 
 import com.aireak.payment.application.port.out.PaymentDeclinedException;
+import com.aireak.payment.application.port.in.ExpireCardPaymentsUseCase;
 import com.aireak.payment.application.port.in.GetPaymentUseCase;
 import com.aireak.payment.application.port.in.InitiatePaymentUseCase;
 import com.aireak.payment.application.port.in.RefundPaymentUseCase;
 import com.aireak.payment.application.port.in.RetryPaymentUseCase;
+import com.aireak.payment.application.port.in.SyncPaymentUseCase;
 import com.aireak.payment.application.port.in.command.InitiatePaymentCommand;
+import com.aireak.payment.config.PaymentModeProperties;
 import com.aireak.payment.domain.model.PaymentStatus;
 import com.aireak.payment.application.port.out.PaymentGatewayPort;
 import com.aireak.payment.application.port.out.PaymentIdempotencyPort;
@@ -13,6 +16,7 @@ import com.aireak.payment.application.port.out.PaymentIdempotencyResult;
 import com.aireak.payment.application.port.out.PaymentReconciliationPort;
 import com.aireak.payment.application.port.out.PaymentRepository;
 import com.aireak.payment.domain.exception.DuplicatePaymentException;
+import com.aireak.payment.domain.exception.InvalidPaymentStatusException;
 import com.aireak.payment.domain.model.Payment;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +24,8 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -41,6 +47,15 @@ import java.util.Optional;
  * <p>booking-service listens to PaymentSucceeded/Failed via Kafka
  * and drives the saga to CONFIRMED or CANCELLED accordingly.
  *
+ * <p><strong>Card mode</strong> ({@code payment.mode=card}) stops after step 1½: the gateway
+ * only opens a PaymentIntent ({@link PaymentGatewayPort#createIntent}) and the row keeps its id
+ * and client secret ({@link Payment#attachIntent}). The customer confirms it in the browser, and
+ * step 3 happens later, from whichever of three places learns the outcome first -- the Stripe
+ * webhook, {@link #syncWithGateway} when the storefront reports the confirmation, or
+ * {@code PaymentWindowExpiryJob} when the window closes. All three go through the same
+ * {@code markSucceeded}/{@code markFailed} steps and raise the same events, so booking-service
+ * cannot tell the two modes apart.
+ *
  * <p><strong>Charge vs. persist are deliberately separate phases</strong> (step 2 vs. step 3):
  * once {@link PaymentGatewayPort#charge} returns a {@code gatewayTxId}, the customer has
  * actually been charged — a failure persisting that outcome must never fall through to
@@ -51,7 +66,7 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase, RetryPaymentUseCase,
-        RefundPaymentUseCase {
+        RefundPaymentUseCase, SyncPaymentUseCase, ExpireCardPaymentsUseCase {
 
     private static final String IDEMPOTENCY_KEY_PREFIX = "payment:idempotency:booking:";
 
@@ -65,6 +80,7 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
     private final PaymentGatewayPort paymentGatewayPort;
     private final PaymentIdempotencyPort idempotencyPort;
     private final PaymentReconciliationPort reconciliationPort;
+    private final PaymentModeProperties paymentMode;
 
     @Override
     public String execute(InitiatePaymentCommand command) {
@@ -119,6 +135,11 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
         idempotencyPort.remember(idempotencyKey, paymentId);
         log.info("Payment initiated: id={}, bookingId={}", paymentId, bookingId);
 
+        if (paymentMode.isCardMode()) {
+            openIntentForCustomer(paymentId, bookingId, command.amount(), command.currency());
+            return paymentId;
+        }
+
         // Step 2: charge via the gateway (REST call, no local transaction). A failure here means
         // the charge itself never went through (or was definitively declined) — safe to mark FAILED.
         String gatewayTxId;
@@ -144,6 +165,122 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
     }
 
     /**
+     * Card mode's step 2: open the intent and remember it. Nothing has been charged, so a gateway
+     * failure here is safe to record as FAILED -- booking-service then cancels the booking and
+     * releases the seats, exactly as it would for a declined auto-mode charge. An intent that was
+     * opened but could not be persisted is closed again so it cannot be confirmed by a client that
+     * somehow learned its secret; if even that fails, the expiry job never sees the row (no
+     * clientSecret), and the intent simply lapses at the gateway.
+     */
+    private void openIntentForCustomer(String paymentId, String bookingId, BigDecimal amount, String currency) {
+        PaymentGatewayPort.IntentHandle intent;
+        try {
+            intent = paymentGatewayPort.createIntent(bookingId, bookingId, amount, currency);
+        } catch (Exception e) {
+            log.error("Opening payment intent failed: id={}, reason={}", paymentId, e.getMessage());
+            if (isDeclinedException(e)) {
+                sagaSteps.markFailed(paymentId, e.getMessage());
+            } else {
+                sagaSteps.markFailedAmbiguous(paymentId, e.getMessage());
+            }
+            return;
+        }
+        try {
+            sagaSteps.attachIntent(paymentId, intent.gatewayIntentId(), intent.clientSecret());
+            log.info("Payment intent opened for customer: id={}, bookingId={}, gatewayIntentId={}, window={}m",
+                    paymentId, bookingId, intent.gatewayIntentId(), paymentMode.card().windowMinutes());
+        } catch (Exception e) {
+            log.error("Persisting payment intent failed: id={}, gatewayIntentId={}, reason={}",
+                    paymentId, intent.gatewayIntentId(), e.getMessage());
+            try {
+                paymentGatewayPort.cancelIntent(intent.gatewayIntentId());
+            } catch (Exception cancelEx) {
+                log.warn("Could not close orphaned intent {}: {}", intent.gatewayIntentId(), cancelEx.getMessage());
+            }
+            sagaSteps.markFailedAmbiguous(paymentId, e.getMessage());
+        }
+    }
+
+    @Override
+    public Optional<Payment> syncWithGateway(String bookingId) {
+        Optional<Payment> found = paymentRepository.findByBookingId(bookingId);
+        if (found.isEmpty()) {
+            return found;
+        }
+        Payment payment = found.get();
+        if (payment.getStatus() != PaymentStatus.INITIATED || !payment.isCardMode()) {
+            return found;
+        }
+        PaymentGatewayPort.IntentSnapshot snapshot = paymentGatewayPort.retrieveIntent(payment.getGatewayIntentId());
+        recordIntentOutcome(payment, snapshot, "sync");
+        return paymentRepository.findByBookingId(bookingId);
+    }
+
+    /**
+     * The cancel is asked of the gateway, not assumed: a customer who confirmed in the last second
+     * has a succeeded intent the gateway refuses to cancel, and {@link PaymentGatewayPort#cancelIntent}
+     * reports that as SUCCEEDED so the payment is recorded as paid instead of expired. A PROCESSING
+     * intent (bank still deciding) is left for the next run. One payment's failure (gateway down,
+     * DB hiccup) must not stop the rest of the batch; that row stays INITIATED and is picked up again.
+     */
+    @Override
+    public int closeExpiredWindows(Instant openedBefore, int batchSize) {
+        List<Payment> expired = paymentRepository.findOpenCardPaymentsCreatedBefore(openedBefore, batchSize);
+        if (expired.isEmpty()) {
+            return 0;
+        }
+        log.info("Closing {} card payment window(s) opened before {}", expired.size(), openedBefore);
+        int closed = 0;
+        for (Payment payment : expired) {
+            try {
+                PaymentGatewayPort.IntentSnapshot snapshot = paymentGatewayPort.cancelIntent(payment.getGatewayIntentId());
+                if (snapshot.outcome() == PaymentGatewayPort.IntentOutcome.CANCELED) {
+                    snapshot = new PaymentGatewayPort.IntentSnapshot(snapshot.outcome(),
+                            "Payment window of " + paymentMode.card().windowMinutes() + " minutes expired");
+                    closed++;
+                }
+                recordIntentOutcome(payment, snapshot, "expiry");
+            } catch (Exception e) {
+                log.error("Could not close payment window: id={}, bookingId={}, gatewayIntentId={}: {}",
+                        payment.getPaymentId(), payment.getBookingId(), payment.getGatewayIntentId(), e.getMessage());
+            }
+        }
+        return closed;
+    }
+
+    /**
+     * Shared by {@link #syncWithGateway} and {@link #closeExpiredWindows}: turns what the gateway
+     * says about a card-mode intent into the payment's own state. Terminal outcomes go through the
+     * same saga steps as an auto-mode charge; an open intent is left open. The gateway's
+     * last-attempt error is kept for the status endpoint either way, since that is what the
+     * customer at the form sees.
+     */
+    private void recordIntentOutcome(Payment payment, PaymentGatewayPort.IntentSnapshot snapshot, String source) {
+        String paymentId = payment.getPaymentId();
+        switch (snapshot.outcome()) {
+            case SUCCEEDED -> {
+                persistSucceededOutcome(paymentId, payment.getBookingId(), payment.getGatewayIntentId(),
+                        payment.getAmount(), payment.getCurrency());
+                log.info("Card payment succeeded ({}): id={}, bookingId={}", source, paymentId, payment.getBookingId());
+            }
+            case CANCELED -> {
+                sagaSteps.markFailed(paymentId, snapshot.failureMessage() == null
+                        ? "Payment was cancelled before it was completed"
+                        : snapshot.failureMessage());
+                log.info("Card payment cancelled ({}): id={}, bookingId={}", source, paymentId, payment.getBookingId());
+            }
+            case OPEN -> {
+                if (snapshot.failureMessage() != null && !snapshot.failureMessage().equals(payment.getFailureReason())) {
+                    sagaSteps.noteAttemptFailure(paymentId, snapshot.failureMessage());
+                    log.info("Card payment attempt declined, intent still open ({}): id={}, reason={}",
+                            source, paymentId, snapshot.failureMessage());
+                }
+            }
+            case PROCESSING -> log.info("Card payment still processing at the gateway ({}): id={}", source, paymentId);
+        }
+    }
+
+    /**
      * Retries {@code markSucceeded} a few times on failure; if it still can't be persisted, the
      * outcome is handed to {@link PaymentReconciliationPort} instead of being silently lost — the
      * gateway transaction is real and must never be recorded as FAILED (see class javadoc).
@@ -154,6 +291,17 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
             try {
                 sagaSteps.markSucceeded(paymentId, gatewayTxId);
                 log.info("Payment succeeded: id={}, gatewayTxId={}", paymentId, gatewayTxId);
+                return;
+            } catch (InvalidPaymentStatusException e) {
+                // Not a persistence failure: the row has already left INITIATED. In card mode the
+                // webhook, the storefront's sync and the expiry job can all learn of the same
+                // success within the same second, and whichever lost this race must not spend
+                // three attempts failing the same guard and then file the charge as unreconciled.
+                // The only states markSucceeded refuses are SUCCEEDED and REFUNDED (a definitive
+                // FAILED cannot be reached once the gateway has said succeeded), so the charge is
+                // already on record.
+                log.info("Payment already recorded as terminal, success is a no-op: id={}, gatewayTxId={}: {}",
+                        paymentId, gatewayTxId, e.getMessage());
                 return;
             } catch (Exception e) {
                 log.error("Persisting successful charge failed (attempt {}/{}): id={}, gatewayTxId={}, reason={}",
@@ -203,7 +351,10 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
     }
 
     /**
-     * Re-opens a FAILED payment (see {@link Payment#retry}) and re-attempts the gateway charge —
+     * Auto mode only -- a card-mode payment refuses this at {@link Payment#retry}, since its FAILED
+     * means the window closed and the seats are gone.
+     *
+     * <p>Re-opens a FAILED payment (see {@link Payment#retry}) and re-attempts the gateway charge —
      * same two-phase shape as {@link #execute}: reopen-and-persist commits first (so the row is
      * never left "stuck" mid-retry), then the gateway call runs with no local transaction held.
      */

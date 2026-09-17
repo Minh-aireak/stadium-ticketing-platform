@@ -223,7 +223,7 @@ segment after `/api/v1/`. Responses are JSON; errors are RFC 7807 problem detail
 | `POST /api/v1/inventory/{showtimeId}/reserve` · `DELETE …/reserve/{bookingId}` · `POST …/confirm` | booking-service | Saga steps. `reserve` turns the customer's hold into the booking's and returns the server-computed price; `confirm` accepts only an internal-service token, since no genuine post-payment confirmation ever carries a customer's JWT. |
 | `POST /api/v1/bookings` | customer | Runs the saga on the request thread: draft → reserve → PENDING_PAYMENT → charge → `booking.booking.created`. Send an `Idempotency-Key` header; a retry with the same key gets the same booking. |
 | `GET /api/v1/bookings` · `/bookings/{id}` · `PUT /bookings/{id}/cancel` | customer | Own bookings only. Cancel is accepted only from PENDING_PAYMENT — a CONFIRMED booking involves money the customer cannot yet refund alone. |
-| `POST /api/v1/payments` · `POST /payments/{paymentId}/retry` · `GET /payments/{bookingId}` | customer | The charge is always the amount booking-service computed from the seat tiers; the request's own `amount` is checked against it, never trusted. |
+| `POST /api/v1/payments` · `POST /payments/{paymentId}/retry` · `GET /payments/{bookingId}` · `POST /payments/{bookingId}/sync` | customer | The charge is always the amount booking-service computed from the seat tiers; the request's own `amount` is checked against it, never trusted. `GET` carries the Stripe `clientSecret` and `expiresAt` only while a card payment is waiting on the customer; `sync` asks Stripe for the outcome after the browser confirmed. |
 | `POST /api/v1/payments/webhook` | Stripe | Signature-verified. The async backstop for the synchronous charge — e.g. the process dying between Stripe answering and the outcome being persisted. |
 | `GET /api/v1/notifications` · `PATCH /notifications/{id}/read` | customer | The in-app feed notification-service keeps alongside the emails it sends. |
 
@@ -264,8 +264,9 @@ limits and public-path policy. **Two ports publish on all interfaces: `8080` (th
 Compose, which is where you are.
 
 `.env.example` documents every variable, which are required, and where to get the third-party
-ones. At minimum you need database and Redis passwords, a JWT secret, a Stripe **test** key, and
-Brevo API credentials for outgoing email.
+ones. At minimum you need database and Redis passwords, a JWT secret, a Stripe **test** secret key
+plus its publishable key (the card form loads Stripe.js with it), and Brevo API credentials for
+outgoing email.
 
 Once the stack is healthy:
 
@@ -310,20 +311,32 @@ registered as a customer, that account is promoted instead. Then:
 3. **Pick seats.** Open the match, then the seat map. Clicking a seat places a 10-minute hold under
    your account (`POST /api/v1/inventory/{showtimeId}/hold`); open the same showtime in a second
    browser and the seat shows as held by someone else.
-4. **Check out.** `POST /api/v1/bookings` runs the saga inside the request: the hold becomes the
-   booking's reservation, ticket-inventory-service reports the price, and payment-service confirms
-   a Stripe PaymentIntent server-side with the test payment method `pm_card_visa` — there is no
-   card form, this is test mode. The status page polls the booking and the payment until one of
-   them is terminal.
+4. **Check out.** `POST /api/v1/bookings` runs the first half of the saga inside the request: the
+   hold becomes the booking's reservation, ticket-inventory-service reports the price, and
+   payment-service opens a Stripe PaymentIntent for that amount. The booking comes back
+   `PENDING_PAYMENT` and the status page shows Stripe's card form (`STRIPE_PUBLISHABLE_KEY` is
+   what renders it) with a countdown: the customer has `PAYMENT_WINDOW_MINUTES` (8) to confirm
+   before the booking is cancelled and the seats go back on sale. Test cards: `4242 4242 4242
+   4242` succeeds, `4000 0000 0000 0002` is declined (the intent stays open — try another card),
+   `4000 0025 0000 3155` asks for 3-D Secure. Any future expiry and any CVC.
 5. **Watch it land.** The confirmation email arrives; the match's `availableSeats` on the home
    page has dropped (`inventory.seats.sold` → the live counter); Kibana shows the whole request
    under one `correlationId`; Grafana's Kafka dashboard shows the offsets moving.
 
-The Stripe CLI's `stripe listen --forward-to localhost:8080/api/v1/payments/webhook` is where
-`STRIPE_WEBHOOK_SECRET` comes from, and while it runs it delivers `payment_intent.*` events to the
-webhook. The happy path above does not need it — success is decided from Stripe's synchronous
-answer — but the webhook is the backstop that reconciles a payment when the process dies between
-charging and persisting, and that path is only exercised with the listener running.
+How the outcome gets back to payment-service is the part worth knowing. Stripe.js confirms the
+intent between the browser and Stripe; nothing on this platform learns of it from the browser.
+Three paths do, and whichever comes first wins — all three end in the same `markSucceeded` /
+`markFailed` step and the same Kafka event, so booking-service cannot tell them apart:
+
+| Path | When |
+|---|---|
+| `POST /api/v1/payments/{bookingId}/sync` | The storefront calls it right after Stripe.js reports success; payment-service retrieves the intent from Stripe and records what *Stripe* says. This is what makes the flow complete on a developer machine with no webhook. |
+| `POST /api/v1/payments/webhook` | Stripe's `payment_intent.succeeded` / `payment_failed`, delivered only while `stripe listen --forward-to localhost:8080/api/v1/payments/webhook` runs (that is also where `STRIPE_WEBHOOK_SECRET` comes from). A decline on an open card intent is noted, not acted on: the customer can still try another card. |
+| `PaymentWindowExpiryJob` | Every 30 s, cancels intents older than the window at Stripe and fails the payment. The cancel is *asked*, not assumed — an intent the customer confirmed in the last second is refused by Stripe and recorded as paid instead. The window has to close before ticket-inventory's reservation TTL (10 min) does, or a late success would pay for seats the booking can no longer confirm. |
+
+`PAYMENT_MODE=auto` is the old shortcut and still exists for scripts and load tests that have no
+browser to type a card into: payment-service confirms the intent itself with Stripe's
+`pm_card_visa`, inside the booking request. Nothing after the charge differs between the modes.
 
 To watch the saga compensate, cancel the match from the admin page: every active booking on it is
 cancelled, and the paid ones are refunded through `booking.refund.requested` — a refund email per

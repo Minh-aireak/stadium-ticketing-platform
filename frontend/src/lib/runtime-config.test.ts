@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { DEFAULT_API_BASE_URL, resolveApiBaseUrl } from '@/lib/runtime-config'
+import { DEFAULT_API_BASE_URL, resolveApiBaseUrl, resolveStripePublishableKey } from '@/lib/runtime-config'
 
 describe('resolveApiBaseUrl', () => {
   afterEach(() => {
@@ -52,5 +52,31 @@ describe('resolveApiBaseUrl', () => {
     expect(resolveApiBaseUrl(undefined, 'http://localhost:9999/api/v1')).toBe(
       'http://localhost:9999/api/v1',
     )
+  })
+})
+
+describe('resolveStripePublishableKey', () => {
+  afterEach(() => {
+    delete window.__APP_CONFIG__
+  })
+
+  it('prefers the key the container wrote over the one baked into the bundle', () => {
+    expect(resolveStripePublishableKey('pk_test_runtime', 'pk_test_build')).toBe('pk_test_runtime')
+  })
+
+  it('falls back to the build-time key, and treats blank as absent', () => {
+    expect(resolveStripePublishableKey('  ', 'pk_test_build')).toBe('pk_test_build')
+  })
+
+  // Unlike the API origin there is no sensible default: an unconfigured deployment must be told
+  // apart from a configured one, and the card form reads undefined as "not available here".
+  it('is undefined when neither source is set', () => {
+    expect(resolveStripePublishableKey(undefined, undefined)).toBeUndefined()
+    expect(resolveStripePublishableKey('', '')).toBeUndefined()
+  })
+
+  it('reads window.__APP_CONFIG__ when called with no arguments', () => {
+    window.__APP_CONFIG__ = { stripePublishableKey: 'pk_test_runtime' }
+    expect(resolveStripePublishableKey()).toBe('pk_test_runtime')
   })
 })

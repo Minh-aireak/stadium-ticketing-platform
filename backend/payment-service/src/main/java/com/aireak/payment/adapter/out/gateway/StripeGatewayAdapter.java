@@ -9,6 +9,7 @@ import com.stripe.exception.StripeException;
 import com.stripe.model.PaymentIntent;
 import com.stripe.model.Refund;
 import com.stripe.net.RequestOptions;
+import com.stripe.param.PaymentIntentCancelParams;
 import com.stripe.param.PaymentIntentCreateParams;
 import com.stripe.param.RefundCreateParams;
 import io.github.resilience4j.bulkhead.annotation.Bulkhead;
@@ -142,6 +143,107 @@ public class StripeGatewayAdapter implements PaymentGatewayPort {
     }
 
     /**
+     * Card mode: the intent is created with {@code automatic_payment_methods} (redirects off) and
+     * no payment method, so it sits at {@code requires_payment_method} until the browser confirms it. The
+     * bookingId metadata is what {@code StripeWebhookController} uses to find the payment again.
+     * {@code @Retry} is safe here for the same reason it is on {@link #charge}: the idempotency key
+     * makes a repeated create return the intent the first attempt made.
+     */
+    @Override
+    @Bulkhead(name = "payment-gateway", type = Bulkhead.Type.SEMAPHORE)
+    @CircuitBreaker(name = "payment-gateway")
+    @Retry(name = "payment-gateway", fallbackMethod = "createIntentFallback")
+    public IntentHandle createIntent(String idempotencyKey, String bookingId, BigDecimal amount, String currency) {
+        try {
+            PaymentIntentCreateParams params = PaymentIntentCreateParams.builder()
+                    .setAmount(toSmallestUnit(amount, currency))
+                    .setCurrency(currency.toLowerCase())
+                    // allow_redirects=never keeps the Payment Element to methods that complete on
+                    // the page (cards, wallets). A redirect-based method would send the customer
+                    // off the storefront mid-countdown and, from a server-side confirm, make Stripe
+                    // demand a return_url before it will do anything at all.
+                    .setAutomaticPaymentMethods(PaymentIntentCreateParams.AutomaticPaymentMethods.builder()
+                            .setEnabled(true)
+                            .setAllowRedirects(PaymentIntentCreateParams.AutomaticPaymentMethods.AllowRedirects.NEVER)
+                            .build())
+                    .putMetadata("bookingId", bookingId)
+                    .build();
+
+            RequestOptions requestOptions = RequestOptions.builder()
+                    .setIdempotencyKey(idempotencyKey)
+                    .build();
+
+            PaymentIntent intent = PaymentIntent.create(params, requestOptions);
+            log.info("[STRIPE] Intent opened: bookingId={}, amount={} {}, paymentIntentId={}, status={}",
+                    bookingId, amount, currency, intent.getId(), intent.getStatus());
+            return new IntentHandle(intent.getId(), intent.getClientSecret());
+        } catch (InvalidRequestException e) {
+            throw new PaymentDeclinedException(
+                    "Payment intent rejected for bookingId=" + bookingId + ": " + e.getMessage(), e);
+        } catch (StripeException e) {
+            throw new RuntimeException("Stripe intent creation failed for bookingId=" + bookingId, e);
+        }
+    }
+
+    @Override
+    @Bulkhead(name = "payment-gateway", type = Bulkhead.Type.SEMAPHORE)
+    @CircuitBreaker(name = "payment-gateway")
+    @Retry(name = "payment-gateway", fallbackMethod = "intentLookupFallback")
+    public IntentSnapshot retrieveIntent(String gatewayIntentId) {
+        try {
+            return snapshotOf(PaymentIntent.retrieve(gatewayIntentId));
+        } catch (StripeException e) {
+            throw new RuntimeException("Stripe intent lookup failed for paymentIntentId=" + gatewayIntentId, e);
+        }
+    }
+
+    @Override
+    @Bulkhead(name = "payment-gateway", type = Bulkhead.Type.SEMAPHORE)
+    @CircuitBreaker(name = "payment-gateway")
+    @Retry(name = "payment-gateway", fallbackMethod = "intentLookupFallback")
+    public IntentSnapshot cancelIntent(String gatewayIntentId) {
+        try {
+            PaymentIntent intent = PaymentIntent.retrieve(gatewayIntentId);
+            // Only an open intent can be cancelled. Anything else is already an answer, and
+            // asking Stripe to cancel a succeeded intent is an InvalidRequestException that would
+            // read as a failure of this call rather than as the success it is.
+            IntentSnapshot before = snapshotOf(intent);
+            if (before.outcome() != IntentOutcome.OPEN) {
+                return before;
+            }
+            PaymentIntent cancelled = intent.cancel(PaymentIntentCancelParams.builder()
+                    .setCancellationReason(PaymentIntentCancelParams.CancellationReason.ABANDONED)
+                    .build());
+            log.info("[STRIPE] Intent cancelled: paymentIntentId={}, status={}", gatewayIntentId, cancelled.getStatus());
+            return snapshotOf(cancelled);
+        } catch (InvalidRequestException e) {
+            // Raced by the customer confirming between the retrieve and the cancel. Read it again
+            // rather than guess: whatever Stripe says now is the outcome to record.
+            log.info("[STRIPE] Cancel refused for paymentIntentId={} ({}); re-reading", gatewayIntentId, e.getMessage());
+            return retrieveIntent(gatewayIntentId);
+        } catch (StripeException e) {
+            throw new RuntimeException("Stripe intent cancel failed for paymentIntentId=" + gatewayIntentId, e);
+        }
+    }
+
+    /**
+     * Stripe's PaymentIntent statuses, folded to what the payment cares about. {@code
+     * requires_payment_method} after a decline still carries {@code last_payment_error}, which is
+     * the reason the status endpoint shows the customer while the form stays open.
+     */
+    private static IntentSnapshot snapshotOf(PaymentIntent intent) {
+        String failureMessage = intent.getLastPaymentError() == null ? null : intent.getLastPaymentError().getMessage();
+        IntentOutcome outcome = switch (intent.getStatus()) {
+            case "succeeded" -> IntentOutcome.SUCCEEDED;
+            case "canceled" -> IntentOutcome.CANCELED;
+            case "processing" -> IntentOutcome.PROCESSING;
+            // requires_payment_method, requires_confirmation, requires_action, requires_capture
+            default -> IntentOutcome.OPEN;
+        };
+        return new IntentSnapshot(outcome, failureMessage);
+    }
+
+    /**
      * Stripe amounts are expressed in the currency's smallest unit. Zero-decimal currencies
      * (e.g. VND) have no fractional unit, so the amount is used as-is; all others are multiplied
      * by 100 (e.g. USD dollars -> cents).
@@ -165,6 +267,20 @@ public class StripeGatewayAdapter implements PaymentGatewayPort {
             throw declined;
         }
         log.error("Payment gateway unavailable for bookingId={}: {}", bookingId, t.getMessage());
+        throw new RuntimeException("Payment gateway unavailable", t);
+    }
+
+    private IntentHandle createIntentFallback(String idempotencyKey, String bookingId, BigDecimal amount,
+                                              String currency, Throwable t) {
+        if (t instanceof PaymentDeclinedException declined) {
+            throw declined;
+        }
+        log.error("Payment gateway unavailable for bookingId={}: {}", bookingId, t.getMessage());
+        throw new RuntimeException("Payment gateway unavailable", t);
+    }
+
+    private IntentSnapshot intentLookupFallback(String gatewayIntentId, Throwable t) {
+        log.error("Payment gateway unavailable for paymentIntentId={}: {}", gatewayIntentId, t.getMessage());
         throw new RuntimeException("Payment gateway unavailable", t);
     }
 

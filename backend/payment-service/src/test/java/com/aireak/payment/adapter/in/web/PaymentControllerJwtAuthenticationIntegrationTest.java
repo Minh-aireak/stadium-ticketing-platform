@@ -5,6 +5,8 @@ import com.aireak.common.security.AuthenticatedUser;
 import com.aireak.payment.application.port.in.GetPaymentUseCase;
 import com.aireak.payment.application.port.in.InitiatePaymentUseCase;
 import com.aireak.payment.application.port.in.RetryPaymentUseCase;
+import com.aireak.payment.application.port.in.SyncPaymentUseCase;
+import com.aireak.payment.config.PaymentModeProperties;
 import com.aireak.payment.application.port.out.BookingOwnershipPort;
 import com.aireak.payment.domain.exception.DuplicatePaymentException;
 import com.aireak.payment.domain.model.Payment;
@@ -19,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -40,6 +43,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -52,7 +56,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * entirely (reconciliation jobs / booking-service saga steps).
  */
 @WebMvcTest(PaymentController.class)
+@EnableConfigurationProperties(PaymentModeProperties.class)
 @TestPropertySource(properties = {
+        "payment.mode=card",
+        "payment.card.window-minutes=8",
         "jwt.secret=test-secret-key-at-least-32-bytes-long-for-hs256!!",
         "jwt.issuer=identity-service",
         "jwt.audience=stadium-clients",
@@ -80,6 +87,9 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
 
     @MockitoBean
     private RetryPaymentUseCase retryPaymentUseCase;
+
+    @MockitoBean
+    private SyncPaymentUseCase syncPaymentUseCase;
 
     @MockitoBean
     private BookingOwnershipPort bookingOwnershipPort;
@@ -267,6 +277,82 @@ class PaymentControllerJwtAuthenticationIntegrationTest {
                 .andExpect(status().isOk());
 
         verify(bookingOwnershipPort, never()).fetchOwnedBooking(anyString(), anyString());
+    }
+
+    // ---------------------------------------------------------------
+    // Card mode: the client secret travels only while there is something to confirm
+    // ---------------------------------------------------------------
+
+    private static Payment openCardPayment() {
+        return Payment.reconstitute(PAYMENT_ID, BOOKING_ID, "buyer@example.com", new BigDecimal("50.00"), "USD",
+                PaymentStatus.INITIATED, null, null, Instant.now(), 0, 1L, "pi_1", "pi_1_secret_x");
+    }
+
+    @Test
+    void getByBookingIdHandsTheOwnerTheClientSecretAndDeadlineWhileInitiated() throws Exception {
+        when(bookingOwnershipPort.fetchOwnedBooking(eq(BOOKING_ID), anyString())).thenReturn(ownedBooking());
+        when(getPaymentUseCase.getByBookingId(BOOKING_ID)).thenReturn(Optional.of(openCardPayment()));
+
+        mockMvc.perform(get("/api/v1/payments/{bookingId}", BOOKING_ID)
+                        .header("Authorization", "Bearer " + validToken(CUSTOMER_A_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("INITIATED"))
+                .andExpect(jsonPath("$.clientSecret").value("pi_1_secret_x"))
+                .andExpect(jsonPath("$.expiresAt").isNotEmpty());
+    }
+
+    @Test
+    void getByBookingIdWithholdsTheClientSecretOnceThePaymentIsTerminal() throws Exception {
+        when(bookingOwnershipPort.fetchOwnedBooking(eq(BOOKING_ID), anyString())).thenReturn(ownedBooking());
+        Payment paid = Payment.reconstitute(PAYMENT_ID, BOOKING_ID, "buyer@example.com", new BigDecimal("50.00"), "USD",
+                PaymentStatus.SUCCEEDED, "pi_1", null, Instant.now(), 0, 1L, "pi_1", "pi_1_secret_x");
+        when(getPaymentUseCase.getByBookingId(BOOKING_ID)).thenReturn(Optional.of(paid));
+
+        mockMvc.perform(get("/api/v1/payments/{bookingId}", BOOKING_ID)
+                        .header("Authorization", "Bearer " + validToken(CUSTOMER_A_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clientSecret").doesNotExist())
+                .andExpect(jsonPath("$.expiresAt").doesNotExist());
+    }
+
+    // ---------------------------------------------------------------
+    // Booking-ownership enforcement: sync
+    // ---------------------------------------------------------------
+
+    @Test
+    void syncReturns403WhenCustomerDoesNotOwnBooking() throws Exception {
+        doThrow(new IdentityMismatchException("Caller does not own booking " + BOOKING_ID))
+                .when(bookingOwnershipPort).fetchOwnedBooking(eq(BOOKING_ID), anyString());
+
+        mockMvc.perform(post("/api/v1/payments/{bookingId}/sync", BOOKING_ID)
+                        .header("Authorization", "Bearer " + validToken(CUSTOMER_A_ID)))
+                .andExpect(status().isForbidden());
+
+        verify(syncPaymentUseCase, never()).syncWithGateway(anyString());
+    }
+
+    @Test
+    void syncReportsTheGatewaysAnswerWhenCustomerOwnsBooking() throws Exception {
+        when(bookingOwnershipPort.fetchOwnedBooking(eq(BOOKING_ID), anyString())).thenReturn(ownedBooking());
+        Payment paid = Payment.reconstitute(PAYMENT_ID, BOOKING_ID, "buyer@example.com", new BigDecimal("50.00"), "USD",
+                PaymentStatus.SUCCEEDED, "pi_1", null, Instant.now(), 0, 1L, "pi_1", "pi_1_secret_x");
+        when(syncPaymentUseCase.syncWithGateway(BOOKING_ID)).thenReturn(Optional.of(paid));
+
+        mockMvc.perform(post("/api/v1/payments/{bookingId}/sync", BOOKING_ID)
+                        .header("Authorization", "Bearer " + validToken(CUSTOMER_A_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.clientSecret").doesNotExist());
+    }
+
+    @Test
+    void syncReturns404WhenNoPaymentExistsForTheBooking() throws Exception {
+        when(bookingOwnershipPort.fetchOwnedBooking(eq(BOOKING_ID), anyString())).thenReturn(ownedBooking());
+        when(syncPaymentUseCase.syncWithGateway(BOOKING_ID)).thenReturn(Optional.empty());
+
+        mockMvc.perform(post("/api/v1/payments/{bookingId}/sync", BOOKING_ID)
+                        .header("Authorization", "Bearer " + validToken(CUSTOMER_A_ID)))
+                .andExpect(status().isNotFound());
     }
 
     // ---------------------------------------------------------------

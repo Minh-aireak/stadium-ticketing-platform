@@ -36,6 +36,15 @@ public class Payment {
     private PaymentStatus status;
     private String gatewayTransactionId; // set on success
     private String failureReason;        // set on failure
+    // Card mode only (see PaymentService#execute): the PaymentIntent the customer's browser will
+    // confirm, created up front so the payment can be found at the gateway by something this side
+    // chose -- expiry cancels it, sync retrieves it -- before any webhook has told us its outcome.
+    // Null in auto mode, where the charge is created and confirmed in one server-side call and
+    // gatewayTransactionId is the first id the gateway ever hands back.
+    private String gatewayIntentId;
+    // The half of the intent the browser needs to confirm it. Only ever released to the booking's
+    // owner (PaymentController#getByBookingId); its presence is what marks a payment as card mode.
+    private String clientSecret;
     private final Instant createdAt;
     // null only until first persist (initiate()) — Spring Data's isNew() check needs that,
     // so reconstitute() must carry the real value through unchanged after that point. Without
@@ -76,10 +85,21 @@ public class Payment {
                                         BigDecimal amount, String currency, PaymentStatus status,
                                         String gatewayTransactionId, String failureReason,
                                         Instant createdAt, int chargeAttempt, Long version) {
+        return reconstitute(paymentId, bookingId, customerEmail, amount, currency, status,
+                gatewayTransactionId, failureReason, createdAt, chargeAttempt, version, null, null);
+    }
+
+    public static Payment reconstitute(String paymentId, String bookingId, String customerEmail,
+                                        BigDecimal amount, String currency, PaymentStatus status,
+                                        String gatewayTransactionId, String failureReason,
+                                        Instant createdAt, int chargeAttempt, Long version,
+                                        String gatewayIntentId, String clientSecret) {
         Payment p = new Payment(paymentId, bookingId, customerEmail, amount, currency, status, createdAt, version);
         p.gatewayTransactionId = gatewayTransactionId;
         p.failureReason = failureReason;
         p.chargeAttempt = chargeAttempt;
+        p.gatewayIntentId = gatewayIntentId;
+        p.clientSecret = clientSecret;
         return p;
     }
 
@@ -107,6 +127,42 @@ public class Payment {
     // Domain behavior
     // ----------------------------------------------------------------
 
+    /**
+     * Card mode: records the PaymentIntent created for the customer to confirm. Only an INITIATED
+     * payment can take one, and only once -- a second intent for the same payment would leave
+     * the first confirmable at the gateway with nothing here able to find it.
+     */
+    public void attachIntent(String gatewayIntentId, String clientSecret) {
+        requireStatus(PaymentStatus.INITIATED, "attachIntent");
+        if (this.gatewayIntentId != null) {
+            throw new InvalidPaymentStatusException(
+                    "Operation 'attachIntent' already done for payment " + paymentId + ": " + this.gatewayIntentId);
+        }
+        this.gatewayIntentId = gatewayIntentId;
+        this.clientSecret = clientSecret;
+    }
+
+    /** True when the customer confirms the charge in the browser rather than this service. */
+    public boolean isCardMode() {
+        return clientSecret != null;
+    }
+
+    /**
+     * Card mode: one confirmation attempt was declined, but the intent stays open and the
+     * customer can try another card, so this is not a failure of the payment. Keeps the gateway's
+     * reason for the status endpoint and moves nothing -- no status change, no event -- because
+     * {@link #markFailed} would cancel the booking and release the seats under a customer who is
+     * still at the form. What ends a card payment is {@link #markSucceeded}, or {@link #markFailed}
+     * from the expiry job once the payment window has closed.
+     */
+    public void noteAttemptFailure(String reason) {
+        requireStatus(PaymentStatus.INITIATED, "noteAttemptFailure");
+        String describedReason = (reason == null || reason.isBlank()) ? UNSPECIFIED_REASON : reason;
+        this.failureReason = describedReason.length() > MAX_FAILURE_REASON_LENGTH
+                ? describedReason.substring(0, MAX_FAILURE_REASON_LENGTH)
+                : describedReason;
+    }
+
     public void markSucceeded(String gatewayTransactionId) {
         if (status != PaymentStatus.INITIATED && !isAmbiguousFailure()) {
             throw new InvalidPaymentStatusException(
@@ -114,6 +170,8 @@ public class Payment {
         }
         this.status = PaymentStatus.SUCCEEDED;
         this.gatewayTransactionId = gatewayTransactionId;
+        // A card-mode success may follow declined attempts whose reason noteAttemptFailure kept.
+        this.failureReason = null;
         domainEvents.add(new PaymentSucceededEvent(paymentId, bookingId, customerEmail, amount, currency,
                 gatewayTransactionId));
     }
@@ -180,6 +238,13 @@ public class Payment {
      */
     public void retry() {
         requireStatus(PaymentStatus.FAILED, "retry");
+        if (isCardMode()) {
+            // A card payment only reaches FAILED once its window has expired and the booking's
+            // seats have gone back on sale; the intent is cancelled at the gateway. There is
+            // nothing to re-charge -- the customer starts a new booking.
+            throw new InvalidPaymentStatusException(
+                    "Operation 'retry' is not available for a card payment: " + paymentId);
+        }
         // Read before failureReason is cleared, since that string is what carries the distinction.
         boolean ambiguous = isAmbiguousFailure();
         this.status = PaymentStatus.INITIATED;
@@ -234,6 +299,8 @@ public class Payment {
     public Instant getCreatedAt()             { return createdAt; }
     public Long getVersion()                  { return version; }
     public int getChargeAttempt()             { return chargeAttempt; }
+    public String getGatewayIntentId()        { return gatewayIntentId; }
+    public String getClientSecret()           { return clientSecret; }
 
     public List<Object> pullDomainEvents() {
         List<Object> events = Collections.unmodifiableList(new ArrayList<>(domainEvents));

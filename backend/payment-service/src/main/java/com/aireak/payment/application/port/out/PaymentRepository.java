@@ -2,6 +2,8 @@ package com.aireak.payment.application.port.out;
 
 import com.aireak.payment.domain.model.Payment;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 public interface PaymentRepository {
@@ -16,4 +18,10 @@ public interface PaymentRepository {
 
     Optional<Payment> findByBookingId(String bookingId);
     Optional<Payment> findById(String paymentId);
+    /**
+     * Card-mode payments still INITIATED that were created before {@code cutoff} -- the ones whose
+     * payment window has closed. Oldest first, at most {@code limit}, so one run of the expiry job
+     * has a bounded number of gateway calls to make.
+     */
+    List<Payment> findOpenCardPaymentsCreatedBefore(Instant cutoff, int limit);
 }

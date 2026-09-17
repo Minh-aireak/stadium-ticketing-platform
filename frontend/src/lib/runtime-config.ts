@@ -14,7 +14,7 @@
 
 declare global {
   interface Window {
-    __APP_CONFIG__?: { apiBaseUrl?: string }
+    __APP_CONFIG__?: { apiBaseUrl?: string; stripePublishableKey?: string }
   }
 }
 
@@ -42,4 +42,21 @@ export function resolveApiBaseUrl(
   buildTimeValue: string | undefined = import.meta.env.VITE_API_BASE_URL as string | undefined,
 ): string {
   return normalize(runtimeValue) ?? normalize(buildTimeValue) ?? DEFAULT_API_BASE_URL
+}
+
+/**
+ * The Stripe publishable key (`pk_test_…` / `pk_live_…`) the card form loads Stripe.js with. Same
+ * two sources and the same precedence as the API origin, for the same reason: which Stripe account
+ * the storefront talks to is a property of the deployment, not of the image. Publishable keys are
+ * designed to ship to browsers, so there is nothing to protect here -- but there is also no
+ * default to fall back on, and `undefined` is what the card form reads as "card payments are not
+ * configured on this deployment".
+ */
+export function resolveStripePublishableKey(
+  runtimeValue: string | undefined = typeof window === 'undefined'
+    ? undefined
+    : window.__APP_CONFIG__?.stripePublishableKey,
+  buildTimeValue: string | undefined = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string | undefined,
+): string | undefined {
+  return runtimeValue?.trim() || buildTimeValue?.trim() || undefined
 }

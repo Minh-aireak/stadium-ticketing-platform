@@ -1,6 +1,7 @@
 package com.aireak.payment.application.service;
 
 import com.aireak.payment.application.port.in.command.InitiatePaymentCommand;
+import com.aireak.payment.config.PaymentModeProperties;
 import com.aireak.payment.application.port.out.PaymentGatewayPort;
 import com.aireak.payment.application.port.out.PaymentIdempotencyPort;
 import com.aireak.payment.application.port.out.PaymentIdempotencyResult;
@@ -38,6 +39,9 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class PaymentServiceTest {
 
+    private static final PaymentModeProperties AUTO_MODE =
+            new PaymentModeProperties(PaymentModeProperties.Mode.AUTO, null);
+
     private static final InitiatePaymentCommand COMMAND =
             new InitiatePaymentCommand("booking-1", "buyer@example.com", new BigDecimal("100.00"), "USD");
 
@@ -56,7 +60,8 @@ class PaymentServiceTest {
 
     private void newService() {
         service = new PaymentService(
-                sagaSteps, paymentRepository, paymentGatewayPort, idempotencyPort, reconciliationPort);
+                sagaSteps, paymentRepository, paymentGatewayPort, idempotencyPort, reconciliationPort,
+                AUTO_MODE);
     }
 
     private Payment existingPayment(String paymentId) {
