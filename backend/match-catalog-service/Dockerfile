@@ -25,8 +25,6 @@ RUN ./mvnw package -pl match-catalog-service -am -DskipTests -B -q
 FROM eclipse-temurin:25-jre
 WORKDIR /app
 
-COPY --from=build /workspace/match-catalog-service/target/*.jar app.jar
-
 # curl is here only so the container can answer its own docker-compose healthcheck against
 # /actuator/health: eclipse-temurin's JRE image ships neither curl nor wget, and without a
 # healthcheck the only condition other services can depend on is service_started, which says
@@ -42,6 +40,10 @@ RUN addgroup --system --gid 10001 appgroup && adduser --system --uid 10001 --ing
 # the image AND be owned by appuser: Docker seeds a fresh named volume from the image path, and
 # a path missing from the image is seeded root-owned — unwritable for a non-root app.
 RUN mkdir -p /var/log/app && chown appuser:appgroup /var/log/app
+
+# Last, because it is the layer that changes on every build: everything above is identical
+# across all 7 service images and stays cached, so a code change never re-runs apt-get.
+COPY --from=build /workspace/match-catalog-service/target/*.jar app.jar
 
 USER appuser
 
