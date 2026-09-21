@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="600" viewBox="0 0 1280 600" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+<defs>
+<marker id="req" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
+<marker id="saga" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/></marker>
+<marker id="evt" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0,0 L10,5 L0,10 z" fill="#ea580c"/></marker>
+</defs>
+<rect width="1280" height="600" fill="#ffffff"/>
+<rect x="515.0" y="26" width="250" height="46" rx="10" fill="#f0fdfa" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="640.0" y="49.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#115e59" text-anchor="middle" dominant-baseline="middle" >React storefront · :5173</text>
+<line x1="640.0" y1="72" x2="640.0" y2="114" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#req)"/>
+<rect x="23" y="116" width="1234" height="60" rx="10" fill="#eef2ff" stroke="#818cf8" stroke-width="1.5"/>
+<text x="640.0" y="137" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#3730a3" text-anchor="middle" dominant-baseline="middle" >api-gateway · :8080</text>
+<text x="640.0" y="158" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="normal" fill="#3730a3" text-anchor="middle" dominant-baseline="middle" >validates JWTs · strips spoofed identity headers · per-route rate limits (Redis) · the only door in</text>
+<line x1="100.0" y1="176" x2="100.0" y2="238" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#req)"/>
+<line x1="316.0" y1="176" x2="316.0" y2="238" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#req)"/>
+<line x1="532.0" y1="176" x2="532.0" y2="238" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#req)"/>
+<line x1="748.0" y1="176" x2="748.0" y2="238" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#req)"/>
+<line x1="964.0" y1="176" x2="964.0" y2="238" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#req)"/>
+<line x1="1180.0" y1="176" x2="1180.0" y2="238" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#req)"/>
+<rect x="23" y="240" width="154" height="150" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="100.0" y="264" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#0f172a" text-anchor="middle" dominant-baseline="middle" >identity</text>
+<text x="100.0" y="282" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="normal" fill="#64748b" text-anchor="middle" dominant-baseline="middle" >:8081</text>
+<text x="100.0" y="304" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="middle" dominant-baseline="middle" >register · verify · login</text>
+<text x="100.0" y="319" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="middle" dominant-baseline="middle" >refresh rotation · reset</text>
+<line x1="37" y1="332" x2="163" y2="332" stroke="#cbd5e1" stroke-width="1"/>
+<circle cx="43" cy="347" r="4" fill="#336791"/>
+<text x="53" y="347" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="start" dominant-baseline="middle" >Postgres</text>
+<circle cx="43" cy="363" r="4" fill="#dc382d"/>
+<text x="53" y="363" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="start" dominant-baseline="middle" >Redis · login throttling</text>
+<rect x="246" y="247" width="154" height="150" rx="10" fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1"/>
+<rect x="239" y="240" width="154" height="150" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="316.0" y="264" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#0f172a" text-anchor="middle" dominant-baseline="middle" >match-catalog</text>
+<text x="316.0" y="282" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="normal" fill="#64748b" text-anchor="middle" dominant-baseline="middle" >:8082</text>
+<text x="316.0" y="304" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="middle" dominant-baseline="middle" >matches &amp; showtimes</text>
+<text x="316.0" y="319" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="middle" dominant-baseline="middle" >CQRS · ES read model</text>
+<line x1="253" y1="332" x2="379" y2="332" stroke="#cbd5e1" stroke-width="1"/>
+<circle cx="259" cy="347" r="4" fill="#336791"/>
+<text x="269" y="347" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="start" dominant-baseline="middle" >Postgres</text>
+<circle cx="259" cy="363" r="4" fill="#d97706"/>
+<text x="269" y="363" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="start" dominant-baseline="middle" >Elasticsearch · search</text>
+<circle cx="259" cy="379" r="4" fill="#dc382d"/>
+<text x="269" y="379" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="start" dominant-baseline="middle" >Redis · live seat counts</text>
+<rect x="291" y="231.5" width="96" height="17" rx="8.5" fill="#334155"/>
+<text x="339.0" y="240.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="9.5" font-weight="700" fill="#ffffff" text-anchor="middle" dominant-baseline="middle" >×2 behind nginx</text>
+<rect x="462" y="247" width="154" height="150" rx="10" fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1"/>
+<rect x="455" y="240" width="154" height="150" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="532.0" y="264" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#0f172a" text-anchor="middle" dominant-baseline="middle" >ticket-inventory</text>
+<text x="532.0" y="282" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="normal" fill="#64748b" text-anchor="middle" dominant-baseline="middle" >:8083</text>
+<text x="532.0" y="304" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="middle" dominant-baseline="middle" >seat map, holds &amp; sales</text>
+<text x="532.0" y="319" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="middle" dominant-baseline="middle" >Redisson lock per seat</text>
+<line x1="469" y1="332" x2="595" y2="332" stroke="#cbd5e1" stroke-width="1"/>
+<circle cx="475" cy="347" r="4" fill="#336791"/>
+<text x="485" y="347" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="start" dominant-baseline="middle" >Postgres</text>
+<circle cx="475" cy="363" r="4" fill="#dc382d"/>
+<text x="485" y="363" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="start" dominant-baseline="middle" >Redis · locks &amp; holds</text>
+<rect x="507" y="231.5" width="96" height="17" rx="8.5" fill="#334155"/>
+<text x="555.0" y="240.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="9.5" font-weight="700" fill="#ffffff" text-anchor="middle" dominant-baseline="middle" >×2 behind nginx</text>
+<rect x="671" y="240" width="154" height="150" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="748.0" y="264" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#0f172a" text-anchor="middle" dominant-baseline="middle" >booking</text>
+<text x="748.0" y="282" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="normal" fill="#64748b" text-anchor="middle" dominant-baseline="middle" >:8086</text>
+<text x="748.0" y="304" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="middle" dominant-baseline="middle" >runs the booking saga</text>
+<text x="748.0" y="319" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="middle" dominant-baseline="middle" >compensates &amp; reconciles</text>
+<line x1="685" y1="332" x2="811" y2="332" stroke="#cbd5e1" stroke-width="1"/>
+<circle cx="691" cy="347" r="4" fill="#336791"/>
+<text x="701" y="347" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="start" dominant-baseline="middle" >Postgres</text>
+<circle cx="691" cy="363" r="4" fill="#dc382d"/>
+<text x="701" y="363" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="start" dominant-baseline="middle" >Redis · idempotency keys</text>
+<rect x="887" y="240" width="154" height="150" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="964.0" y="264" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#0f172a" text-anchor="middle" dominant-baseline="middle" >payment</text>
+<text x="964.0" y="282" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="normal" fill="#64748b" text-anchor="middle" dominant-baseline="middle" >:8084</text>
+<text x="964.0" y="304" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="middle" dominant-baseline="middle" >Stripe charge &amp; webhooks</text>
+<text x="964.0" y="319" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="middle" dominant-baseline="middle" >refunds · reconciliation</text>
+<line x1="901" y1="332" x2="1027" y2="332" stroke="#cbd5e1" stroke-width="1"/>
+<circle cx="907" cy="347" r="4" fill="#336791"/>
+<text x="917" y="347" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="start" dominant-baseline="middle" >Postgres</text>
+<circle cx="907" cy="363" r="4" fill="#dc382d"/>
+<text x="917" y="363" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="start" dominant-baseline="middle" >Redis · idempotency keys</text>
+<circle cx="907" cy="379" r="4" fill="#64748b"/>
+<text x="917" y="379" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="start" dominant-baseline="middle" >Stripe</text>
+<rect x="1103" y="240" width="154" height="150" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="1180.0" y="264" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#0f172a" text-anchor="middle" dominant-baseline="middle" >notification</text>
+<text x="1180.0" y="282" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="normal" fill="#64748b" text-anchor="middle" dominant-baseline="middle" >:8085</text>
+<text x="1180.0" y="304" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="middle" dominant-baseline="middle" >consumes events, sends</text>
+<text x="1180.0" y="319" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="middle" dominant-baseline="middle" >email · in-app feed</text>
+<line x1="1117" y1="332" x2="1243" y2="332" stroke="#cbd5e1" stroke-width="1"/>
+<circle cx="1123" cy="347" r="4" fill="#336791"/>
+<text x="1133" y="347" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="start" dominant-baseline="middle" >Postgres</text>
+<circle cx="1123" cy="363" r="4" fill="#64748b"/>
+<text x="1133" y="363" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="start" dominant-baseline="middle" >Brevo · email</text>
+<line x1="454" y1="316" x2="395" y2="316" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#saga)"/>
+<text x="424.0" y="297" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="9.5" font-weight="600" fill="#7c3aed" text-anchor="middle" dominant-baseline="middle" >showtime</text>
+<text x="424.0" y="308" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="9.5" font-weight="600" fill="#7c3aed" text-anchor="middle" dominant-baseline="middle" >lookup</text>
+<line x1="670" y1="316" x2="611" y2="316" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#saga)"/>
+<text x="640.0" y="286" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="9.5" font-weight="600" fill="#7c3aed" text-anchor="middle" dominant-baseline="middle" >reserve</text>
+<text x="640.0" y="297" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="9.5" font-weight="600" fill="#7c3aed" text-anchor="middle" dominant-baseline="middle" >release</text>
+<text x="640.0" y="308" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="9.5" font-weight="600" fill="#7c3aed" text-anchor="middle" dominant-baseline="middle" >confirm</text>
+<line x1="826" y1="316" x2="885" y2="316" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#saga)"/>
+<text x="856.0" y="308" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="9.5" font-weight="600" fill="#7c3aed" text-anchor="middle" dominant-baseline="middle" >charge</text>
+<rect x="23" y="450" width="1234" height="56" rx="10" fill="#fff7ed" stroke="#fb923c" stroke-width="1.5"/>
+<text x="47" y="478.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#9a3412" text-anchor="start" dominant-baseline="middle" >Kafka</text>
+<text x="119" y="469.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="normal" fill="#9a3412" text-anchor="start" dominant-baseline="middle" >every cross-service event · nothing is published by the request that made it</text>
+<text x="119" y="487.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="normal" fill="#9a3412" text-anchor="start" dominant-baseline="middle" >each service writes an outbox_events row in its own transaction; Debezium (Kafka Connect) streams that table to the topic</text>
+<line x1="100.0" y1="390" x2="100.0" y2="449" stroke="#ea580c" stroke-width="1.75" marker-end="url(#evt)"/>
+<line x1="316.0" y1="400" x2="316.0" y2="449" stroke="#ea580c" stroke-width="1.75" marker-start="url(#evt)" marker-end="url(#evt)"/>
+<line x1="532.0" y1="400" x2="532.0" y2="449" stroke="#ea580c" stroke-width="1.75" marker-start="url(#evt)" marker-end="url(#evt)"/>
+<line x1="748.0" y1="392" x2="748.0" y2="449" stroke="#ea580c" stroke-width="1.75" marker-start="url(#evt)" marker-end="url(#evt)"/>
+<line x1="964.0" y1="392" x2="964.0" y2="449" stroke="#ea580c" stroke-width="1.75" marker-start="url(#evt)" marker-end="url(#evt)"/>
+<line x1="1180.0" y1="392" x2="1180.0" y2="449" stroke="#ea580c" stroke-width="1.75" marker-start="url(#evt)"/>
+<line x1="27" y1="556" x2="57" y2="556" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#req)"/>
+<text x="65" y="556" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="normal" fill="#64748b" text-anchor="start" dominant-baseline="middle" >request path</text>
+<line x1="176" y1="556" x2="206" y2="556" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#saga)"/>
+<text x="214" y="556" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="normal" fill="#64748b" text-anchor="start" dominant-baseline="middle" >REST call inside the booking saga</text>
+<line x1="438" y1="556" x2="466" y2="556" stroke="#ea580c" stroke-width="1.75" marker-start="url(#evt)" marker-end="url(#evt)"/>
+<text x="474" y="556" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="normal" fill="#64748b" text-anchor="start" dominant-baseline="middle" >publishes / consumes events</text>
+<circle cx="672" cy="556" r="4" fill="#336791"/>
+<text x="682" y="556" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="normal" fill="#64748b" text-anchor="start" dominant-baseline="middle" >Postgres — one database per service</text>
+<circle cx="912" cy="556" r="4" fill="#dc382d"/>
+<text x="922" y="556" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="normal" fill="#64748b" text-anchor="start" dominant-baseline="middle" >Redis 7 (Redisson)</text>
+<circle cx="1054" cy="556" r="4" fill="#d97706"/>
+<text x="1064" y="556" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="normal" fill="#64748b" text-anchor="start" dominant-baseline="middle" >Elasticsearch</text>
+<circle cx="1170" cy="556" r="4" fill="#64748b"/>
+<text x="1180" y="556" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="normal" fill="#64748b" text-anchor="start" dominant-baseline="middle" >external SaaS</text>
+</svg>

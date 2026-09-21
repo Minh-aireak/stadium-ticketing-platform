@@ -9,32 +9,14 @@ halfway. Seats are held under a distributed lock, payment runs as a saga with co
 every cross-service event goes out through a transactional outbox read by Debezium — so a broker
 hiccup between "money taken" and "booking confirmed" cannot lose the event.
 
-```mermaid
-flowchart TB
-    fe["React storefront · :5173"] --> gw["api-gateway · :8080<br/>JWT validation, rate limits"]
-    gw --> idn & clb & ilb & bk & pay & ntf
-    subgraph svc["Spring Boot services — one Postgres database each"]
-        idn["identity"]
-        clb{{"catalog-lb"}} --> cat["match-catalog ×2"]
-        ilb{{"ticket-inventory-lb"}} --> inv["ticket-inventory ×2"]
-        bk["booking"]
-        pay["payment"]
-        ntf["notification"]
-    end
-    bk -. "REST: reserve / release / confirm" .-> ilb
-    bk -. "REST: charge" .-> pay
-    inv -. "REST: showtime lookup" .-> clb
-    svc -- "outbox_events → Debezium CDC" --> kafka[["Kafka"]]
-    kafka --> svc
-    svc --> redis[("Redis<br/>seat locks & holds, idempotency keys,<br/>live seat counters, login throttling")]
-    cat --> es[("Elasticsearch<br/>match search")]
-    pay --> stripe(["Stripe"])
-    ntf --> brevo(["Brevo"])
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/architecture-dark.svg">
+  <img alt="Architecture: React storefront → api-gateway → six Spring Boot services (identity, match-catalog ×2, ticket-inventory ×2, booking, payment, notification), each with its own Postgres and its Redis/Elasticsearch/SaaS dependencies, all publishing to and consuming from Kafka through a Debezium-read outbox" src="docs/architecture-light.svg" width="100%">
+</picture>
 
-Solid arrows are what a request touches; dotted ones are the service-to-service calls inside the
-booking saga. Everything else between services is an event — see *Who produces and consumes what*
-under *Architecture notes*.
+Grey arrows are what a request touches; dashed ones are the REST calls inside the booking saga;
+orange ones are events. Each card lists the stores that service owns. For the topics themselves see
+*Who produces and consumes what* under *Architecture notes*.
 
 ---
 
