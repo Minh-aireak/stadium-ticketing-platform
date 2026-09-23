@@ -54,7 +54,38 @@ volumes:
   grafana_data:
   app_logs:
 
+# ---- Resource budget for the nine backend JVMs --------------------------------
+# Without a limit each JVM sized itself from the whole Docker VM: a quarter of its RAM as heap,
+# nine times over on a VM that cannot hold nine quarters, and all 8 of its CPUs counted by every
+# one -- 8 carrier threads, 8 GC threads and JIT/Netty pools to match, per JVM, on a machine whose
+# load tests were CPU-bound before they were service-bound.
+#
+# memory caps the whole process, not the heap. MaxRAMPercentage=65 gives the heap ~666 MB of the
+# 1 GB and leaves ~360 MB for what a Spring Boot process holds off-heap: metaspace, JIT code
+# cache, thread stacks, Netty direct buffers (Redisson), GC bookkeeping. 75% is the usual figure
+# from 2 GB up; at 1 GB the off-heap part is a larger share, and nothing here has a restart:
+# policy, so a container that crosses its limit is OOM-killed and stays down mid-measurement.
+# The percentage is not optional either: under this limit the JVM's default is 25%, a 256 MB heap.
+#
+# UseG1GC is pinned because HotSpot treats a box with under ~1792 MB as client-class and would
+# pick Serial GC under this limit -- a different pause profile from every measurement taken
+# before the limit existed.
+#
+# cpus is a ceiling, not a reservation: nine JVMs at 2 each may exceed the VM's 8. Its other
+# effect is the one that matters here -- each JVM now sees 2 processors and sizes its carrier and
+# GC threads to that instead of to the whole machine.
+x-jvm-resources: &jvm-resources
+  deploy:
+    resources:
+      limits:
+        cpus: "2"
+        memory: 1g
+
+x-jvm-env: &jvm-env
+  JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=65 -XX:+UseG1GC"
+
 x-ticket-inventory-service: &ticket-inventory-service
+  <<: *jvm-resources
   build:
     context: ./backend
     dockerfile: ticket-inventory-service/Dockerfile
@@ -79,6 +110,7 @@ x-ticket-inventory-service: &ticket-inventory-service
   stop_grace_period: 40s
 
 x-ticket-inventory-service-env: &ticket-inventory-service-env
+  <<: *jvm-env
   DB_HOST: postgres-inventory
   DB_PORT: 5432
   DB_USERNAME: ${DB_USERNAME}
@@ -96,6 +128,7 @@ x-ticket-inventory-service-env: &ticket-inventory-service-env
   JWT_AUDIENCE: ${JWT_AUDIENCE}
 
 x-booking-service: &booking-service
+  <<: *jvm-resources
   build:
     context: ./backend
     dockerfile: booking-service/Dockerfile
@@ -124,6 +157,7 @@ x-booking-service: &booking-service
   stop_grace_period: 40s
 
 x-booking-service-env: &booking-service-env
+  <<: *jvm-env
   DB_HOST: postgres-booking
   DB_PORT: 5432
   DB_USERNAME: ${DB_USERNAME}
@@ -143,6 +177,7 @@ x-booking-service-env: &booking-service-env
   JWT_AUDIENCE: ${JWT_AUDIENCE}
 
 x-match-catalog-service: &match-catalog-service
+  <<: *jvm-resources
   build:
     context: ./backend
     dockerfile: match-catalog-service/Dockerfile
@@ -168,6 +203,7 @@ x-match-catalog-service: &match-catalog-service
     start_period: 60s
 
 x-match-catalog-service-env: &match-catalog-service-env
+  <<: *jvm-env
   DB_HOST: postgres-catalog
   DB_PORT: 5432
   DB_USERNAME: ${DB_USERNAME}
@@ -541,6 +577,16 @@ services:
     image: docker.elastic.co/elasticsearch/elasticsearch:9.5.1
     container_name: elasticsearch_stadium_booking
     networks: [stadium-net]
+    # CPU only, and only for the ELK trio: none of the three is on a request's path, so under a
+    # load test every core they take is one the services being measured did not get -- Logstash
+    # parsing and Elasticsearch indexing the very log lines that load produces. Capped, they fall
+    # behind instead; the logs are files on app_logs and nothing is lost. Memory is left alone:
+    # the heaps are pinned below, and a guessed limit on top of them would only add an OOM-kill.
+    # 1.5 rounds up to 2 visible processors, which is what Elasticsearch sizes its pools from.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
     environment:
       # Cluster settings live in infra/elasticsearch/elasticsearch.yml. These two stay here: heap
       # is a JVM flag, and ELASTIC_PASSWORD is a secret that must not sit in a committed file.
@@ -591,6 +637,11 @@ services:
     image: docker.elastic.co/logstash/logstash:9.5.1
     container_name: logstash_stadium_booking
     networks: [stadium-net]
+    # See elasticsearch above. The two pipeline workers set in logstash.yml share this one core.
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
     depends_on:
       elasticsearch-init:
         condition: service_completed_successfully
@@ -633,6 +684,11 @@ services:
     image: docker.elastic.co/kibana/kibana:9.5.1
     container_name: kibana_stadium_booking
     networks: [stadium-net]
+    # See elasticsearch above.
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
     depends_on:
       elasticsearch-init:
         condition: service_completed_successfully
@@ -658,6 +714,7 @@ services:
 
   # ---- identity-service (auth, JWT issuance, admin bootstrap) ----------
   identity-service:
+    <<: *jvm-resources
     build:
       context: ./backend
       dockerfile: identity-service/Dockerfile
@@ -679,6 +736,7 @@ services:
       retries: 20
       start_period: 60s
     environment:
+      <<: *jvm-env
       # Turns on the ECS JSON log file Logstash tails; see the logging block in
       # this service's application.yaml for why it is set here and not there.
       LOGGING_FILE_NAME: /var/log/app/identity-service.log
@@ -837,6 +895,7 @@ services:
 
   # ---- payment-service (Stripe charges, refunds) -----------------------
   payment-service:
+    <<: *jvm-resources
     build:
       context: ./backend
       dockerfile: payment-service/Dockerfile
@@ -862,6 +921,7 @@ services:
       retries: 20
       start_period: 60s
     environment:
+      <<: *jvm-env
       # Turns on the ECS JSON log file Logstash tails; see the logging block in
       # this service's application.yaml for why it is set here and not there.
       LOGGING_FILE_NAME: /var/log/app/payment-service.log
@@ -894,6 +954,7 @@ services:
 
   # ---- notification-service (Kafka consumer, transactional email) -----
   notification-service:
+    <<: *jvm-resources
     build:
       context: ./backend
       dockerfile: notification-service/Dockerfile
@@ -915,6 +976,7 @@ services:
       retries: 20
       start_period: 60s
     environment:
+      <<: *jvm-env
       # Turns on the ECS JSON log file Logstash tails; see the logging block in
       # this service's application.yaml for why it is set here and not there.
       LOGGING_FILE_NAME: /var/log/app/notification-service.log
@@ -965,6 +1027,7 @@ services:
 
   # ---- api-gateway (single entrypoint, JWT validation, rate limiting) --
   api-gateway:
+    <<: *jvm-resources
     build:
       context: ./backend
       dockerfile: api-gateway/Dockerfile
@@ -998,6 +1061,7 @@ services:
       retries: 20
       start_period: 60s
     environment:
+      <<: *jvm-env
       # Turns on the ECS JSON log file Logstash tails; see the logging block in
       # this service's application.yaml for why it is set here and not there.
       LOGGING_FILE_NAME: /var/log/app/api-gateway.log
