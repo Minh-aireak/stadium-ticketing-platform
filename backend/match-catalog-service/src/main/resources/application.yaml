@@ -20,10 +20,17 @@ spring:
     # slot and postgres-exporter). Smaller than the other services' 20 on purpose -- browse reads
     # are served from the Guava and Redis tiers, and search goes to Elasticsearch, so Postgres only
     # sees cache misses and the rare admin write.
+    #
+    # connection-timeout 3s instead of Hikari's 30s: catalog-read admits 200 calls against these 10
+    # connections, so when Postgres stalls up to 190 of them queue here. At 30s they would hold
+    # their bulkhead permits long enough to fill it and 503 every other browse, and outlive
+    # api-gateway's 10s response-timeout -- still waiting for a connection on behalf of a client
+    # the gateway has already answered with a 504.
     hikari:
       pool-name: CatalogHikariPool
       maximum-pool-size: 10
       minimum-idle: 2
+      connection-timeout: 3000
 
   jpa:
     hibernate:

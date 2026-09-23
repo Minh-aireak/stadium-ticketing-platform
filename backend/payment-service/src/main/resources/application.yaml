@@ -14,12 +14,13 @@ spring:
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
+    # No minimum-idle: Hikari then defaults it to maximum-pool-size and keeps every connection
+    # open, the fixed-size pool HikariCP itself recommends. A pool that has shrunk while idle has
+    # to open new connections during a flash-sale spike, the one moment it can least afford to.
     hikari:
       pool-name: PaymentHikariPool
       maximum-pool-size: 20
-      minimum-idle: 10
       connection-timeout: 3000
-      max-lifetime: 1800000
 
   jpa:
     hibernate:
@@ -43,8 +44,6 @@ spring:
 
 server:
   port: 8084
-  tomcat:
-    accept-count: 100
 
 jwt:
   secret: ${JWT_SECRET}

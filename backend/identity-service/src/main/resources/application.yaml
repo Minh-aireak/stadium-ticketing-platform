@@ -11,6 +11,11 @@ spring:
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
+    # Pool size stays on Hikari's default of 10; only the wait is overridden. Login is on this pool,
+    # and Hikari's default 30s would keep a login waiting for a connection long after api-gateway's
+    # 10s response-timeout has already answered the client with a 504.
+    hikari:
+      connection-timeout: 3000
 
   jpa:
     hibernate:

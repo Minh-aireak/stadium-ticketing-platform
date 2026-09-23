@@ -21,12 +21,15 @@ spring:
     # Explicit pool size: the reserve/release hot path no longer touches Postgres at all (Redis
     # hold only — see SeatInventoryService), so this pool only serves the rarer confirm-sale write
     # and read queries. Sized well below the Bulkhead limit below so the DB is never the bottleneck.
+    #
+    # No minimum-idle: Hikari then defaults it to maximum-pool-size and keeps every connection
+    # open, the fixed-size pool HikariCP itself recommends. Two instances hold 2 x 20 = 40 of
+    # postgres-inventory's 100 max_connections permanently, which still leaves room for Debezium
+    # and postgres-exporter.
     hikari:
       pool-name: InventoryHikariPool
       maximum-pool-size: 20
-      minimum-idle: 5
       connection-timeout: 3000
-      max-lifetime: 1800000
 
   jpa:
     hibernate:
@@ -58,8 +61,6 @@ server:
   # 502 that says nothing about which side cut it, and restarting one instance at a time is most of
   # the reason for running two.
   shutdown: graceful
-  tomcat:
-    accept-count: 100
 
 jwt:
   secret: ${JWT_SECRET}
