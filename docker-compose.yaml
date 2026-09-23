@@ -1,7 +1,9 @@
 # =============================================================================
 # Stadium Ticketing Platform — Local Development Infrastructure
 # =============================================================================
-# Usage: docker compose up -d
+# Usage: ./scripts/start-stack.ps1 -- brings the stack up one stage at a time
+# and leaves the four exporters off. A plain `docker compose up -d` boots every
+# service JVM at once; the script's help explains why that is worth avoiding.
 # Services use internal 'stadium-net' network.
 #
 # THIS IS A DEVELOPMENT STACK, NOT A DEPLOYABLE TOPOLOGY. The backing services
