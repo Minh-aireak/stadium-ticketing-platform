@@ -223,7 +223,7 @@ Everything runs in Docker Compose.
 ```bash
 cp .env.example .env      # then fill in the [REQUIRED] values
 cp infra/postgres-exporter/config.yaml.example infra/postgres-exporter/config.yaml
-docker compose up -d
+./scripts/start-stack.ps1   # PowerShell; a plain `docker compose up -d` also works, see below
 ```
 
 Two files to copy, not one. postgres_exporter's `auth_modules` block has no environment-variable
@@ -231,6 +231,21 @@ substitution, so its database credentials can neither come from `.env` nor be co
 template exists to be filled in with the same `DB_USERNAME`/`DB_PASSWORD` you just put there.
 `docker-compose.yaml` bind-mounts that exact path, so skipping the copy leaves Docker inventing a
 directory where the file should be and the exporter never starts.
+
+`start-stack.ps1` brings the platform up one stage at a time — datastores, Kafka, Elasticsearch,
+Kafka Connect, then one service JVM after another — and waits for each to turn healthy before
+starting the next. `docker compose up -d` gets to the same place, but it boots every service JVM
+at once as soon as the datastores are ready, and on a Docker VM of this size that burst is enough
+to take Docker Desktop down. The script leaves Kibana off unless you pass `-WithKibana`, and the
+four exporters off altogether (see [Metrics](#metrics)). If a stage fails, fix it and run the
+script again: stages that are already healthy go by in seconds.
+
+The stack is sized for a Docker VM of 8 CPUs and 10 GB. Each service JVM is capped at 2 CPUs and
+1 GiB with its heap at 65% of that (`x-jvm-resources` in `docker-compose.yaml`); Elasticsearch,
+Logstash and Kibana are capped on CPU only. Brought up by the script without Kibana, it settles at
+about 7.2 GiB. On Windows the VM's size is `memory=` in `%USERPROFILE%\.wslconfig` — WSL2's default
+of half the host's RAM left 7.7 GB on a 16 GB machine, and Elasticsearch was the first thing
+OOM-killed.
 
 `docker-compose.yaml` is a **development stack, not a deployable topology**. Kafka runs PLAINTEXT
 with no authentication, and Postgres, Redis and Elasticsearch are protected by nothing but the
@@ -262,13 +277,13 @@ Once the stack is healthy:
 | Kafka Connect | http://localhost:8083/connectors |
 
 Services declare healthchecks against `/actuator/health`, and dependants wait on
-`condition: service_healthy` — so `docker compose up` finishing means the platform is actually
+`condition: service_healthy` — so the stack coming up, by either route, means the platform is actually
 ready to serve, not merely that containers launched.
 
 ### Your first booking
 
 The stack comes up empty: there is no seed data, and only an ADMIN can create a match. So before
-`docker compose up`, set two more values in `.env`:
+starting it, set two more values in `.env`:
 
 ```
 ADMIN_BOOTSTRAP_EMAIL=admin@example.com
@@ -329,6 +344,10 @@ booking is the visible result.
 Prometheus scrapes `/actuator/prometheus` on every service (both instances of each replicated
 one, each under its own container name) plus four exporters — node, Redis, Postgres and Kafka. Grafana
 auto-loads whatever dashboard JSON sits in `infra/grafana/provisioning/dashboards/`.
+
+`start-stack.ps1` leaves the four exporters down to save memory, so until you start them their
+dashboards stay empty and `ServiceDown` fires for their targets. Start one when you need it —
+`docker compose up -d --no-deps kafka-exporter` for consumer lag, say.
 
 Kafka is the one thing measured from outside the application. `kafka-exporter` asks the broker for
 each consumer group's committed offset and each partition's end offset, so **lag stays visible
@@ -504,6 +523,7 @@ infra/
   nginx/                      load balancers for the two replicated services
   postgres-exporter/          multi-target probe credentials (template only)
 scripts/
+  start-stack.ps1             brings the stack up one stage at a time
   load-test/                  contention, ramp and log-pipeline scripts against the running stack
 docker-compose.yaml           the whole platform
 .env.example                  documented environment contract
