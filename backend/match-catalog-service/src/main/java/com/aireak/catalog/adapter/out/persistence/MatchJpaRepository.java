@@ -77,6 +77,14 @@ interface MatchJpaRepository extends JpaRepository<MatchJpaEntity, String> {
             "WHERE showtime_id = :showtimeId", nativeQuery = true)
     int decrementAvailableSeats(@Param("showtimeId") String showtimeId, @Param("count") int count);
 
+    // Capped at total_seats the way the decrement is floored at zero: a return projects something
+    // that already happened in ticket-inventory-service, so it is absorbed, never refused — but a
+    // showtime can never have more seats available than it has seats.
+    @Modifying
+    @Query(value = "UPDATE showtimes SET available_seats = LEAST(available_seats + :count, total_seats) " +
+            "WHERE showtime_id = :showtimeId", nativeQuery = true)
+    int incrementAvailableSeats(@Param("showtimeId") String showtimeId, @Param("count") int count);
+
     /**
      * Committed available_seats, read on the recovery path only — when the Redis counter has to be
      * re-derived from the source of truth. Not part of any normal read: browse serves the count

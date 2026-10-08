@@ -47,6 +47,14 @@ public interface SeatCounterUpdatePort {
     void restore(String showtimeId, int seatCount);
 
     /**
+     * Atomically adds back seats a cancelled booking returned to sale — the projection of a return,
+     * where {@link #restore} is the compensation of a failed decrement. Same script, same refusal to
+     * recreate an absent key: the caller has just committed the return to Postgres, so re-deriving
+     * the counter from there already counts it, and inventing a value here would not.
+     */
+    IncrementResult increment(String showtimeId, int seatCount);
+
+    /**
      * Overwrites the counter with an authoritative value read from Postgres. Reserved for the
      * recovery branches — an expired key, a detected drift, a failed decrement — never for the
      * normal sale path, where an unconditional overwrite would reintroduce exactly the lost-update
@@ -86,6 +94,34 @@ public interface SeatCounterUpdatePort {
         /** True when Redis ended up agreeing with the request; anything else needs a reseed from Postgres. */
         public boolean isClean() {
             return status == DecrementStatus.APPLIED;
+        }
+    }
+
+    /**
+     * The statuses an increment can end in. There is no CLAMPED: Redis does not know the showtime's
+     * total, so it cannot cap — Postgres does ({@code LEAST(available + n, total_seats)}), and a
+     * counter that ran ahead of it is corrected by the next reseed.
+     */
+    enum IncrementStatus {
+        /** The seats were added. */
+        APPLIED,
+        /** No counter key exists — the caller must reseed from Postgres. */
+        NOT_INITIALIZED,
+        /** The key held something that is not a number — treated the same as a missing key. */
+        CORRUPT,
+        /** Redis could not be reached; nothing was written. */
+        UNAVAILABLE
+    }
+
+    /** @param availableSeats what the counter holds after the script ran, or {@code 0} when nothing was written */
+    record IncrementResult(IncrementStatus status, int availableSeats) {
+
+        public static IncrementResult nothingWritten(IncrementStatus status) {
+            return new IncrementResult(status, 0);
+        }
+
+        public boolean isClean() {
+            return status == IncrementStatus.APPLIED;
         }
     }
 }

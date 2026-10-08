@@ -61,6 +61,27 @@ class SeatAvailabilityProjectionAdapter implements SeatAvailabilityProjectionPor
     }
 
     /**
+     * The same idempotency-then-update shape as {@link #decrementAvailableSeats}, sharing its
+     * {@code processed_inventory_events} table: event ids are unique across both kinds, so one
+     * table is one record of everything this projection has applied.
+     */
+    @Override
+    @Transactional
+    public boolean incrementAvailableSeats(String eventId, String showtimeId, int returnedSeatCount) {
+        if (processedEventRepository.existsById(eventId)) {
+            log.debug("Returned-seat event already recorded, skipping the Postgres increment: eventId={}, showtime={}",
+                    eventId, showtimeId);
+            return false;
+        }
+        int updated = matchJpaRepository.incrementAvailableSeats(showtimeId, returnedSeatCount);
+        if (updated == 0) {
+            throw new IllegalStateException("Showtime not found for returned-seat event: " + showtimeId);
+        }
+        processedEventRepository.save(new ProcessedInventoryEventJpaEntity(eventId, Instant.now()));
+        return true;
+    }
+
+    /**
      * Read on the recovery path only, and deliberately uncached — its whole purpose is to answer
      * "what does the source of truth actually say" when the Redis counter is suspect.
      */

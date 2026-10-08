@@ -1,8 +1,10 @@
 package com.aireak.catalog.adapter.in.messaging;
 
+import com.aireak.catalog.application.port.in.ApplyReturnedSeatsUseCase;
 import com.aireak.catalog.application.port.in.ApplySoldSeatsUseCase;
 import com.aireak.catalog.config.KafkaConfig;
 import com.aireak.common.event.EventEnvelope;
+import com.aireak.inventory.domain.event.SeatsReturnedEvent;
 import com.aireak.inventory.domain.event.SeatsSoldEvent;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -84,6 +86,9 @@ class SeatsSoldEventConsumerEmbeddedKafkaIntegrationTest {
     @MockitoBean
     private ApplySoldSeatsUseCase applySoldSeatsUseCase;
 
+    @MockitoBean
+    private ApplyReturnedSeatsUseCase applyReturnedSeatsUseCase;
+
     private KafkaTemplate<String, String> rawProducer;
     private DefaultKafkaProducerFactory<String, String> producerFactory;
 
@@ -108,6 +113,19 @@ class SeatsSoldEventConsumerEmbeddedKafkaIntegrationTest {
 
         verify(applySoldSeatsUseCase, timeout(10_000))
                 .applySoldSeats(eq(eventId), eq("showtime-1"), eq(2));
+    }
+
+    /**
+     * A return rides the sale topic (see KafkaTopics#SEATS_RETURNED), so the production deserializer
+     * has to resolve the second payload class on it, and the one listener has to route it.
+     */
+    @Test
+    void consumesARealReturnedSeatRecordFromTheSameTopic() {
+        SeatsReturnedEvent event = new SeatsReturnedEvent("showtime-3", "booking-9", List.of("C1"), Instant.now());
+        String eventId = publishAsDebeziumWouldForwardTheOutboxRow(event);
+
+        verify(applyReturnedSeatsUseCase, timeout(10_000))
+                .applyReturnedSeats(eq(eventId), eq("showtime-3"), eq(1));
     }
 
     /**
@@ -137,7 +155,7 @@ class SeatsSoldEventConsumerEmbeddedKafkaIntegrationTest {
         verify(applySoldSeatsUseCase, atLeast(2)).applySoldSeats(eq(eventId), eq("showtime-2"), eq(1));
     }
 
-    private String publishAsDebeziumWouldForwardTheOutboxRow(SeatsSoldEvent payload) {
+    private String publishAsDebeziumWouldForwardTheOutboxRow(Object payload) {
         EventEnvelope<Object> envelope = EventEnvelope.of(SEATS_SOLD, payload, null);
         rawProducer.send(new ProducerRecord<>(
                 SEATS_SOLD, envelope.getEventId(), OBJECT_MAPPER.writeValueAsString(envelope)));

@@ -253,6 +253,35 @@ public class RedisSeatAvailabilityCounter
                 showtimeId, seatCount, valuePart(reply));
     }
 
+    /**
+     * {@link #RESTORE_SCRIPT} again, deliberately: adding seats back atomically and refusing to
+     * invent a missing key is exactly what a projected return needs too. What differs is only what
+     * the caller does with the answer, so this reports it instead of just logging it.
+     */
+    @Override
+    public IncrementResult increment(String showtimeId, int seatCount) {
+        requirePositive(seatCount, "seatCount");
+        String reply = eval(RESTORE_SCRIPT, showtimeId, String.valueOf(seatCount));
+        if (reply == null) {
+            return IncrementResult.nothingWritten(IncrementStatus.UNAVAILABLE);
+        }
+        if (reply.startsWith("NOT_INITIALIZED")) {
+            log.warn("No live seat counter to add returned seats to, it will be seeded from Postgres: showtime={}",
+                    showtimeId);
+            return IncrementResult.nothingWritten(IncrementStatus.NOT_INITIALIZED);
+        }
+        if (!reply.startsWith("RESTORED:")) {
+            log.error("Live seat counter holds a non-numeric value, it will be reseeded from Postgres: showtime={}",
+                    showtimeId);
+            return IncrementResult.nothingWritten(IncrementStatus.CORRUPT);
+        }
+        localSeatCountCache.invalidate(showtimeId);
+        int available = Integer.parseInt(valuePart(reply));
+        log.debug("Live seat counter incremented atomically: showtime={}, added={}, available={}",
+                showtimeId, seatCount, available);
+        return new IncrementResult(IncrementStatus.APPLIED, available);
+    }
+
     // ----------------------------------------------------------------
     // Redis plumbing
     // ----------------------------------------------------------------
