@@ -1,5 +1,6 @@
 package com.aireak.inventory.domain.model;
 
+import com.aireak.inventory.domain.event.SeatsReturnedEvent;
 import com.aireak.inventory.domain.event.SeatsSoldEvent;
 
 import java.util.*;
@@ -7,9 +8,10 @@ import java.util.*;
 /**
  * Aggregate Root: SeatInventory — one per showtime.
  *
- * <p><strong>Core invariant</strong>: no double-booking. {@code sellSeats()} is the only
- * mutating operation left on this aggregate — reserve/release now live entirely in Redis
- * (see {@code SeatHoldPort}) and never touch this aggregate at all.
+ * <p><strong>Core invariant</strong>: no double-booking. {@code sellSeats()} and its inverse,
+ * {@code returnSeats()} (a paid booking cancelling seats), are the only mutating operations left on
+ * this aggregate — reserve/release now live entirely in Redis (see {@code SeatHoldPort}) and never
+ * touch this aggregate at all.
  *
  * <p>Concurrency protection:
  * <ul>
@@ -65,6 +67,26 @@ public class SeatInventory {
         if (!newlySold.isEmpty()) {
             domainEvents.add(new SeatsSoldEvent(showtimeId, newlySold));
         }
+    }
+
+    /**
+     * Puts back on sale the seats of {@code seatCodes} that are SOLD to {@code bookingId} — its
+     * customer cancelled them. Idempotent: a second call finds them AVAILABLE and changes nothing.
+     * Raises {@link SeatsReturnedEvent} for exactly the seats that changed, if any did.
+     *
+     * @return the seats that went from SOLD to AVAILABLE
+     */
+    public List<SeatCode> returnSeats(List<SeatCode> seatCodes, String bookingId) {
+        List<SeatCode> returned = seatCodes.stream()
+                .map(seats::get)
+                .filter(Objects::nonNull)
+                .filter(seat -> seat.returnToSale(bookingId))
+                .map(Seat::getSeatCode)
+                .toList();
+        if (!returned.isEmpty()) {
+            domainEvents.add(new SeatsReturnedEvent(showtimeId, bookingId, returned));
+        }
+        return returned;
     }
 
     public String getShowtimeId()         { return showtimeId; }

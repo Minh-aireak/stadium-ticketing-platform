@@ -7,6 +7,7 @@ import com.aireak.common.outbox.OutboxEventJpaRepository;
 import com.aireak.inventory.application.port.out.DomainEventPublisher;
 import com.aireak.inventory.domain.event.SeatsReleasedEvent;
 import com.aireak.inventory.domain.event.SeatsReservedEvent;
+import com.aireak.inventory.domain.event.SeatsReturnedEvent;
 import com.aireak.inventory.domain.event.SeatsSoldEvent;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
@@ -37,6 +38,9 @@ public class OutboxEventPublisher extends AbstractOutboxEventPublisher implement
             case SeatsReservedEvent ignored -> KafkaTopics.SEATS_RESERVED;
             case SeatsReleasedEvent ignored -> KafkaTopics.SEATS_RELEASED;
             case SeatsSoldEvent ignored -> KafkaTopics.SEATS_SOLD;
+            // Same topic as SEATS_SOLD and the same showtimeId key, on purpose — see
+            // KafkaTopics#SEATS_RETURNED.
+            case SeatsReturnedEvent ignored -> KafkaTopics.SEATS_RETURNED;
             default -> null;
         };
     }
@@ -47,6 +51,7 @@ public class OutboxEventPublisher extends AbstractOutboxEventPublisher implement
             case SeatsReservedEvent e -> e.showtimeId();
             case SeatsReleasedEvent e -> e.showtimeId();
             case SeatsSoldEvent e -> e.showtimeId();
+            case SeatsReturnedEvent e -> e.showtimeId();
             default -> throw new IllegalArgumentException(
                     "No aggregate id mapping for domain event type: " + event.getClass().getSimpleName());
         };

@@ -58,6 +58,23 @@ public class Seat {
         return true;
     }
 
+    /**
+     * Puts this seat back on sale because {@code bookingId}, which bought it, cancelled it. Only a
+     * seat SOLD to that exact booking moves: one still AVAILABLE has nothing to undo (a redelivered
+     * request, or a seat the booking only ever held), and one SOLD to another booking is not this
+     * booking's to give back — that buyer keeps it.
+     *
+     * @return whether the seat changed, i.e. whether it now counts as available again
+     */
+    boolean returnToSale(String bookingId) {
+        if (status != SeatStatus.SOLD || !Objects.equals(reservedByBookingId, bookingId)) {
+            return false;
+        }
+        this.status = SeatStatus.AVAILABLE;
+        this.reservedByBookingId = null;
+        return true;
+    }
+
     public SeatCode getSeatCode()          { return seatCode; }
     public SeatStatus getStatus()          { return status; }
     public String getReservedByBookingId() { return reservedByBookingId; }

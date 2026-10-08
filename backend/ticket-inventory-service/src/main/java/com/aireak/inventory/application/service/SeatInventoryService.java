@@ -73,9 +73,11 @@ import java.util.stream.Collectors;
 public class SeatInventoryService implements ReserveSeatsUseCase, ReleaseSeatsUseCase, ConfirmSeatsUseCase,
         HoldSeatsUseCase, UnholdSeatsUseCase {
 
-    private static final String LOCK_PREFIX = "inventory:";
-    private static final long LOCK_WAIT_SECONDS  = 5;
-    private static final long LOCK_LEASE_SECONDS = 10;
+    // Package-private: SeatReturnService takes the same per-showtime lock, so a seat going back on
+    // sale can never interleave with a reserve or a confirm of the same showtime.
+    static final String LOCK_PREFIX = "inventory:";
+    static final long LOCK_WAIT_SECONDS  = 5;
+    static final long LOCK_LEASE_SECONDS = 10;
 
     private final SeatInventoryRepository seatInventoryRepository;
     private final DistributedLockPort distributedLockPort;
