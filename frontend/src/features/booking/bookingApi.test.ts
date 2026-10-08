@@ -99,14 +99,35 @@ describe('cancelBooking', () => {
    * can still read on the account page), and the verb's idempotency is real — booking-service
    * answers a second cancel of the same booking exactly like the first.
    */
-  it('puts to the cancel action and returns the booking as it now stands', async () => {
+  it('puts to the cancel action with no body for a whole booking and returns it as it now stands', async () => {
     const put = vi.spyOn(api, 'put').mockResolvedValue({
       data: { bookingId: 'b-1', status: 'CANCELLED', amount: 400000, currency: 'VND' },
     })
 
     const booking = await cancelBooking('b-1')
 
-    expect(put).toHaveBeenCalledWith('/bookings/b-1/cancel')
+    expect(put).toHaveBeenCalledWith('/bookings/b-1/cancel', undefined)
     expect(booking.status).toBe('CANCELLED')
+  })
+
+  /** A paid booking names the seats to cancel; each is refunded at its own price. */
+  it('names the seats in the body when cancelling single seats of a paid booking', async () => {
+    const put = vi.spyOn(api, 'put').mockResolvedValue({
+      data: {
+        bookingId: 'b-1',
+        status: 'CONFIRMED',
+        amount: 400000,
+        currency: 'VND',
+        seatCodes: ['A1'],
+        cancelledSeatCodes: ['A2'],
+        refundedAmount: 200000,
+      },
+    })
+
+    const booking = await cancelBooking('b-1', ['A2'])
+
+    expect(put).toHaveBeenCalledWith('/bookings/b-1/cancel', { seatCodes: ['A2'] })
+    expect(booking.cancelledSeatCodes).toEqual(['A2'])
+    expect(booking.refundedAmount).toBe(200000)
   })
 })

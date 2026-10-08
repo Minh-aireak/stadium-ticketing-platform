@@ -2,6 +2,7 @@ import { api, ensureAccessToken } from '@/lib/api'
 import type {
   BookingListResponse,
   BookingStatusResponse,
+  CancelBookingResponse,
   CreateBookingRequest,
   CreateBookingResponse,
 } from './types'
@@ -45,11 +46,13 @@ export async function listMyBookings(params: ListBookingsParams = {}): Promise<B
   return data
 }
 
-// FR-21: the customer gives up a booking that has not been paid for. PUT because a repeat is a
-// no-op server-side (an already-CANCELLED booking is answered as-is), so a retried click cannot
-// do anything the first one did not. Only offered for PENDING_PAYMENT bookings; anything else is
-// refused by booking-service with a 422 the caller sees as a toast.
-export async function cancelBooking(bookingId: string): Promise<BookingStatusResponse> {
-  const { data } = await api.put<BookingStatusResponse>(`/bookings/${bookingId}/cancel`)
+// FR-21: the customer cancels seats of their own booking. No `seatCodes` means every seat it still
+// holds — the only form an unpaid booking accepts. A paid booking can name single seats until 24
+// hours before kickoff; each is refunded at its own price. PUT because a repeat is a no-op
+// server-side (seats already cancelled are answered as-is), so a retried click cannot do anything
+// the first one did not. A cancel that collides with another one still running is answered 409.
+export async function cancelBooking(bookingId: string, seatCodes?: string[]): Promise<CancelBookingResponse> {
+  const body = seatCodes && seatCodes.length > 0 ? { seatCodes } : undefined
+  const { data } = await api.put<CancelBookingResponse>(`/bookings/${bookingId}/cancel`, body)
   return data
 }

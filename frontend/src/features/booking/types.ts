@@ -26,14 +26,33 @@ export interface BookingStatusResponse {
   currency: string
 }
 
+/**
+ * What PUT /bookings/{id}/cancel answers with: the booking after the cancel. `seatCodes` here are
+ * the seats it still holds — unlike BookingSummary, where they are every seat it was made for.
+ */
+export interface CancelBookingResponse {
+  bookingId: string
+  status: BookingStatus
+  amount: number
+  currency: string
+  seatCodes: string[]
+  cancelledSeatCodes: string[]
+  refundedAmount: number
+}
+
 export interface BookingSummary {
   bookingId: string
   showtimeId: string
+  /** Every seat the booking was made for, including any since cancelled. */
   seatCodes: string[]
   amount: number
   currency: string
   status: BookingStatus
   createdAt: string // ISO timestamp
+  /** Seats the booking no longer holds — all of them once it is CANCELLED. */
+  cancelledSeatCodes: string[]
+  /** Refunds requested so far for cancelled seats, in `currency`. */
+  refundedAmount: number
 }
 
 export interface BookingListResponse {

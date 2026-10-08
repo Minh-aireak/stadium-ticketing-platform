@@ -99,6 +99,22 @@ const MESSAGE_BY_ERROR_TYPE = new Map<string, string>([
     'Đơn đặt vé này đang được xử lý. Vui lòng đợi giây lát rồi kiểm tra lại.',
   ],
   [
+    'cancellation-in-progress',
+    'Một yêu cầu huỷ khác của đơn này đang được xử lý. Vui lòng đợi giây lát rồi thử lại.',
+  ],
+  [
+    'ticket-issuance-in-progress',
+    'Vé của đơn này vẫn đang được xuất nên chưa huỷ được. Vui lòng thử lại sau ít phút.',
+  ],
+  [
+    'cancellation-conflict',
+    'Đơn vừa thay đổi trạng thái trong lúc huỷ. Vui lòng tải lại trang rồi thử lại.',
+  ],
+  [
+    'cancellation-window-closed',
+    'Đã quá hạn huỷ: vé đã thanh toán chỉ huỷ được trước giờ đá 24 giờ.',
+  ],
+  [
     'data-conflict',
     'Dữ liệu vừa gửi trùng với dữ liệu đã có. Vui lòng tải lại trang rồi thử lại.',
   ],
