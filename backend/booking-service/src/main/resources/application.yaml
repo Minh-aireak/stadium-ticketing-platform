@@ -27,6 +27,15 @@ spring:
       connection-timeout: 3000
 
   jpa:
+    # Off, because the saga steps depend on it. Each BookingSagaSteps step is REQUIRES_NEW and
+    # re-reads the booking to decide on the committed row, but with open-in-view on, a step run from
+    # an HTTP request reuses the request's EntityManager, so that re-read is served from its
+    # first-level cache: a customer cancel that read the booking before taking its lock re-decided
+    # on that stale copy, and only the @Version check stopped it writing over a cancel that had
+    # committed in between (seen as an optimistic-lock retry in the logs). Nothing here needs the
+    # session open past the service call: BookingJpaEntity has no lazy associations, and every
+    # adapter maps to domain objects before returning.
+    open-in-view: false
     hibernate:
       ddl-auto: validate
     show-sql: false
