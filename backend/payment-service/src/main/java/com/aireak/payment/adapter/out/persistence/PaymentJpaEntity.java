@@ -59,6 +59,10 @@ public class PaymentJpaEntity extends BaseAuditEntity {
     @Column(name = "client_secret", length = 200)
     private String clientSecret;
 
+    // What has been refunded so far; see Payment#refund and V12__add_partial_refunds.sql.
+    @Column(name = "refunded_amount", nullable = false, precision = 15, scale = 2)
+    private BigDecimal refundedAmount;
+
     @Version
     @Column(name = "version")
     private Long version;

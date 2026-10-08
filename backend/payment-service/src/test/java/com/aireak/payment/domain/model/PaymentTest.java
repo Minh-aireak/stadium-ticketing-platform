@@ -216,9 +216,10 @@ class PaymentTest {
         payment.markSucceeded("gw-tx-1");
         payment.pullDomainEvents(); // discard PaymentInitiatedEvent + PaymentSucceededEvent
 
-        payment.refund("gw-refund-1", "Match cancelled");
+        payment.refund("req-1", AMOUNT, "gw-refund-1", "Match cancelled");
 
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.REFUNDED);
+        assertThat(payment.getRefundedAmount()).isEqualByComparingTo(AMOUNT);
         List<Object> events = payment.pullDomainEvents();
         assertThat(events).hasSize(1);
         PaymentRefundedEvent event = (PaymentRefundedEvent) events.get(0);
@@ -228,13 +229,15 @@ class PaymentTest {
         // Carried so notification-service has somewhere to send the refund email. Without it the
         // event reached a consumer that could not act on it.
         assertThat(event.customerEmail()).isEqualTo("buyer@example.com");
+        assertThat(payment.newRefunds()).singleElement()
+                .satisfies(refund -> assertThat(refund.refundRequestId()).isEqualTo("req-1"));
     }
 
     @Test
     void refundRejectsWhenNotSucceeded() {
         Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
 
-        assertThatThrownBy(() -> payment.refund("gw-refund-1", "Match cancelled"))
+        assertThatThrownBy(() -> payment.refund("req-1", AMOUNT, "gw-refund-1", "Match cancelled"))
                 .isInstanceOf(InvalidPaymentStatusException.class);
     }
 
@@ -242,10 +245,42 @@ class PaymentTest {
     void refundRejectsWhenAlreadyRefunded() {
         Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
         payment.markSucceeded("gw-tx-1");
-        payment.refund("gw-refund-1", "first refund");
+        payment.refund("req-1", AMOUNT, "gw-refund-1", "first refund");
 
-        assertThatThrownBy(() -> payment.refund("gw-refund-2", "second refund"))
+        assertThatThrownBy(() -> payment.refund("req-2", AMOUNT, "gw-refund-2", "second refund"))
                 .isInstanceOf(InvalidPaymentStatusException.class);
+    }
+
+    /** One cancelled seat of several: the payment stays SUCCEEDED and keeps the rest refundable. */
+    @Test
+    void aPartialRefundKeepsThePaymentSucceededWithTheRestStillRefundable() {
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
+        payment.markSucceeded("gw-tx-1");
+        payment.pullDomainEvents();
+        BigDecimal part = AMOUNT.divide(BigDecimal.valueOf(4));
+
+        payment.refund("req-1", part, "gw-refund-1", "Seat A1 cancelled");
+
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.SUCCEEDED);
+        assertThat(payment.refundableAmount()).isEqualByComparingTo(AMOUNT.subtract(part));
+        assertThat(((PaymentRefundedEvent) payment.pullDomainEvents().get(0)).amount()).isEqualByComparingTo(part);
+
+        payment.refund("req-2", AMOUNT.subtract(part), "gw-refund-2", "Seat A2 cancelled");
+
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.REFUNDED);
+        assertThat(payment.refundableAmount()).isEqualByComparingTo("0");
+        assertThat(payment.newRefunds()).hasSize(2);
+    }
+
+    @Test
+    void refundingMoreThanIsLeftIsRefused() {
+        Payment payment = Payment.initiate("booking-1", "buyer@example.com", AMOUNT, "USD");
+        payment.markSucceeded("gw-tx-1");
+        payment.refund("req-1", AMOUNT.divide(BigDecimal.valueOf(2)), "gw-refund-1", "half");
+
+        assertThatThrownBy(() -> payment.refund("req-2", AMOUNT, "gw-refund-2", "too much"))
+                .isInstanceOf(InvalidPaymentStatusException.class);
+        assertThat(payment.getRefundedAmount()).isEqualByComparingTo(AMOUNT.divide(BigDecimal.valueOf(2)));
     }
 
     // ----------------------------------------------------------------

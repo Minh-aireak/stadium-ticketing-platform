@@ -1,5 +1,6 @@
 package com.aireak.payment.application.service;
 
+import com.aireak.payment.application.port.in.RefundCommand;
 import com.aireak.payment.application.port.in.command.InitiatePaymentCommand;
 import com.aireak.payment.config.PaymentModeProperties;
 import com.aireak.payment.application.port.out.PaymentGatewayPort;
@@ -294,8 +295,8 @@ class PaymentServiceTest {
         Optional<String> result = service.refundByBookingId("booking-1", "Match cancelled");
 
         assertThat(result).isEmpty();
-        verify(paymentGatewayPort, never()).refund(any(), any(), any());
-        verify(sagaSteps, never()).markRefunded(any(), any(), any());
+        verify(paymentGatewayPort, never()).refund(any(), any(), any(), any());
+        verify(sagaSteps, never()).markRefunded(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -307,7 +308,7 @@ class PaymentServiceTest {
         Optional<String> result = service.refundByBookingId("booking-1", "Match cancelled");
 
         assertThat(result).isEmpty();
-        verify(paymentGatewayPort, never()).refund(any(), any(), any());
+        verify(paymentGatewayPort, never()).refund(any(), any(), any(), any());
     }
 
     @Test
@@ -320,7 +321,7 @@ class PaymentServiceTest {
         Optional<String> result = service.refundByBookingId("booking-1", "Match cancelled");
 
         assertThat(result).isEmpty();
-        verify(paymentGatewayPort, never()).refund(any(), any(), any());
+        verify(paymentGatewayPort, never()).refund(any(), any(), any(), any());
     }
 
     @Test
@@ -329,13 +330,14 @@ class PaymentServiceTest {
         Payment succeeded = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"), "USD",
                 PaymentStatus.SUCCEEDED, "gw-tx-1", null, Instant.now(), 0, 1L);
         when(paymentRepository.findByBookingId("booking-1")).thenReturn(Optional.of(succeeded));
-        when(paymentGatewayPort.refund("gw-tx-1", succeeded.getAmount(), succeeded.getCurrency()))
-                .thenReturn("gw-refund-1");
+        when(paymentGatewayPort.refund("refund:gw-tx-1:full:payment-1", "gw-tx-1", succeeded.getAmount(),
+                succeeded.getCurrency())).thenReturn("gw-refund-1");
 
         Optional<String> result = service.refundByBookingId("booking-1", "Match cancelled");
 
         assertThat(result).contains("payment-1");
-        verify(sagaSteps).markRefunded("payment-1", "gw-refund-1", "Match cancelled");
+        verify(sagaSteps).markRefunded("payment-1", "full:payment-1", succeeded.getAmount(), "gw-refund-1",
+                "Match cancelled");
     }
 
     @Test
@@ -344,11 +346,58 @@ class PaymentServiceTest {
         Payment succeeded = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"), "USD",
                 PaymentStatus.SUCCEEDED, "gw-tx-1", null, Instant.now(), 0, 1L);
         when(paymentRepository.findByBookingId("booking-1")).thenReturn(Optional.of(succeeded));
-        when(paymentGatewayPort.refund(any(), any(), any())).thenThrow(new RuntimeException("gateway down"));
+        when(paymentGatewayPort.refund(any(), any(), any(), any())).thenThrow(new RuntimeException("gateway down"));
 
         assertThatThrownBy(() -> service.refundByBookingId("booking-1", "Match cancelled"))
                 .isInstanceOf(RuntimeException.class);
-        verify(sagaSteps, never()).markRefunded(any(), any(), any());
+        verify(sagaSteps, never()).markRefunded(any(), any(), any(), any(), any());
+    }
+
+    /** One cancelled seat: exactly its price goes back, under a gateway key of its own. */
+    @Test
+    void aPartialRefundIsIssuedForTheRequestedAmountUnderItsOwnIdempotencyKey() {
+        newService();
+        Payment succeeded = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"), "USD",
+                PaymentStatus.SUCCEEDED, "gw-tx-1", null, Instant.now(), 0, 1L);
+        when(paymentRepository.findByBookingId("booking-1")).thenReturn(Optional.of(succeeded));
+        when(paymentRepository.hasRefund("req-1")).thenReturn(false);
+        when(paymentGatewayPort.refund("refund:gw-tx-1:req-1", "gw-tx-1", new BigDecimal("40.00"), "USD"))
+                .thenReturn("gw-refund-1");
+
+        Optional<String> result = service.refund(new RefundCommand("booking-1", "req-1", new BigDecimal("40.00"), "Seat A1"));
+
+        assertThat(result).contains("payment-1");
+        verify(sagaSteps).markRefunded("payment-1", "req-1", new BigDecimal("40.00"), "gw-refund-1", "Seat A1");
+    }
+
+    /** A redelivered request finds its ledger row and moves no money — the status no longer can tell. */
+    @Test
+    void aRefundRequestAlreadyAppliedIsSkippedEvenThoughThePaymentIsStillSucceeded() {
+        newService();
+        Payment partlyRefunded = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"),
+                "USD", PaymentStatus.SUCCEEDED, "gw-tx-1", null, Instant.now(), 0, 2L, null, null, new BigDecimal("40.00"));
+        when(paymentRepository.findByBookingId("booking-1")).thenReturn(Optional.of(partlyRefunded));
+        when(paymentRepository.hasRefund("req-1")).thenReturn(true);
+
+        Optional<String> result = service.refund(new RefundCommand("booking-1", "req-1", new BigDecimal("40.00"), "Seat A1"));
+
+        assertThat(result).isEmpty();
+        verify(paymentGatewayPort, never()).refund(any(), any(), any(), any());
+        verify(sagaSteps, never()).markRefunded(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void aRequestForMoreThanIsLeftRefundsWhatIsLeft() {
+        newService();
+        Payment partlyRefunded = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"),
+                "USD", PaymentStatus.SUCCEEDED, "gw-tx-1", null, Instant.now(), 0, 2L, null, null, new BigDecimal("80.00"));
+        when(paymentRepository.findByBookingId("booking-1")).thenReturn(Optional.of(partlyRefunded));
+        when(paymentRepository.hasRefund("req-2")).thenReturn(false);
+        when(paymentGatewayPort.refund(any(), eq("gw-tx-1"), eq(new BigDecimal("20.00")), eq("USD"))).thenReturn("gw-refund-2");
+
+        service.refund(new RefundCommand("booking-1", "req-2", new BigDecimal("50.00"), "Seat A2"));
+
+        verify(sagaSteps).markRefunded("payment-1", "req-2", new BigDecimal("20.00"), "gw-refund-2", "Seat A2");
     }
 
     @Test

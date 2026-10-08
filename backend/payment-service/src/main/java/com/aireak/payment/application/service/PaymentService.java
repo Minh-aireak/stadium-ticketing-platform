@@ -4,6 +4,7 @@ import com.aireak.payment.application.port.out.PaymentDeclinedException;
 import com.aireak.payment.application.port.in.ExpireCardPaymentsUseCase;
 import com.aireak.payment.application.port.in.GetPaymentUseCase;
 import com.aireak.payment.application.port.in.InitiatePaymentUseCase;
+import com.aireak.payment.application.port.in.RefundCommand;
 import com.aireak.payment.application.port.in.RefundPaymentUseCase;
 import com.aireak.payment.application.port.in.RetryPaymentUseCase;
 import com.aireak.payment.application.port.in.SyncPaymentUseCase;
@@ -401,26 +402,56 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
      * money had in fact been returned.
      */
     @Override
-    public Optional<String> refundByBookingId(String bookingId, String reason) {
+    public Optional<String> refund(RefundCommand command) {
+        String bookingId = command.bookingId();
         Payment payment = paymentRepository.findByBookingId(bookingId).orElse(null);
         if (payment == null || payment.getStatus() != PaymentStatus.SUCCEEDED) {
-            log.info("Refund skipped for bookingId={}: no SUCCEEDED payment found (status={})",
+            log.info("Refund skipped for bookingId={}: no SUCCEEDED payment with a balance left (status={})",
                     bookingId, payment == null ? "none" : payment.getStatus());
+            return Optional.empty();
+        }
+
+        // A request raised before requests carried an id can only have been a full refund, and a
+        // payment is fully refunded at most once, so the payment's own id keys it uniquely.
+        String refundRequestId = command.refundRequestId() != null
+                ? command.refundRequestId()
+                : "full:" + payment.getPaymentId();
+        if (paymentRepository.hasRefund(refundRequestId)) {
+            log.info("Refund request already applied, skipping the redelivery: bookingId={}, refundRequestId={}",
+                    bookingId, refundRequestId);
+            return Optional.empty();
+        }
+
+        BigDecimal refundable = payment.refundableAmount();
+        BigDecimal amount = command.amount() == null ? refundable : command.amount().min(refundable);
+        if (command.amount() != null && command.amount().compareTo(refundable) > 0) {
+            log.warn("Refund request asks for more than is left on the payment, refunding what is left: "
+                            + "bookingId={}, refundRequestId={}, requested={}, refundable={} {}",
+                    bookingId, refundRequestId, command.amount(), refundable, payment.getCurrency());
+        }
+        if (amount.signum() <= 0) {
+            log.info("Refund skipped for bookingId={}: nothing left to refund (refundRequestId={})",
+                    bookingId, refundRequestId);
             return Optional.empty();
         }
 
         String gatewayRefundId;
         try {
-            gatewayRefundId = paymentGatewayPort.refund(
-                    payment.getGatewayTransactionId(), payment.getAmount(), payment.getCurrency());
+            gatewayRefundId = paymentGatewayPort.refund(refundIdempotencyKey(payment, refundRequestId),
+                    payment.getGatewayTransactionId(), amount, payment.getCurrency());
         } catch (Exception e) {
-            log.error("Refund gateway call failed: paymentId={}, bookingId={}, reason={}",
-                    payment.getPaymentId(), bookingId, e.getMessage(), e);
+            log.error("Refund gateway call failed: paymentId={}, bookingId={}, refundRequestId={}, amount={} {}, reason={}",
+                    payment.getPaymentId(), bookingId, refundRequestId, amount, payment.getCurrency(), e.getMessage(), e);
             throw new RuntimeException("Refund failed for bookingId=" + bookingId, e);
         }
 
-        persistRefundedOutcome(payment, bookingId, gatewayRefundId, reason);
+        persistRefundedOutcome(payment, bookingId, refundRequestId, amount, gatewayRefundId, command.reason());
         return Optional.of(payment.getPaymentId());
+    }
+
+    // Per request, not per charge — see PaymentGatewayPort#refund.
+    private static String refundIdempotencyKey(Payment payment, String refundRequestId) {
+        return "refund:" + payment.getGatewayTransactionId() + ":" + refundRequestId;
     }
 
     /**
@@ -429,19 +460,20 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
      * lose it. The money is already back with the customer at this point, so the one thing this
      * must never do is leave that fact recorded nowhere.
      */
-    private void persistRefundedOutcome(Payment payment, String bookingId, String gatewayRefundId, String reason) {
+    private void persistRefundedOutcome(Payment payment, String bookingId, String refundRequestId,
+                                        BigDecimal amount, String gatewayRefundId, String reason) {
         String paymentId = payment.getPaymentId();
         for (int attempt = 1; attempt <= PERSIST_MAX_ATTEMPTS; attempt++) {
             try {
-                sagaSteps.markRefunded(paymentId, gatewayRefundId, reason);
-                log.info("Payment refunded: id={}, bookingId={}, gatewayRefundId={}",
-                        paymentId, bookingId, gatewayRefundId);
+                sagaSteps.markRefunded(paymentId, refundRequestId, amount, gatewayRefundId, reason);
+                log.info("Payment refunded: id={}, bookingId={}, refundRequestId={}, amount={} {}, gatewayRefundId={}",
+                        paymentId, bookingId, refundRequestId, amount, payment.getCurrency(), gatewayRefundId);
                 return;
             } catch (Exception e) {
                 log.error("Persisting issued refund failed (attempt {}/{}): id={}, gatewayRefundId={}, reason={}",
                         attempt, PERSIST_MAX_ATTEMPTS, paymentId, gatewayRefundId, e.getMessage());
                 if (attempt == PERSIST_MAX_ATTEMPTS) {
-                    recordRefundForManualReconciliation(payment, bookingId, gatewayRefundId, e.getMessage());
+                    recordRefundForManualReconciliation(payment, bookingId, amount, gatewayRefundId, e.getMessage());
                     return;
                 }
                 sleep(PERSIST_RETRY_BACKOFF.multipliedBy(attempt));
@@ -450,12 +482,13 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
     }
 
     // Same last-resort contract as recordForManualReconciliation: must not itself throw and
-    // abandon the outcome with nothing but a log line.
-    private void recordRefundForManualReconciliation(Payment payment, String bookingId,
+    // abandon the outcome with nothing but a log line. Records the amount of THIS refund, which
+    // since partial refunds is no longer necessarily the whole payment.
+    private void recordRefundForManualReconciliation(Payment payment, String bookingId, BigDecimal amount,
                                                       String gatewayRefundId, String failureReason) {
         try {
             reconciliationPort.recordUnpersistedRefund(payment.getPaymentId(), bookingId, gatewayRefundId,
-                    payment.getAmount(), payment.getCurrency(), failureReason);
+                    amount, payment.getCurrency(), failureReason);
             log.error("Refund was issued at the gateway but could not be persisted after {} attempts — " +
                             "recorded for manual reconciliation: id={}, bookingId={}, gatewayRefundId={}",
                     PERSIST_MAX_ATTEMPTS, payment.getPaymentId(), bookingId, gatewayRefundId);
@@ -463,7 +496,7 @@ public class PaymentService implements InitiatePaymentUseCase, GetPaymentUseCase
             log.error("CRITICAL: refund was issued at the gateway but could not be persisted NOR recorded " +
                             "for reconciliation — id={}, bookingId={}, gatewayRefundId={}, amount={} {}: {}",
                     payment.getPaymentId(), bookingId, gatewayRefundId,
-                    payment.getAmount(), payment.getCurrency(), e.getMessage(), e);
+                    amount, payment.getCurrency(), e.getMessage(), e);
         }
     }
 

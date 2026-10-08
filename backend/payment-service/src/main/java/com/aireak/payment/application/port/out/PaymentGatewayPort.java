@@ -17,8 +17,15 @@ public interface PaymentGatewayPort {
      */
     String charge(String idempotencyKey, String bookingId, BigDecimal amount, String currency);
 
-    /** @return gatewayRefundId on success */
-    String refund(String gatewayTransactionId, BigDecimal amount, String currency);
+    /**
+     * @param idempotencyKey one per refund request, not per charge: a payment can now be refunded
+     *        in parts (one cancelled seat at a time), and a key derived from the charge alone would
+     *        answer the second partial refund with the first one's reply — no money moved, success
+     *        reported. Constant across the adapter's own retries of the same request, so a lost
+     *        response can never become a second refund.
+     * @return gatewayRefundId on success
+     */
+    String refund(String idempotencyKey, String gatewayTransactionId, BigDecimal amount, String currency);
 
     // ---- card mode: the customer confirms in the browser, this side only opens and closes ----
 

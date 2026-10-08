@@ -24,4 +24,11 @@ public interface PaymentRepository {
      * has a bounded number of gateway calls to make.
      */
     List<Payment> findOpenCardPaymentsCreatedBefore(Instant cutoff, int limit);
+
+    /**
+     * Whether a refund request with this id has already been applied. {@link #save} persists the
+     * refunds a payment applied ({@code Payment#newRefunds}) in the same transaction as the payment
+     * itself, so this and the payment's {@code refundedAmount} never disagree.
+     */
+    boolean hasRefund(String refundRequestId);
 }

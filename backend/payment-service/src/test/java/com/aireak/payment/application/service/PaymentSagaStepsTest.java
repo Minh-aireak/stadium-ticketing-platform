@@ -132,12 +132,15 @@ class PaymentSagaStepsTest {
                 "USD", PaymentStatus.SUCCEEDED, "gw-tx-1", null, Instant.now(), 0, 1L);
         when(paymentRepository.findById("payment-1")).thenReturn(Optional.of(existing));
 
-        sagaSteps.markRefunded("payment-1", "gw-refund-1", "Match cancelled");
+        sagaSteps.markRefunded("payment-1", "req-1", new BigDecimal("100.00"), "gw-refund-1", "Match cancelled");
 
         ArgumentCaptor<Payment> saved = ArgumentCaptor.forClass(Payment.class);
         verify(paymentRepository).save(saved.capture());
         assertThat(saved.getValue().getStatus()).isEqualTo(PaymentStatus.REFUNDED);
         assertThat(saved.getValue()).isSameAs(existing);
+        // The ledger row rides the same save, so it commits with the payment or not at all.
+        assertThat(saved.getValue().newRefunds()).singleElement()
+                .satisfies(refund -> assertThat(refund.refundRequestId()).isEqualTo("req-1"));
 
         ArgumentCaptor<List<Object>> published = ArgumentCaptor.forClass(List.class);
         verify(eventPublisher).publishAll(published.capture());
@@ -150,7 +153,7 @@ class PaymentSagaStepsTest {
         newSagaSteps();
         when(paymentRepository.findById("missing")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> sagaSteps.markRefunded("missing", "gw-refund-1", "reason"))
+        assertThatThrownBy(() -> sagaSteps.markRefunded("missing", "req-1", BigDecimal.ONE, "gw-refund-1", "reason"))
                 .isInstanceOf(IllegalStateException.class);
     }
 

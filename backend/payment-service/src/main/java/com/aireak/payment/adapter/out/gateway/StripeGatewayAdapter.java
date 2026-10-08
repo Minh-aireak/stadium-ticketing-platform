@@ -116,17 +116,18 @@ public class StripeGatewayAdapter implements PaymentGatewayPort {
     @Bulkhead(name = "payment-gateway", type = Bulkhead.Type.SEMAPHORE)
     @CircuitBreaker(name = "payment-gateway")
     @Retry(name = "payment-gateway", fallbackMethod = "refundFallback")
-    public String refund(String gatewayTransactionId, BigDecimal amount, String currency) {
+    public String refund(String idempotencyKey, String gatewayTransactionId, BigDecimal amount, String currency) {
         try {
             RefundCreateParams params = RefundCreateParams.builder()
                     .setPaymentIntent(gatewayTransactionId)
                     .setAmount(toSmallestUnit(amount, currency))
                     .build();
 
-            // Idempotency key derived from the charge being refunded — a retried refund request
-            // for the same PaymentIntent must never double-refund it.
+            // One key per refund request (see PaymentGatewayPort#refund): a retried request must
+            // never double-refund, and a second partial refund of the same PaymentIntent must not
+            // be answered with the first one's reply.
             RequestOptions requestOptions = RequestOptions.builder()
-                    .setIdempotencyKey("refund:" + gatewayTransactionId)
+                    .setIdempotencyKey(idempotencyKey)
                     .build();
 
             Refund refund = Refund.create(params, requestOptions);
@@ -284,7 +285,8 @@ public class StripeGatewayAdapter implements PaymentGatewayPort {
         throw new RuntimeException("Payment gateway unavailable", t);
     }
 
-    private String refundFallback(String gatewayTransactionId, BigDecimal amount, String currency, Throwable t) {
+    private String refundFallback(String idempotencyKey, String gatewayTransactionId, BigDecimal amount,
+                                  String currency, Throwable t) {
         // Same reasoning as chargeFallback: a refund Stripe actively rejected is not the gateway
         // being unreachable, and whoever reads the dead-lettered refund needs to know which it was.
         if (t instanceof PaymentDeclinedException declined) {

@@ -55,6 +55,12 @@ public class Payment {
     // Which gateway attempt this payment is on, and therefore which idempotency key its next
     // charge presents. See #chargeIdempotencyKey and #retry.
     private int chargeAttempt;
+    // What has been refunded so far (V12). A payment can be refunded in parts now — one cancelled
+    // seat at a time — so "REFUNDED" alone no longer says how much went back.
+    private BigDecimal refundedAmount = BigDecimal.ZERO;
+    // Refunds applied by this instance and not yet persisted; PaymentPersistenceAdapter#save writes
+    // them with the payment row, in the same transaction.
+    private final List<RefundRecord> newRefunds = new ArrayList<>();
     private final List<Object> domainEvents = new ArrayList<>();
 
     private Payment(String paymentId, String bookingId, String customerEmail, BigDecimal amount,
@@ -94,12 +100,22 @@ public class Payment {
                                         String gatewayTransactionId, String failureReason,
                                         Instant createdAt, int chargeAttempt, Long version,
                                         String gatewayIntentId, String clientSecret) {
+        return reconstitute(paymentId, bookingId, customerEmail, amount, currency, status, gatewayTransactionId,
+                failureReason, createdAt, chargeAttempt, version, gatewayIntentId, clientSecret, BigDecimal.ZERO);
+    }
+
+    public static Payment reconstitute(String paymentId, String bookingId, String customerEmail,
+                                        BigDecimal amount, String currency, PaymentStatus status,
+                                        String gatewayTransactionId, String failureReason,
+                                        Instant createdAt, int chargeAttempt, Long version,
+                                        String gatewayIntentId, String clientSecret, BigDecimal refundedAmount) {
         Payment p = new Payment(paymentId, bookingId, customerEmail, amount, currency, status, createdAt, version);
         p.gatewayTransactionId = gatewayTransactionId;
         p.failureReason = failureReason;
         p.chargeAttempt = chargeAttempt;
         p.gatewayIntentId = gatewayIntentId;
         p.clientSecret = clientSecret;
+        p.refundedAmount = refundedAmount == null ? BigDecimal.ZERO : refundedAmount;
         return p;
     }
 
@@ -211,16 +227,34 @@ public class Payment {
         domainEvents.add(new PaymentFailedEvent(paymentId, bookingId, this.failureReason));
     }
 
+    /** What can still be refunded: the captured amount minus what already went back. */
+    public BigDecimal refundableAmount() {
+        if (status != PaymentStatus.SUCCEEDED) {
+            return BigDecimal.ZERO;
+        }
+        return amount.subtract(refundedAmount).max(BigDecimal.ZERO);
+    }
+
     /**
-     * Refunds a SUCCEEDED payment (e.g. its booking's match was cancelled) — the gateway call
-     * itself happens before this (see PaymentSagaSteps#markRefunded), so {@code gatewayRefundId}
-     * is already known by the time this runs. Terminal: a refund can never be retried or reversed
-     * through this aggregate.
+     * Records a refund of {@code refundAmount} that the gateway has already issued (see
+     * PaymentSagaSteps#markRefunded), so {@code gatewayRefundId} is known by the time this runs.
+     *
+     * <p>The payment stays SUCCEEDED while part of it is refunded — one cancelled seat of several —
+     * and becomes REFUNDED, terminally, once all of it is. Never more than {@link #refundableAmount}:
+     * the gateway would refuse it, and recording it would claim money went back that did not.
      */
-    public void refund(String gatewayRefundId, String reason) {
+    public void refund(String refundRequestId, BigDecimal refundAmount, String gatewayRefundId, String reason) {
         requireStatus(PaymentStatus.SUCCEEDED, "refund");
-        this.status = PaymentStatus.REFUNDED;
-        domainEvents.add(new PaymentRefundedEvent(paymentId, bookingId, customerEmail, amount, currency,
+        if (refundAmount.signum() <= 0 || refundAmount.compareTo(refundableAmount()) > 0) {
+            throw new InvalidPaymentStatusException("Refund of " + refundAmount + " " + currency + " is outside what "
+                    + "payment " + paymentId + " can still refund: " + refundableAmount());
+        }
+        this.refundedAmount = refundedAmount.add(refundAmount);
+        if (refundedAmount.compareTo(amount) >= 0) {
+            this.status = PaymentStatus.REFUNDED;
+        }
+        newRefunds.add(new RefundRecord(refundRequestId, refundAmount, gatewayRefundId, reason, Instant.now()));
+        domainEvents.add(new PaymentRefundedEvent(paymentId, bookingId, customerEmail, refundAmount, currency,
                 gatewayRefundId, reason));
     }
 
@@ -301,6 +335,12 @@ public class Payment {
     public int getChargeAttempt()             { return chargeAttempt; }
     public String getGatewayIntentId()        { return gatewayIntentId; }
     public String getClientSecret()           { return clientSecret; }
+    public BigDecimal getRefundedAmount()     { return refundedAmount; }
+
+    /** Refunds applied since this instance was loaded, for the repository to persist with it. */
+    public List<RefundRecord> newRefunds() {
+        return List.copyOf(newRefunds);
+    }
 
     public List<Object> pullDomainEvents() {
         List<Object> events = Collections.unmodifiableList(new ArrayList<>(domainEvents));

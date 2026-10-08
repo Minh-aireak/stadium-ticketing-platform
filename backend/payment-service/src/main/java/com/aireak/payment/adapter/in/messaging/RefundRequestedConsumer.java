@@ -3,6 +3,7 @@ package com.aireak.payment.adapter.in.messaging;
 import com.aireak.booking.domain.event.RefundRequestedEvent;
 import com.aireak.common.event.EventEnvelope;
 import com.aireak.common.kafka.KafkaTopics;
+import com.aireak.payment.application.port.in.RefundCommand;
 import com.aireak.payment.application.port.in.RefundPaymentUseCase;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,13 +41,19 @@ public class RefundRequestedConsumer {
         log.debug("Received refund request: type={}, eventId={}", envelope.getEventType(), envelope.getEventId());
 
         if (envelope.getPayload() instanceof RefundRequestedEvent event) {
+            log.info("Refund requested: bookingId={}, refundRequestId={}, amount={}, seats={}, reason={}",
+                    event.bookingId(), event.refundRequestId(),
+                    event.amount() == null ? "REMAINING_BALANCE" : event.amount() + " " + event.currency(),
+                    event.seatCodes(), event.reason());
             // Anything thrown here is deliberate: the error handler retries, then dead-letters.
             // Swallowing it is what the old HTTP fallback did, and why refunds went missing.
-            refundPaymentUseCase.refundByBookingId(event.bookingId(), event.reason())
+            refundPaymentUseCase.refund(new RefundCommand(
+                            event.bookingId(), event.refundRequestId(), event.amount(), event.reason()))
                     .ifPresentOrElse(
-                            paymentId -> log.info("Refund applied from event: bookingId={}, paymentId={}",
-                                    event.bookingId(), paymentId),
-                            () -> log.info("Refund request needs no action: bookingId={}", event.bookingId()));
+                            paymentId -> log.info("Refund applied from event: bookingId={}, paymentId={}, refundRequestId={}",
+                                    event.bookingId(), paymentId, event.refundRequestId()),
+                            () -> log.info("Refund request needs no action: bookingId={}, refundRequestId={}",
+                                    event.bookingId(), event.refundRequestId()));
             return;
         }
         log.warn("Unknown payload on {} for eventType={}", KafkaTopics.REFUND_REQUESTED, envelope.getEventType());

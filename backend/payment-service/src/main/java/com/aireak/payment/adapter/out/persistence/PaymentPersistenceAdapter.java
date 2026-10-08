@@ -18,10 +18,29 @@ import java.util.Optional;
 public class PaymentPersistenceAdapter implements PaymentRepository {
 
     private final PaymentJpaRepository jpaRepository;
+    private final PaymentRefundJpaRepository refundJpaRepository;
 
+    // The payment row and the refunds it applied go in together: every caller runs this inside one
+    // transaction (PaymentSagaSteps), so a refund cannot be recorded without the refundedAmount it
+    // adds to, or the other way round.
     @Override
     public void save(Payment payment) {
         jpaRepository.save(toJpaEntity(payment));
+        payment.newRefunds().forEach(refund -> refundJpaRepository.save(PaymentRefundJpaEntity.builder()
+                .refundRequestId(refund.refundRequestId())
+                .paymentId(payment.getPaymentId())
+                .bookingId(payment.getBookingId())
+                .amount(refund.amount())
+                .currency(payment.getCurrency())
+                .gatewayRefundId(refund.gatewayRefundId())
+                .reason(refund.reason())
+                .createdAt(refund.refundedAt())
+                .build()));
+    }
+
+    @Override
+    public boolean hasRefund(String refundRequestId) {
+        return refundJpaRepository.existsById(refundRequestId);
     }
 
     @Override
@@ -67,6 +86,7 @@ public class PaymentPersistenceAdapter implements PaymentRepository {
                 .chargeAttempt(p.getChargeAttempt())
                 .gatewayIntentId(p.getGatewayIntentId())
                 .clientSecret(p.getClientSecret())
+                .refundedAmount(p.getRefundedAmount())
                 .version(p.getVersion())
                 .build();
     }
@@ -77,7 +97,7 @@ public class PaymentPersistenceAdapter implements PaymentRepository {
                 e.getAmount(), e.getCurrency(), e.getStatus(),
                 e.getGatewayTransactionId(), e.getFailureReason(),
                 e.getCreatedAt(), e.getChargeAttempt(), e.getVersion(),
-                e.getGatewayIntentId(), e.getClientSecret()
+                e.getGatewayIntentId(), e.getClientSecret(), e.getRefundedAmount()
         );
     }
 }

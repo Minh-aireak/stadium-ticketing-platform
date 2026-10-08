@@ -65,10 +65,13 @@ class PaymentSagaSteps {
         saveAndPublish(payment);
     }
 
+    // One transaction for the payment's refundedAmount, the refund's ledger row (written by
+    // PaymentRepository#save) and PaymentRefundedEvent: a refund is recorded whole or not at all.
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void markRefunded(String paymentId, String gatewayRefundId, String reason) {
+    public void markRefunded(String paymentId, String refundRequestId, BigDecimal amount,
+                             String gatewayRefundId, String reason) {
         Payment payment = findOrThrow(paymentId);
-        payment.refund(gatewayRefundId, reason);
+        payment.refund(refundRequestId, amount, gatewayRefundId, reason);
         saveAndPublish(payment);
     }
 

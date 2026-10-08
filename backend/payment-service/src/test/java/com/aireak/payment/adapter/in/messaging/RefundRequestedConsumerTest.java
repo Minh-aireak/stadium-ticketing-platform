@@ -3,18 +3,21 @@ package com.aireak.payment.adapter.in.messaging;
 import com.aireak.booking.domain.event.RefundRequestedEvent;
 import com.aireak.common.event.EventEnvelope;
 import com.aireak.common.kafka.KafkaTopics;
+import com.aireak.payment.application.port.in.RefundCommand;
 import com.aireak.payment.application.port.in.RefundPaymentUseCase;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -34,31 +37,47 @@ class RefundRequestedConsumerTest {
         return new RefundRequestedConsumer(refundPaymentUseCase);
     }
 
-    private static EventEnvelope<?> envelopeFor(String bookingId, String reason) {
-        return EventEnvelope.of(KafkaTopics.REFUND_REQUESTED,
-                new RefundRequestedEvent(bookingId, reason, Instant.now()), "trace-1");
+    private static EventEnvelope<?> envelopeFor(RefundRequestedEvent event) {
+        return EventEnvelope.of(KafkaTopics.REFUND_REQUESTED, event, "trace-1");
+    }
+
+    private static RefundRequestedEvent remainingBalance(String bookingId, String reason) {
+        return new RefundRequestedEvent(bookingId, "req-1", null, null, List.of(), reason, Instant.now());
     }
 
     @Test
     void appliesTheRefundForTheBookingNamedInTheEvent() {
-        when(refundPaymentUseCase.refundByBookingId("booking-1", "Match cancelled"))
-                .thenReturn(Optional.of("payment-1"));
+        RefundCommand command = new RefundCommand("booking-1", "req-1", null, "Match cancelled");
+        when(refundPaymentUseCase.refund(command)).thenReturn(Optional.of("payment-1"));
 
-        consumer().consume(envelopeFor("booking-1", "Match cancelled"));
+        consumer().consume(envelopeFor(remainingBalance("booking-1", "Match cancelled")));
 
-        verify(refundPaymentUseCase).refundByBookingId("booking-1", "Match cancelled");
+        verify(refundPaymentUseCase).refund(command);
+    }
+
+    /** A cancelled seat: its price and the request's own id reach the use case unchanged. */
+    @Test
+    void passesThePartialAmountAndTheRequestIdThrough() {
+        RefundRequestedEvent seatRefund = new RefundRequestedEvent("booking-1", "req-7", new BigDecimal("150000"), "VND",
+                List.of("A2"), "Cancelled by the customer", Instant.now());
+        RefundCommand command = new RefundCommand("booking-1", "req-7", new BigDecimal("150000"), "Cancelled by the customer");
+        when(refundPaymentUseCase.refund(command)).thenReturn(Optional.of("payment-1"));
+
+        consumer().consume(envelopeFor(seatRefund));
+
+        verify(refundPaymentUseCase).refund(command);
     }
 
     /**
-     * A redelivery finds the payment already REFUNDED and gets an empty Optional back. That is a
+     * A redelivery finds the request already applied and gets an empty Optional back. That is a
      * normal outcome, not a failure — throwing here would dead-letter a request that was in fact
      * already honoured.
      */
     @Test
     void treatsNothingToRefundAsSuccessSoARedeliveryIsNotDeadLettered() {
-        when(refundPaymentUseCase.refundByBookingId(anyString(), anyString())).thenReturn(Optional.empty());
+        when(refundPaymentUseCase.refund(any(RefundCommand.class))).thenReturn(Optional.empty());
 
-        assertThatCode(() -> consumer().consume(envelopeFor("booking-1", "Match cancelled")))
+        assertThatCode(() -> consumer().consume(envelopeFor(remainingBalance("booking-1", "Match cancelled"))))
                 .doesNotThrowAnyException();
     }
 
@@ -68,10 +87,10 @@ class RefundRequestedConsumerTest {
      */
     @Test
     void letsAFailedRefundPropagateInsteadOfSwallowingIt() {
-        when(refundPaymentUseCase.refundByBookingId(anyString(), anyString()))
+        when(refundPaymentUseCase.refund(any(RefundCommand.class)))
                 .thenThrow(new RuntimeException("gateway refused the refund"));
 
-        assertThatThrownBy(() -> consumer().consume(envelopeFor("booking-1", "Match cancelled")))
+        assertThatThrownBy(() -> consumer().consume(envelopeFor(remainingBalance("booking-1", "Match cancelled"))))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("gateway refused the refund");
     }
@@ -80,6 +99,6 @@ class RefundRequestedConsumerTest {
     void ignoresAnEnvelopeCarryingSomeOtherPayload() {
         consumer().consume(EventEnvelope.of(KafkaTopics.REFUND_REQUESTED, "not an event", "trace-1"));
 
-        verify(refundPaymentUseCase, never()).refundByBookingId(anyString(), anyString());
+        verify(refundPaymentUseCase, never()).refund(any(RefundCommand.class));
     }
 }
