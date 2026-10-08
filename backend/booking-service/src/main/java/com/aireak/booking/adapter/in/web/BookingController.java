@@ -1,12 +1,17 @@
 package com.aireak.booking.adapter.in.web;
 
+import com.aireak.booking.application.port.in.CancelBookingCommand;
 import com.aireak.booking.application.port.in.CancelBookingUseCase;
 import com.aireak.booking.application.port.in.CreateBookingUseCase;
 import com.aireak.booking.application.port.in.GetBookingUseCase;
 import com.aireak.booking.application.port.in.ListBookingsUseCase;
 import com.aireak.booking.application.port.in.dto.BookingCreationResult;
 import com.aireak.booking.application.port.out.OutboundServiceUnavailableException;
+import com.aireak.booking.application.service.CancellationInProgressException;
 import com.aireak.booking.application.service.DuplicateRequestInProgressException;
+import com.aireak.booking.domain.exception.CancellationConflictException;
+import com.aireak.booking.domain.exception.CancellationWindowClosedException;
+import com.aireak.booking.domain.exception.TicketIssuanceInProgressException;
 import com.aireak.booking.domain.model.Booking;
 import com.aireak.common.exception.IdentityMismatchException;
 import com.aireak.common.security.AuthenticatedUser;
@@ -111,21 +116,32 @@ public class BookingController {
     }
 
     /**
-     * PUT /api/v1/bookings/{bookingId}/cancel — the customer gives up a booking they have not
-     * paid for (FR-21). PUT, like match-catalog's publish/cancel/complete: the target state is
-     * fixed and a repeat is a no-op, so the verb's idempotency promise actually holds — and it
-     * means nginx and the gateway may safely retry it, unlike the POST that creates a booking.
+     * PUT /api/v1/bookings/{bookingId}/cancel — the customer cancels seats of their own booking
+     * (FR-21). Body {@code {"seatCodes": ["A1"]}} names the seats; no body, or an empty list, means
+     * every seat the booking still holds. An unpaid booking can only be cancelled whole; a paid one
+     * seat by seat until 24 hours before kickoff, each seat refunded at its own price.
+     *
+     * <p>PUT, like match-catalog's publish/cancel/complete: the target state is fixed and a repeat
+     * is a no-op, so the verb's idempotency promise actually holds — and it means nginx and the
+     * gateway may safely retry it, unlike the POST that creates a booking.
      *
      * <p>The ownership check lives in the use case (bookingId is enumerable); this method only
-     * says who is asking. Answers 200 with the booking as it now stands, 404 for an unknown id,
-     * 403 for someone else's booking, 422 when the booking is DRAFT or already CONFIRMED.
+     * says who is asking. Answers 200 with the booking as it now stands; 404 unknown id; 403 someone
+     * else's; 422 for a DRAFT booking, seats that are not the booking's, part of an unpaid booking,
+     * or a paid one past its deadline; 409 when another cancel of it is running or its tickets are
+     * still being issued — both clear by themselves, so the 409s carry a Retry-After.
      */
     @PutMapping("/{bookingId}/cancel")
-    public ResponseEntity<BookingStatusResponse> cancelBooking(@PathVariable("bookingId") String bookingId) {
-        Booking booking = cancelBookingUseCase.cancelBooking(bookingId, currentUser().userId());
-        return ResponseEntity.ok(new BookingStatusResponse(
+    public ResponseEntity<CancelBookingResponse> cancelBooking(
+            @PathVariable("bookingId") String bookingId,
+            @Valid @RequestBody(required = false) CancelBookingRequest request) {
+        List<String> seatCodes = request == null || request.seatCodes() == null ? List.of() : request.seatCodes();
+        Booking booking = cancelBookingUseCase.cancelBooking(
+                new CancelBookingCommand(bookingId, currentUser().userId(), seatCodes));
+        return ResponseEntity.ok(new CancelBookingResponse(
                 booking.getBookingId(), booking.getStatus().name(),
-                booking.getAmount().amount(), booking.getAmount().currency()));
+                booking.getAmount().amount(), booking.getAmount().currency(),
+                booking.activeSeatCodes(), booking.getCancelledSeatCodes(), booking.getRefundedAmount()));
     }
 
     /**
@@ -155,7 +171,8 @@ public class BookingController {
         return new BookingSummaryResponse(
                 booking.getBookingId(), booking.getShowtimeId(), booking.getSeatSelection().seatCodes(),
                 booking.getAmount().amount(), booking.getAmount().currency(),
-                booking.getStatus().name(), booking.getCreatedAt());
+                booking.getStatus().name(), booking.getCreatedAt(),
+                booking.getCancelledSeatCodes(), booking.getRefundedAmount());
     }
 
     /**
@@ -231,8 +248,32 @@ public class BookingController {
     public record BookingStatusResponse(String bookingId, String status,
                                         BigDecimal amount, String currency) {}
 
+    /**
+     * {@code seatCodes} is every seat the booking was made for; {@code cancelledSeatCodes} the ones
+     * it no longer holds (all of them once it is CANCELLED), and {@code refundedAmount} what has
+     * been refunded for them — so the account page can show a part-cancelled booking as such.
+     */
     public record BookingSummaryResponse(String bookingId, String showtimeId, List<String> seatCodes,
-                                        BigDecimal amount, String currency, String status, Instant createdAt) {}
+                                        BigDecimal amount, String currency, String status, Instant createdAt,
+                                        List<String> cancelledSeatCodes, BigDecimal refundedAmount) {}
+
+    /** {@code seatCodes} is optional; see {@link #cancelBooking}. Same format rule as creation. */
+    public record CancelBookingRequest(
+            List<@Pattern(regexp = SEAT_CODE_PATTERN,
+                    message = "must be a seat code such as A12 or B3") String> seatCodes
+    ) {}
+
+    /**
+     * The booking after the cancel. A superset of {@link BookingStatusResponse}, which stays as it
+     * is: payment-service reads that one off GET and must not see it change shape.
+     *
+     * @param seatCodes          seats the booking still holds
+     * @param cancelledSeatCodes seats it no longer holds
+     * @param refundedAmount     refunds requested so far, in {@code currency}
+     */
+    public record CancelBookingResponse(String bookingId, String status, BigDecimal amount, String currency,
+                                        List<String> seatCodes, List<String> cancelledSeatCodes,
+                                        BigDecimal refundedAmount) {}
 
     public record BookingListResponse(List<BookingSummaryResponse> items, long totalElements, int page, int size) {}
 
@@ -270,6 +311,44 @@ public class BookingController {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .header(HttpHeaders.RETRY_AFTER, RETRY_AFTER_SECONDS)
                 .body(problem);
+    }
+
+    /**
+     * The three ways a cancel is turned away for now rather than refused: another cancel of the
+     * booking holds the lock, the paid seats are still being issued, or the booking changed under
+     * the request. Each has its own {@code type}, so the frontend can say which in Vietnamese, and
+     * all three clear by themselves — hence 409 with a Retry-After, not a 422.
+     */
+    @ExceptionHandler({CancellationInProgressException.class, TicketIssuanceInProgressException.class,
+            CancellationConflictException.class})
+    public ResponseEntity<ProblemDetail> handleCancellationNotNow(RuntimeException ex) {
+        String type = switch (ex) {
+            case CancellationInProgressException ignored -> "cancellation-in-progress";
+            case TicketIssuanceInProgressException ignored -> "ticket-issuance-in-progress";
+            default -> "cancellation-conflict";
+        };
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setType(URI.create("https://aireak.com/errors/" + type));
+        problem.setTitle("Cancellation Not Possible Right Now");
+        problem.setProperty("timestamp", Instant.now());
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .header(HttpHeaders.RETRY_AFTER, RETRY_AFTER_SECONDS)
+                .body(problem);
+    }
+
+    /**
+     * Still a 422 like every other DomainException, but with a {@code type} of its own: common's
+     * handler gives them all {@code domain-error}, which the frontend cannot translate, and this is
+     * a refusal the customer needs to understand rather than retry.
+     */
+    @ExceptionHandler(CancellationWindowClosedException.class)
+    public ProblemDetail handleCancellationWindowClosed(CancellationWindowClosedException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+        problem.setType(URI.create("https://aireak.com/errors/cancellation-window-closed"));
+        problem.setTitle("Cancellation Deadline Passed");
+        problem.setProperty("cancellableUntil", ex.getClosedAt());
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
     }
 
     // Handles duplicate in-flight requests with 409 Conflict

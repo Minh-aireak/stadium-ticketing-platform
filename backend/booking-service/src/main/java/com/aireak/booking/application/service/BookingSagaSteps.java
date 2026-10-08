@@ -4,6 +4,8 @@ import com.aireak.booking.application.port.out.BookingRepository;
 import com.aireak.booking.application.port.out.DomainEventPublisher;
 import com.aireak.booking.domain.model.Booking;
 import com.aireak.booking.domain.model.BookingAmount;
+import com.aireak.booking.domain.model.CancellationOutcome;
+import com.aireak.booking.domain.model.SeatRefundQuote;
 import com.aireak.booking.domain.model.SeatSelection;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -54,6 +56,25 @@ class BookingSagaSteps {
         Booking booking = findOrThrow(bookingId);
         booking.cancel(reason);
         saveAndPublish(booking);
+    }
+
+    /**
+     * A customer's cancellation, applied to the booking as it is NOW — re-read here, inside the
+     * transaction, so a decision made on an earlier snapshot is never written over a newer row. The
+     * refund request and the seat-return request go to the outbox in this same transaction, so they
+     * commit with the cancellation or not at all. A repeat writes nothing. A concurrent writer
+     * surfaces as {@link org.springframework.dao.OptimisticLockingFailureException} at commit, via
+     * the row's {@code @Version}; {@code CancelBookingService} decides what to do about it.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public CancellationOutcome cancelSeatsByCustomer(String bookingId, List<String> seatCodes,
+                                                     SeatRefundQuote refundQuote, String reason) {
+        Booking booking = findOrThrow(bookingId);
+        CancellationOutcome outcome = booking.cancelSeatsByCustomer(seatCodes, refundQuote, reason);
+        if (!outcome.isRepeat()) {
+            saveAndPublish(booking);
+        }
+        return outcome;
     }
 
     /**

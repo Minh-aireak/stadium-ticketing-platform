@@ -2,10 +2,12 @@ package com.aireak.booking.adapter.out.client;
 
 import com.aireak.booking.application.port.out.InventoryConfirmationRefusedException;
 import com.aireak.booking.application.port.out.OutboundServiceUnavailableException;
+import com.aireak.booking.application.port.out.SeatPricingPort;
 import com.aireak.booking.application.port.out.SeatReservationRejectedException;
 import com.aireak.booking.application.port.out.TicketInventoryPort;
 import com.aireak.common.security.AuthenticatedUser;
 import com.aireak.common.security.AuthenticatedUserContext;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.github.resilience4j.bulkhead.annotation.Bulkhead;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
@@ -20,7 +22,9 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -41,7 +45,7 @@ import java.util.Set;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class TicketInventoryRestAdapter implements TicketInventoryPort {
+public class TicketInventoryRestAdapter implements TicketInventoryPort, SeatPricingPort {
 
     // Explicit qualifier: InfraConfig defines a second RestClient bean (paymentStatusRestClient),
     // so type alone no longer resolves unambiguously.
@@ -150,6 +154,40 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
     }
 
     /**
+     * Reads the seat map ticket-inventory-service serves the seat-selection page and keeps the
+     * prices of {@code seatCodes}. The whole map for a handful of prices, deliberately: it is the
+     * one endpoint that already exposes each seat's price, a paid cancellation is rare, and a map
+     * is a few hundred rows — not worth a second endpoint that would have to stay in step with it.
+     * Runs inside the customer's cancel request, so their own JWT is forwarded, as for reserve.
+     */
+    @Override
+    @Bulkhead(name = "ticket-inventory", type = Bulkhead.Type.SEMAPHORE)
+    @CircuitBreaker(name = "ticket-inventory")
+    @Retry(name = "ticket-inventory", fallbackMethod = "pricesOfFallback")
+    public Map<String, BigDecimal> pricesOf(String showtimeId, List<String> seatCodes) {
+        log.debug("Reading seat prices: showtime={}, seats={}", showtimeId, seatCodes);
+        SeatMapView seatMap = restClient.get()
+                .uri(baseUrl + "/api/v1/inventory/{showtimeId}/seats", showtimeId)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + authorizationToken())
+                .retrieve()
+                .body(SeatMapView.class);
+        Map<String, BigDecimal> priceBySeat = new HashMap<>();
+        if (seatMap != null && seatMap.seats() != null) {
+            seatMap.seats().stream()
+                    .filter(seat -> seatCodes.contains(seat.code()) && seat.price() != null)
+                    .forEach(seat -> priceBySeat.put(seat.code(), seat.price()));
+        }
+        List<String> unpriced = seatCodes.stream().filter(code -> !priceBySeat.containsKey(code)).toList();
+        if (!unpriced.isEmpty()) {
+            // The seats came from a booking this same service priced, so this is a data problem,
+            // not an outage — reported as itself rather than dressed up as a 503.
+            throw new IllegalStateException(
+                    "ticket-inventory-service has no price for seats " + unpriced + " of showtime " + showtimeId);
+        }
+        return priceBySeat;
+    }
+
+    /**
      * Reads ticket-inventory-service's own customer-facing sentence off the ProblemDetail body
      * rather than replacing it: "seats not available" and "booking is closed for this showtime"
      * are different things for a customer to be told, and both arrive as 422.
@@ -234,6 +272,26 @@ public class TicketInventoryRestAdapter implements TicketInventoryPort {
                 "Ticket inventory service unavailable for confirmReservation", t);
     }
 
+    // Same split as reserveSeatsFallback: a definite answer about this request travels as itself,
+    // everything that is "no usable answer" becomes the type BookingController answers 503 for.
+    private Map<String, BigDecimal> pricesOfFallback(String showtimeId, List<String> seatCodes, Throwable t) {
+        if (t instanceof IllegalStateException unpriced) {
+            throw unpriced;
+        }
+        if (t instanceof HttpClientErrorException clientError) {
+            throw clientError;
+        }
+        log.error("Circuit open / retry exhausted for pricesOf: showtime={}, error={}", showtimeId, t.getMessage());
+        throw new OutboundServiceUnavailableException("Ticket inventory service unavailable", t);
+    }
+
     record ReservationRequest(String bookingId, List<String> seatCodes) {}
     record ReserveResponse(BigDecimal totalPrice, String currency) {}
+
+    // Only the two fields read here; the seat map carries more (row, tier, heldByYou, ...).
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record SeatMapView(List<SeatView> seats) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record SeatView(String code, BigDecimal price) {}
 }

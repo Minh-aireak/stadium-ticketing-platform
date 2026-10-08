@@ -4,14 +4,22 @@ import com.aireak.booking.domain.event.BookingCancelledEvent;
 import com.aireak.booking.domain.event.BookingConfirmedEvent;
 import com.aireak.booking.domain.event.BookingCreatedEvent;
 import com.aireak.booking.domain.event.RefundRequestedEvent;
+import com.aireak.booking.domain.event.SeatsReturnRequestedEvent;
+import com.aireak.booking.domain.exception.CancellationConflictException;
 import com.aireak.booking.domain.exception.InvalidBookingStatusException;
 import com.aireak.booking.domain.exception.MaxTicketsExceededException;
+import com.aireak.booking.domain.exception.SeatCancellationException;
+import com.aireak.booking.domain.exception.TicketIssuanceInProgressException;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 public class Booking {
@@ -44,12 +52,21 @@ public class Booking {
     // is what takes the booking out of InventoryConfirmationReconciler's queue and into a gauge a
     // human is alerted on. See InventoryConfirmationRefusedException.
     private boolean inventorySaleRefused;
+    // Seats the customer has cancelled one at a time (see cancelSeatsByCustomer). A booking
+    // cancelled as a whole is read through getCancelledSeatCodes() as having every seat cancelled,
+    // whether it was cancelled here or on any other path, so rows cancelled before seats could be
+    // cancelled singly need no backfill.
+    private final Set<String> cancelledSeatCodes;
+    // What has been asked of payment-service so far, summed. Never more than amount — see
+    // cancelSeatsByCustomer, which is what keeps it so.
+    private BigDecimal refundedAmount;
     private final List<Object> domainEvents = new ArrayList<>();
 
     private Booking(String bookingId, String customerId, String customerEmail, String showtimeId,
                     SeatSelection seatSelection, BookingAmount amount,
                     BookingStatus status, Instant createdAt, String idempotencyKey, Long version,
-                    boolean inventoryConfirmed, boolean inventorySaleRefused) {
+                    boolean inventoryConfirmed, boolean inventorySaleRefused,
+                    Collection<String> cancelledSeatCodes, BigDecimal refundedAmount) {
         this.bookingId    = bookingId;
         this.customerId   = customerId;
         this.customerEmail = customerEmail;
@@ -62,6 +79,8 @@ public class Booking {
         this.version        = version;
         this.inventoryConfirmed = inventoryConfirmed;
         this.inventorySaleRefused = inventorySaleRefused;
+        this.cancelledSeatCodes = new LinkedHashSet<>(cancelledSeatCodes);
+        this.refundedAmount = refundedAmount == null ? BigDecimal.ZERO : refundedAmount;
     }
 
     // Creates a new Booking in DRAFT state with invariant checks.
@@ -86,7 +105,8 @@ public class Booking {
         }
         String bookingId = UUID.randomUUID().toString();
         return new Booking(bookingId, customerId, customerEmail, showtimeId,
-                seatSelection, amount, BookingStatus.DRAFT, Instant.now(), idempotencyKey, null, false, false);
+                seatSelection, amount, BookingStatus.DRAFT, Instant.now(), idempotencyKey, null, false, false,
+                List.of(), BigDecimal.ZERO);
     }
 
     // Reconstitute from persistence — no events raised.
@@ -95,8 +115,20 @@ public class Booking {
                                         BookingStatus status, Instant createdAt,
                                         String idempotencyKey, Long version, boolean inventoryConfirmed,
                                         boolean inventorySaleRefused) {
+        return reconstitute(bookingId, customerId, customerEmail, showtimeId, seatSelection, amount, status,
+                createdAt, idempotencyKey, version, inventoryConfirmed, inventorySaleRefused,
+                List.of(), BigDecimal.ZERO);
+    }
+
+    // Reconstitute from persistence, including seats the customer has cancelled singly (V8).
+    public static Booking reconstitute(String bookingId, String customerId, String customerEmail, String showtimeId,
+                                        SeatSelection seatSelection, BookingAmount amount,
+                                        BookingStatus status, Instant createdAt,
+                                        String idempotencyKey, Long version, boolean inventoryConfirmed,
+                                        boolean inventorySaleRefused, Collection<String> cancelledSeatCodes,
+                                        BigDecimal refundedAmount) {
         return new Booking(bookingId, customerId, customerEmail, showtimeId, seatSelection, amount, status, createdAt,
-                idempotencyKey, version, inventoryConfirmed, inventorySaleRefused);
+                idempotencyKey, version, inventoryConfirmed, inventorySaleRefused, cancelledSeatCodes, refundedAmount);
     }
 
     // Overwrites the placeholder amount recorded at draft-creation time with the authoritative
@@ -173,7 +205,9 @@ public class Booking {
         this.status = BookingStatus.CANCELLED;
         domainEvents.add(new BookingCancelledEvent(bookingId, customerId, customerEmail, showtimeId, reason));
         if (wasConfirmed) {
-            domainEvents.add(new RefundRequestedEvent(bookingId, reason));
+            // The remaining balance, not the full amount: seats the customer cancelled earlier
+            // have already been refunded on their own (see cancelSeatsByCustomer).
+            domainEvents.add(RefundRequestedEvent.ofRemainingBalance(bookingId, reason));
         }
     }
 
@@ -189,7 +223,143 @@ public class Booking {
             throw new InvalidBookingStatusException(
                     "Late-payment refund only applies to a CANCELLED booking, but status is " + status);
         }
-        domainEvents.add(new RefundRequestedEvent(bookingId, reason));
+        domainEvents.add(RefundRequestedEvent.ofRemainingBalance(bookingId, reason));
+    }
+
+    /**
+     * What a customer asking to cancel {@code requestedSeatCodes} would get, decided from this
+     * booking's state alone and without changing it. An empty request means every seat.
+     *
+     * <ul>
+     *   <li>Seats that are not this booking's → {@link SeatCancellationException} (422).</li>
+     *   <li>Every requested seat already cancelled → {@link CustomerCancellation.AlreadyCancelled}:
+     *       a repeat is answered like the first request, in whatever state the booking is now.</li>
+     *   <li>DRAFT → refused: the creation saga still owns the booking on another thread.</li>
+     *   <li>PENDING_PAYMENT → only as a whole. The PaymentIntent was created for the full amount
+     *       and cannot be shrunk to fit a smaller booking; pay first, then cancel single seats.</li>
+     *   <li>CONFIRMED → seat by seat, once ticket-inventory-service has finished selling the seats
+     *       to this booking. Before that, see {@link TicketIssuanceInProgressException}. A sale it
+     *       refused for good ({@code inventorySaleRefused}) has nothing in flight, so it is no
+     *       reason to wait.</li>
+     * </ul>
+     *
+     * The cancellation deadline is not checked here: it needs the showtime's kickoff, which this
+     * aggregate does not hold — see {@link CancellationWindow}.
+     */
+    public CustomerCancellation planCustomerCancellation(List<String> requestedSeatCodes) {
+        List<String> requested = requestedSeatCodes == null || requestedSeatCodes.isEmpty()
+                ? seatSelection.seatCodes()
+                : List.copyOf(new LinkedHashSet<>(requestedSeatCodes));
+
+        List<String> unknown = requested.stream().filter(code -> !seatSelection.seatCodes().contains(code)).toList();
+        if (!unknown.isEmpty()) {
+            throw new SeatCancellationException(
+                    "Seats " + String.join(", ", unknown) + " are not part of booking " + bookingId);
+        }
+
+        List<String> alreadyCancelled = getCancelledSeatCodes();
+        List<String> toCancel = requested.stream().filter(code -> !alreadyCancelled.contains(code)).toList();
+        if (toCancel.isEmpty()) {
+            return new CustomerCancellation.AlreadyCancelled(requested);
+        }
+
+        return switch (status) {
+            case DRAFT -> throw new InvalidBookingStatusException(
+                    "The booking is still being created; try again in a moment");
+            case PENDING_PAYMENT -> {
+                // toCancel is always a subset of the active seats, so equal size means equal sets.
+                if (toCancel.size() != activeSeatCodes().size()) {
+                    throw new SeatCancellationException(
+                            "An unpaid booking can only be cancelled as a whole; pay for it first to cancel single seats");
+                }
+                yield new CustomerCancellation.Unpaid(toCancel);
+            }
+            case CONFIRMED -> {
+                if (!inventoryConfirmed && !inventorySaleRefused) {
+                    throw new TicketIssuanceInProgressException(bookingId);
+                }
+                yield new CustomerCancellation.Paid(toCancel);
+            }
+            // Unreachable: every seat of a CANCELLED booking counts as cancelled, so toCancel is
+            // empty and the request was answered above. Kept so the switch stays exhaustive.
+            case CANCELLED -> new CustomerCancellation.AlreadyCancelled(requested);
+        };
+    }
+
+    /**
+     * Cancels {@code requestedSeatCodes} for the customer, re-deciding from this booking's state as
+     * it is now — the caller's earlier {@link #planCustomerCancellation} answered from a snapshot
+     * that another writer may since have moved on from.
+     *
+     * <p>Raises, in the one transaction that persists the change:
+     * <ul>
+     *   <li>{@link SeatsReturnRequestedEvent} always, so the seats come free whatever else happens;</li>
+     *   <li>{@link RefundRequestedEvent} for paid seats, priced from {@code refundQuote};</li>
+     *   <li>{@link BookingCancelledEvent} when no seat is left, which is what emails the customer.</li>
+     * </ul>
+     *
+     * <p>The refund is the cancelled seats' own prices, except when this call cancels the last seat:
+     * then it is whatever is left of the amount, so the customer always ends up refunded exactly what
+     * they paid, never more, whatever the per-seat prices summed to.
+     *
+     * @param refundQuote the cancelled seats' prices; may be null when the booking was unpaid at the
+     *                    caller's snapshot. If it has become paid since, this throws
+     *                    {@link CancellationConflictException} and the caller asks again.
+     */
+    public CancellationOutcome cancelSeatsByCustomer(List<String> requestedSeatCodes, SeatRefundQuote refundQuote,
+                                                     String reason) {
+        CustomerCancellation plan = planCustomerCancellation(requestedSeatCodes);
+        return switch (plan) {
+            case CustomerCancellation.AlreadyCancelled already ->
+                    CancellationOutcome.alreadyCancelled(already.seatCodes(), status == BookingStatus.CANCELLED);
+            case CustomerCancellation.Unpaid unpaid -> {
+                cancelledSeatCodes.addAll(unpaid.seatCodes());
+                status = BookingStatus.CANCELLED;
+                domainEvents.add(new BookingCancelledEvent(bookingId, customerId, customerEmail, showtimeId, reason));
+                domainEvents.add(new SeatsReturnRequestedEvent(bookingId, showtimeId, unpaid.seatCodes(), reason));
+                yield CancellationOutcome.cancelledNow(unpaid.seatCodes(), BigDecimal.ZERO, BigDecimal.ZERO, true);
+            }
+            case CustomerCancellation.Paid paid -> {
+                if (refundQuote == null || !refundQuote.covers(paid.seatCodes())) {
+                    throw new CancellationConflictException(bookingId);
+                }
+                BigDecimal quoted = refundQuote.totalFor(paid.seatCodes());
+                BigDecimal refundable = amount.amount().subtract(refundedAmount).max(BigDecimal.ZERO);
+                cancelledSeatCodes.addAll(paid.seatCodes());
+                boolean nothingLeft = activeSeatCodes().isEmpty();
+                BigDecimal refund = nothingLeft ? refundable : quoted.min(refundable);
+                refundedAmount = refundedAmount.add(refund);
+                if (nothingLeft) {
+                    status = BookingStatus.CANCELLED;
+                    domainEvents.add(new BookingCancelledEvent(bookingId, customerId, customerEmail, showtimeId, reason));
+                }
+                if (refund.signum() > 0) {
+                    domainEvents.add(RefundRequestedEvent.forSeats(bookingId, refund, amount.currency(),
+                            paid.seatCodes(), reason));
+                }
+                domainEvents.add(new SeatsReturnRequestedEvent(bookingId, showtimeId, paid.seatCodes(), reason));
+                yield CancellationOutcome.cancelledNow(paid.seatCodes(), refund, quoted, nothingLeft);
+            }
+        };
+    }
+
+    /** Seats this booking still holds, in booking order. A cancelled booking holds none. */
+    public List<String> activeSeatCodes() {
+        if (status == BookingStatus.CANCELLED) {
+            return List.of();
+        }
+        return seatSelection.seatCodes().stream().filter(code -> !cancelledSeatCodes.contains(code)).toList();
+    }
+
+    /**
+     * Seats this booking no longer holds, in booking order: every seat of a CANCELLED booking, however
+     * it got there, and otherwise the ones its customer cancelled singly.
+     */
+    public List<String> getCancelledSeatCodes() {
+        if (status == BookingStatus.CANCELLED) {
+            return seatSelection.seatCodes();
+        }
+        return seatSelection.seatCodes().stream().filter(cancelledSeatCodes::contains).toList();
     }
 
     // Records that ticketInventoryPort.confirmReservation() actually succeeded. Idempotent —
@@ -224,6 +394,7 @@ public class Booking {
     public Long getVersion()                { return version; }
     public boolean isInventoryConfirmed()   { return inventoryConfirmed; }
     public boolean isInventorySaleRefused() { return inventorySaleRefused; }
+    public BigDecimal getRefundedAmount()   { return refundedAmount; }
 
     public List<Object> pullDomainEvents() {
         List<Object> events = Collections.unmodifiableList(new ArrayList<>(domainEvents));

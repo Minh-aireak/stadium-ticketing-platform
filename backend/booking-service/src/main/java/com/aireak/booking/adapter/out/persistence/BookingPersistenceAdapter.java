@@ -104,12 +104,18 @@ public class BookingPersistenceAdapter implements BookingRepository {
                 .idempotencyKey(booking.getIdempotencyKey())
                 .inventoryConfirmed(booking.isInventoryConfirmed())
                 .inventorySaleRefused(booking.isInventorySaleRefused())
+                .cancelledSeatCodes(String.join(",", booking.getCancelledSeatCodes()))
+                .refundedAmount(booking.getRefundedAmount())
                 .version(booking.getVersion())
                 .build();
     }
 
     private Booking toDomain(BookingJpaEntity entity) {
         List<String> seatCodes = Arrays.asList(entity.getSeatCodes().split(","));
+        String cancelled = entity.getCancelledSeatCodes();
+        List<String> cancelledSeatCodes = cancelled == null || cancelled.isBlank()
+                ? List.of()
+                : Arrays.asList(cancelled.split(","));
         return Booking.reconstitute(
                 entity.getBookingId(),
                 entity.getCustomerId(),
@@ -122,7 +128,9 @@ public class BookingPersistenceAdapter implements BookingRepository {
                 entity.getIdempotencyKey(),
                 entity.getVersion(),
                 entity.isInventoryConfirmed(),
-                entity.isInventorySaleRefused()
+                entity.isInventorySaleRefused(),
+                cancelledSeatCodes,
+                entity.getRefundedAmount()
         );
     }
 }

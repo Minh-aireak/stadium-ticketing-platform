@@ -73,8 +73,20 @@ services:
     base-url: ${TICKET_INVENTORY_SERVICE_URL}
   payment:
     base-url: ${PAYMENT_SERVICE_URL}
+  # Read only by a paid cancellation, for the showtime's kickoff (ShowtimeScheduleRestAdapter).
+  match-catalog:
+    base-url: ${MATCH_CATALOG_SERVICE_URL:http://localhost:8082}
 
 booking:
+  cancellation:
+    # A paid ticket can be cancelled, and refunded in full, until this many hours before kickoff.
+    cutoff-hours: ${BOOKING_CANCELLATION_CUTOFF_HOURS:24}
+    # Redis claim that turns a second, concurrent cancel of the same booking away with a 409. A
+    # cancel holds it for the length of one local transaction, milliseconds; the lease only bounds
+    # how long a crashed request can keep it.
+    lock-lease: ${BOOKING_CANCELLATION_LOCK_LEASE:5s}
+    # How long Redis remembers a booking's cancelled seats, so repeats skip the lock and the write.
+    state-ttl: ${BOOKING_CANCELLATION_STATE_TTL:24h}
   inventory-confirmation-reconciler:
     grace-minutes: ${INVENTORY_RECONCILER_GRACE_MINUTES:5}
     fixed-delay-ms: ${INVENTORY_RECONCILER_FIXED_DELAY_MS:300000}

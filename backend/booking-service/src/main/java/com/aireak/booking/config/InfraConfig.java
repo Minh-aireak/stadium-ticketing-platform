@@ -9,6 +9,7 @@ import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 import java.net.http.HttpClient;
+import java.time.Clock;
 import java.time.Duration;
 
 @Configuration
@@ -36,6 +37,28 @@ public class InfraConfig {
                 // caller's correlation ID instead of minting a new one.
                 .requestInitializer(new CorrelationIdRequestInitializer())
                 .build();
+    }
+
+    // For ShowtimeScheduleRestAdapter: one read inside a customer's cancel request, so the same
+    // fail-fast budget ticket-inventory-service gives its own catalog lookups.
+    @Bean
+    public RestClient catalogRestClient() {
+        HttpClient httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(2))
+                .build();
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
+        requestFactory.setReadTimeout(Duration.ofSeconds(3));
+
+        return RestClient.builder()
+                .requestFactory(requestFactory)
+                .requestInitializer(new CorrelationIdRequestInitializer())
+                .build();
+    }
+
+    // The cancellation deadline is a comparison against "now"; a bean, so a test can fix it.
+    @Bean
+    public Clock clock() {
+        return Clock.systemUTC();
     }
 
     // For reconciliation lookups (PaymentPort#checkOutcome) after an already-ambiguous

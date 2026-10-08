@@ -1,11 +1,15 @@
 package com.aireak.booking.adapter.in.web;
 
+import com.aireak.booking.application.port.in.CancelBookingCommand;
 import com.aireak.booking.application.port.in.CancelBookingUseCase;
 import com.aireak.booking.application.port.in.CreateBookingUseCase;
 import com.aireak.booking.application.port.in.GetBookingUseCase;
 import com.aireak.booking.application.port.in.ListBookingsUseCase;
 import com.aireak.booking.application.port.in.dto.BookingCreationResult;
+import com.aireak.booking.application.service.CancellationInProgressException;
+import com.aireak.booking.domain.exception.CancellationWindowClosedException;
 import com.aireak.booking.domain.exception.InvalidBookingStatusException;
+import com.aireak.booking.domain.exception.TicketIssuanceInProgressException;
 import com.aireak.booking.domain.model.Booking;
 import com.aireak.booking.domain.model.BookingAmount;
 import com.aireak.booking.domain.model.BookingStatus;
@@ -28,6 +32,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
@@ -46,6 +51,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -314,26 +320,63 @@ class BookingControllerJwtAuthenticationIntegrationTest {
     }
 
     @Test
-    void cancelPassesTheAuthenticatedCallerNotAnythingFromTheRequestAndReturnsTheBooking() throws Exception {
+    void cancelWithoutABodyCancelsTheWholeBookingForTheAuthenticatedCaller() throws Exception {
         String accountId = UUID.randomUUID().toString();
         Booking cancelled = Booking.reconstitute("booking-1", accountId, "owner@example.com", "showtime-1",
                 new SeatSelection(List.of("A1")), BookingAmount.of(new BigDecimal("50.00"), "USD"),
                 BookingStatus.CANCELLED, Instant.now(), null, 0L, false, false);
-        when(cancelBookingUseCase.cancelBooking("booking-1", accountId)).thenReturn(cancelled);
+        when(cancelBookingUseCase.cancelBooking(any(CancelBookingCommand.class))).thenReturn(cancelled);
 
         mockMvc.perform(put("/api/v1/bookings/{id}/cancel", "booking-1")
                         .header("Authorization", "Bearer " + validToken(accountId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.bookingId").value("booking-1"))
-                .andExpect(jsonPath("$.status").value("CANCELLED"));
+                .andExpect(jsonPath("$.status").value("CANCELLED"))
+                .andExpect(jsonPath("$.seatCodes").isEmpty())
+                .andExpect(jsonPath("$.cancelledSeatCodes[0]").value("A1"));
 
-        verify(cancelBookingUseCase).cancelBooking("booking-1", accountId);
+        verify(cancelBookingUseCase).cancelBooking(new CancelBookingCommand("booking-1", accountId, List.of()));
+    }
+
+    @Test
+    void cancelNamesTheSeatsFromTheBodyAndReportsWhatIsLeftAndWhatWasRefunded() throws Exception {
+        String accountId = UUID.randomUUID().toString();
+        Booking partlyCancelled = Booking.reconstitute("booking-1", accountId, "owner@example.com", "showtime-1",
+                new SeatSelection(List.of("A1", "A2")), BookingAmount.of(new BigDecimal("300000"), "VND"),
+                BookingStatus.CONFIRMED, Instant.now(), null, 1L, true, false,
+                List.of("A2"), new BigDecimal("150000"));
+        when(cancelBookingUseCase.cancelBooking(any(CancelBookingCommand.class))).thenReturn(partlyCancelled);
+
+        mockMvc.perform(put("/api/v1/bookings/{id}/cancel", "booking-1")
+                        .header("Authorization", "Bearer " + validToken(accountId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"seatCodes\":[\"A2\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.seatCodes[0]").value("A1"))
+                .andExpect(jsonPath("$.cancelledSeatCodes[0]").value("A2"))
+                .andExpect(jsonPath("$.refundedAmount").value(150000));
+
+        verify(cancelBookingUseCase).cancelBooking(new CancelBookingCommand("booking-1", accountId, List.of("A2")));
+    }
+
+    @Test
+    void cancelRejectsAMalformedSeatCodeBeforeReachingTheUseCase() throws Exception {
+        String caller = UUID.randomUUID().toString();
+
+        mockMvc.perform(put("/api/v1/bookings/{id}/cancel", "booking-1")
+                        .header("Authorization", "Bearer " + validToken(caller))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"seatCodes\":[\"not-a-seat\"]}"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(cancelBookingUseCase);
     }
 
     @Test
     void cancelOfSomeoneElsesBookingIs403() throws Exception {
         String caller = UUID.randomUUID().toString();
-        when(cancelBookingUseCase.cancelBooking("booking-1", caller))
+        when(cancelBookingUseCase.cancelBooking(any(CancelBookingCommand.class)))
                 .thenThrow(new IdentityMismatchException("Booking does not belong to the authenticated caller"));
 
         mockMvc.perform(put("/api/v1/bookings/{id}/cancel", "booking-1")
@@ -342,15 +385,54 @@ class BookingControllerJwtAuthenticationIntegrationTest {
     }
 
     @Test
-    void cancelOfAPaidBookingIs422NotA500() throws Exception {
+    void cancelOfADraftBookingIs422NotA500() throws Exception {
         String caller = UUID.randomUUID().toString();
-        when(cancelBookingUseCase.cancelBooking("booking-1", caller))
-                .thenThrow(new InvalidBookingStatusException("A paid booking cannot be cancelled by the customer"));
+        when(cancelBookingUseCase.cancelBooking(any(CancelBookingCommand.class)))
+                .thenThrow(new InvalidBookingStatusException("The booking is still being created; try again in a moment"));
 
         mockMvc.perform(put("/api/v1/bookings/{id}/cancel", "booking-1")
                         .header("Authorization", "Bearer " + validToken(caller)))
                 .andExpect(status().isUnprocessableEntity())
-                .andExpect(jsonPath("$.detail").value("A paid booking cannot be cancelled by the customer"));
+                .andExpect(jsonPath("$.detail").value("The booking is still being created; try again in a moment"));
+    }
+
+    @Test
+    void cancelPastTheDeadlineIs422WithATypeTheFrontendCanTranslate() throws Exception {
+        String caller = UUID.randomUUID().toString();
+        when(cancelBookingUseCase.cancelBooking(any(CancelBookingCommand.class)))
+                .thenThrow(new CancellationWindowClosedException(Instant.parse("2026-10-09T10:00:00Z"), Duration.ofHours(24)));
+
+        mockMvc.perform(put("/api/v1/bookings/{id}/cancel", "booking-1")
+                        .header("Authorization", "Bearer " + validToken(caller)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.type").value("https://aireak.com/errors/cancellation-window-closed"))
+                .andExpect(jsonPath("$.cancellableUntil").value("2026-10-09T10:00:00Z"));
+    }
+
+    /** User decision: a second cancel while the first holds the lock is answered 409 at once. */
+    @Test
+    void aConcurrentCancelIs409WithRetryAfter() throws Exception {
+        String caller = UUID.randomUUID().toString();
+        when(cancelBookingUseCase.cancelBooking(any(CancelBookingCommand.class)))
+                .thenThrow(new CancellationInProgressException("booking-1"));
+
+        mockMvc.perform(put("/api/v1/bookings/{id}/cancel", "booking-1")
+                        .header("Authorization", "Bearer " + validToken(caller)))
+                .andExpect(status().isConflict())
+                .andExpect(header().string("Retry-After", "1"))
+                .andExpect(jsonPath("$.type").value("https://aireak.com/errors/cancellation-in-progress"));
+    }
+
+    @Test
+    void aPaidBookingStillBeingIssuedIs409NotA422() throws Exception {
+        String caller = UUID.randomUUID().toString();
+        when(cancelBookingUseCase.cancelBooking(any(CancelBookingCommand.class)))
+                .thenThrow(new TicketIssuanceInProgressException("booking-1"));
+
+        mockMvc.perform(put("/api/v1/bookings/{id}/cancel", "booking-1")
+                        .header("Authorization", "Bearer " + validToken(caller)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("https://aireak.com/errors/ticket-issuance-in-progress"));
     }
 
     private String validToken(String subject) {

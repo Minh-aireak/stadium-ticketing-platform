@@ -1,6 +1,5 @@
 package com.aireak.booking.application.service;
 
-import com.aireak.booking.application.port.in.CancelBookingUseCase;
 import com.aireak.booking.application.port.in.CreateBookingUseCase;
 import com.aireak.booking.application.port.in.GetBookingUseCase;
 import com.aireak.booking.application.port.in.ListBookingsUseCase;
@@ -11,11 +10,8 @@ import com.aireak.booking.application.port.out.IdempotencyStore;
 import com.aireak.booking.application.port.out.InventoryConfirmationRefusedException;
 import com.aireak.booking.application.port.out.PaymentPort;
 import com.aireak.booking.application.port.out.TicketInventoryPort;
-import com.aireak.booking.domain.exception.InvalidBookingStatusException;
 import com.aireak.booking.domain.model.Booking;
 import com.aireak.booking.domain.model.BookingStatus;
-import com.aireak.common.exception.IdentityMismatchException;
-import com.aireak.common.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -27,14 +23,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
-// Saga Orchestrator: coordinates booking creation flow and compensating transactions.
+// Saga Orchestrator: coordinates booking creation flow and compensating transactions. A customer's
+// own cancellation is not part of that saga and lives in CancelBookingService.
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class BookingOrchestrationService implements CreateBookingUseCase, GetBookingUseCase, ListBookingsUseCase,
-        CancelBookingUseCase {
-
-    static final String CUSTOMER_CANCELLATION_REASON = "Cancelled by the customer before payment";
+public class BookingOrchestrationService implements CreateBookingUseCase, GetBookingUseCase, ListBookingsUseCase {
 
     private final BookingSagaSteps sagaSteps;
     private final BookingRepository bookingRepository;
@@ -448,51 +442,6 @@ public class BookingOrchestrationService implements CreateBookingUseCase, GetBoo
         sagaSteps.cancelBooking(bookingId, reason);
         ticketInventoryPort.releaseSeats(booking.getShowtimeId(), bookingId, booking.getSeatSelection().seatCodes());
         log.info("Booking cancelled due to payment failure: id={}", bookingId);
-    }
-
-    /**
-     * Customer-initiated cancellation of an unpaid booking (FR-21). Mirrors
-     * {@link #cancelBookingOnPaymentFailure}: cancel in a REQUIRES_NEW step first, release the
-     * Redis holds best-effort after — a release that fails only means the holds expire on their
-     * own TTL instead of right now.
-     *
-     * <p>Only PENDING_PAYMENT is cancellable. DRAFT is the creation saga still running on the
-     * request thread; cancelling underneath it would make its next step throw and its own
-     * compensation cancel a booking that is already cancelled. CONFIRMED means money was taken,
-     * and giving it back is a refund decision the customer cannot yet make alone. CANCELLED is a
-     * no-op so a double click or a retried request answers exactly like the first.
-     *
-     * <p>Racing the charge is safe. Step 4 confirms the PaymentIntent server-side, so the money
-     * may already be taken when the customer cancels a booking that still reads PENDING_PAYMENT;
-     * the webhook then reaches {@link #confirmBooking}, which sees CANCELLED and requests an
-     * idempotent refund. A PAYMENT_FAILED that arrives after this is ignored by
-     * {@link #cancelBookingOnPaymentFailure}. Neither path can strand the seats or the money.
-     *
-     * <p>Ownership is checked here and not only in the controller: {@code bookingId} is
-     * enumerable, and every path into this use case must refuse to cancel someone else's order.
-     */
-    @Override
-    public Booking cancelBooking(String bookingId, String requestingCustomerId) {
-        Booking booking = bookingRepository.findById(bookingId)
-                .orElseThrow(() -> new ResourceNotFoundException("Booking not found: " + bookingId));
-        if (!booking.getCustomerId().equals(requestingCustomerId)) {
-            throw new IdentityMismatchException("Booking does not belong to the authenticated caller");
-        }
-        switch (booking.getStatus()) {
-            case CANCELLED -> {
-                log.info("Booking {} is already cancelled; nothing to do", bookingId);
-                return booking;
-            }
-            case CONFIRMED -> throw new InvalidBookingStatusException(
-                    "A paid booking cannot be cancelled by the customer; contact support for a refund");
-            case DRAFT -> throw new InvalidBookingStatusException(
-                    "The booking is still being created; try again in a moment");
-            case PENDING_PAYMENT -> { /* the one cancellable state */ }
-        }
-        sagaSteps.cancelBooking(bookingId, CUSTOMER_CANCELLATION_REASON);
-        ticketInventoryPort.releaseSeats(booking.getShowtimeId(), bookingId, booking.getSeatSelection().seatCodes());
-        log.info("Booking cancelled by its customer: id={}", bookingId);
-        return sagaSteps.findOrThrow(bookingId);
     }
 
     /**

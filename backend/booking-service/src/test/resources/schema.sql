@@ -16,6 +16,8 @@ CREATE TABLE bookings (
     idempotency_key VARCHAR(255),
     inventory_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
     inventory_sale_refused BOOLEAN NOT NULL DEFAULT FALSE,
+    cancelled_seat_codes VARCHAR(1000) NOT NULL DEFAULT '',
+    refunded_amount DECIMAL(15, 2) NOT NULL DEFAULT 0,
     version BIGINT,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL

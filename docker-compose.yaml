@@ -172,6 +172,8 @@ x-booking-service-env: &booking-service-env
   # inventory replicas the same way the gateway's do.
   TICKET_INVENTORY_SERVICE_URL: http://ticket-inventory-lb:8083
   PAYMENT_SERVICE_URL: http://payment-service:8084
+  # A paid cancellation reads the showtime's kickoff to check its deadline.
+  MATCH_CATALOG_SERVICE_URL: http://catalog-lb:8082
   JWT_SECRET: ${JWT_SECRET}
   JWT_PREVIOUS_SECRET: ${JWT_PREVIOUS_SECRET}
   JWT_INTERNAL_SECRET: ${JWT_INTERNAL_SECRET}

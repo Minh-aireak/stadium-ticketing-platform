@@ -62,6 +62,15 @@ public class BookingJpaEntity extends BaseAuditEntity {
     @Column(name = "inventory_sale_refused", nullable = false)
     private boolean inventorySaleRefused;
 
+    // Seats the customer has cancelled, comma-separated like seat_codes; '' for none. See V8 and
+    // Booking#cancelSeatsByCustomer.
+    @Column(name = "cancelled_seat_codes", nullable = false, length = 1000)
+    private String cancelledSeatCodes;
+
+    // What has been asked of payment-service in refunds so far, summed. Never more than amount.
+    @Column(name = "refunded_amount", nullable = false, precision = 15, scale = 2)
+    private BigDecimal refundedAmount;
+
     @Version
     @Column(name = "version")
     private Long version;
