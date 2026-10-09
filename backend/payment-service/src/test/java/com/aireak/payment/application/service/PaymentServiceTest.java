@@ -386,6 +386,27 @@ class PaymentServiceTest {
         verify(sagaSteps, never()).markRefunded(any(), any(), any(), any(), any());
     }
 
+    /**
+     * The first attempt refunded at Stripe but could not persist it, so the payment is still
+     * SUCCEEDED with no ledger row. The redelivered request carries the same id, so it reaches
+     * Stripe under the same idempotency key — which answers with the original refund instead of
+     * refusing a second one — and the outcome gets another chance to persist.
+     */
+    @Test
+    void aRedeliveredRequestWhoseFirstRefundNeverPersistedReusesTheGatewayKey() {
+        newService();
+        Payment succeeded = Payment.reconstitute("payment-1", "booking-1", "buyer@example.com", new BigDecimal("100.00"), "USD",
+                PaymentStatus.SUCCEEDED, "gw-tx-1", null, Instant.now(), 0, 1L);
+        when(paymentRepository.findByBookingId("booking-1")).thenReturn(Optional.of(succeeded));
+        RefundCommand latePayment = new RefundCommand("booking-1", "late-payment:booking-1", null, "late");
+
+        service.refund(latePayment);
+        service.refund(latePayment);
+
+        verify(paymentGatewayPort, times(2)).refund("refund:gw-tx-1:late-payment:booking-1", "gw-tx-1",
+                succeeded.getAmount(), "USD");
+    }
+
     @Test
     void aRequestForMoreThanIsLeftRefundsWhatIsLeft() {
         newService();

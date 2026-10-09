@@ -232,6 +232,24 @@ class BookingTest {
                 .hasOnlyElementsOfType(RefundRequestedEvent.class);
     }
 
+    /**
+     * PAYMENT_SUCCEEDED can be delivered more than once, and each delivery for a cancelled booking
+     * asks again. Every ask must be the same request, or payment-service sees a new one each time.
+     */
+    @Test
+    void everyLatePaymentRefundRequestForABookingCarriesTheSameRequestId() {
+        Booking booking = Booking.create("customer-1", "customer-1@example.com", "showtime-1", SEATS, AMOUNT, null);
+        booking.cancel("customer changed their mind");
+        booking.pullDomainEvents();
+
+        booking.requestRefundForLatePayment("Payment succeeded after booking cancellation");
+        booking.requestRefundForLatePayment("Payment succeeded after booking cancellation");
+
+        assertThat(booking.pullDomainEvents())
+                .extracting(event -> ((RefundRequestedEvent) event).refundRequestId())
+                .containsExactly("late-payment:" + booking.getBookingId(), "late-payment:" + booking.getBookingId());
+    }
+
     /** Guards the aggregate against a refund being requested for a booking still on its way. */
     @Test
     void latePaymentRefundRequestRejectsABookingThatIsNotCancelled() {

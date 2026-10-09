@@ -223,7 +223,8 @@ public class Booking {
             throw new InvalidBookingStatusException(
                     "Late-payment refund only applies to a CANCELLED booking, but status is " + status);
         }
-        domainEvents.add(RefundRequestedEvent.ofRemainingBalance(bookingId, reason));
+        // Same request id on every call — see RefundRequestedEvent#forLatePayment.
+        domainEvents.add(RefundRequestedEvent.forLatePayment(bookingId, reason));
     }
 
     /**

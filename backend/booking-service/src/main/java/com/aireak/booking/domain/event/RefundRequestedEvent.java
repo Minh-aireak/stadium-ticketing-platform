@@ -28,9 +28,30 @@ public record RefundRequestedEvent(String bookingId, String refundRequestId, Big
         seatCodes = seatCodes == null ? List.of() : List.copyOf(seatCodes);
     }
 
-    /** Everything still refundable on the booking's payment. */
+    /**
+     * Everything still refundable on the booking's payment. A fresh id is right here because the
+     * caller raises this exactly once, in the transaction that moves the booking to CANCELLED;
+     * redeliveries of the outbox row carry the same id.
+     */
     public static RefundRequestedEvent ofRemainingBalance(String bookingId, String reason) {
         return new RefundRequestedEvent(bookingId, UUID.randomUUID().toString(), null, null, List.of(),
+                reason, Instant.now());
+    }
+
+    /**
+     * Everything still refundable, for a payment that succeeded after its booking was cancelled.
+     *
+     * <p>Keyed by the booking, not random, because this one is NOT raised once: every delivery of
+     * PAYMENT_SUCCEEDED for a cancelled booking raises it again, and Kafka delivers at least once. A
+     * random id made each redelivery a new request, so payment-service could only skip it by
+     * noticing the payment was already REFUNDED — and when the first refund had gone out at Stripe
+     * but failed to persist, the next one went back to Stripe under a new idempotency key and was
+     * refused there, dead-lettering. A booking has one payment, so it owes at most one late-payment
+     * refund: the same id every time lets payment-service skip it by id, and lets Stripe answer a
+     * retried refund with the original instead of refusing it.
+     */
+    public static RefundRequestedEvent forLatePayment(String bookingId, String reason) {
+        return new RefundRequestedEvent(bookingId, "late-payment:" + bookingId, null, null, List.of(),
                 reason, Instant.now());
     }
 
